@@ -26,9 +26,13 @@ const Navbar = ({ handleDrawerToggle }) => {
         >
           <MenuIcon />
         </IconButton>
-        <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
-          The Beer Game
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', mr: 2 }}>
+          <Box component="img" src="/daybreak_logo.png" alt="Daybreak logo" sx={{ height: 28, width: 'auto', mr: 1 }} />
+          <Typography variant="h6" noWrap component="div">
+            The Beer Game
+          </Typography>
+        </Box>
+        <Box sx={{ flexGrow: 1 }} />
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <IconButton color="inherit">
             <NotificationsIcon />

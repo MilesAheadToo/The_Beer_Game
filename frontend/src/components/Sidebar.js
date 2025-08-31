@@ -48,9 +48,12 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
   const drawer = (
     <div>
       <Toolbar>
-        <Typography variant="h6" noWrap component="div" sx={{ fontWeight: 700 }}>
-          Beer Game
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center' }}>
+          <Box component="img" src="/daybreak_logo.png" alt="Daybreak logo" sx={{ height: 28, width: 'auto', mr: 1 }} />
+          <Typography variant="h6" noWrap component="div" sx={{ fontWeight: 700 }}>
+            Beer Game
+          </Typography>
+        </Box>
       </Toolbar>
       <Divider />
       <List>

@@ -15,7 +15,7 @@ const theme = createTheme({
       contrastText: '#fff',
     },
     background: {
-      default: '#f5f5f5',
+      default: '#f7f9fc',
       paper: '#ffffff',
     },
     text: {
@@ -70,9 +70,17 @@ const theme = createTheme({
     },
   },
   shape: {
-    borderRadius: 4,
+    borderRadius: 10,
   },
   components: {
+    MuiPaper: {
+      styleOverrides: {
+        root: {
+          borderRadius: 10,
+          boxShadow: '0 1px 3px rgba(16,24,40,0.08), 0 1px 2px rgba(16,24,40,0.06)',
+        },
+      },
+    },
     MuiButton: {
       styleOverrides: {
         root: {
@@ -83,9 +91,9 @@ const theme = createTheme({
     MuiCard: {
       styleOverrides: {
         root: {
-          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+          boxShadow: '0 1px 3px rgba(16,24,40,0.08), 0 1px 2px rgba(16,24,40,0.06)',
           '&:hover': {
-            boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+            boxShadow: '0 2px 8px rgba(16,24,40,0.12)',
           },
         },
       },

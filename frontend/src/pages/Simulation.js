@@ -35,7 +35,7 @@ import {
   Timeline as TimelineIcon,
   Settings as SettingsIcon,
 } from '@mui/icons-material';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 
 // Sample data for the simulation
 const sampleDemandData = [
@@ -356,7 +356,7 @@ const Simulation = () => {
                           <CartesianGrid strokeDasharray="3 3" />
                           <XAxis dataKey="week" />
                           <YAxis />
-                          <Tooltip />
+                          <RechartsTooltip />
                           <Legend />
                           <Line
                             type="monotone"
@@ -382,7 +382,7 @@ const Simulation = () => {
                           <CartesianGrid strokeDasharray="3 3" />
                           <XAxis dataKey="week" />
                           <YAxis />
-                          <Tooltip />
+                          <RechartsTooltip />
                           <Legend />
                           <Line
                             type="monotone"
@@ -487,7 +487,7 @@ const Simulation = () => {
                   <XAxis dataKey="week" />
                   <YAxis yAxisId="left" />
                   <YAxis yAxisId="right" orientation="right" />
-                  <Tooltip />
+                  <RechartsTooltip />
                   <Legend />
                   <Line yAxisId="left" type="monotone" dataKey="inventory" stroke="#8884d8" name="Inventory Level" />
                   <Line yAxisId="right" type="monotone" dataKey="reorder" stroke="#82ca9d" name="Reorder Point" />
