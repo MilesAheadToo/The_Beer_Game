@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - REACT_APP_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - beer-game-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - MYSQL_SERVER=db
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=19890617
+      - MYSQL_DB=beer_game
+      - SQLALCHEMY_DATABASE_URI=mysql+pymysql://root:19890617@db/beer_game
+    depends_on:
+      - db
+    volumes:
+      - ./backend:/app
+    networks:
+      - beer-game-network
+
+  db:
+    image: mariadb:10.6
+    command: --default-authentication-plugin=mysql_native_password
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: 19890617
+      MYSQL_DATABASE: beer_game
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - beer-game-network
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    restart: always
+    environment:
+      PMA_HOST: db
+      MYSQL_ROOT_PASSWORD: 19890617
+    ports:
+      - "8080:80"
+    depends_on:
+      - db
+    networks:
+      - beer-game-network
+
+networks:
+  beer-game-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
