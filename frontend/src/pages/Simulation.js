@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Box,
   Button,
-  Paper,
   Typography,
   Grid,
   TextField,
@@ -10,20 +9,16 @@ import {
   InputLabel,
   Select,
   MenuItem,
-  FormHelperText,
   Slider,
   Divider,
   Card,
   CardContent,
-  CardActions,
-  Tab,
-  Tabs,
+  Paper,
   Step,
   StepLabel,
   Stepper,
   IconButton,
   Tooltip,
-  CircularProgress,
 } from '@mui/material';
 import {
   PlayArrow as PlayIcon,
@@ -31,9 +26,6 @@ import {
   Stop as StopIcon,
   SkipNext as NextIcon,
   SkipPrevious as PreviousIcon,
-  Save as SaveIcon,
-  Timeline as TimelineIcon,
-  Settings as SettingsIcon,
 } from '@mui/icons-material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 
@@ -67,7 +59,8 @@ const Simulation = () => {
   const [activeStep, setActiveStep] = useState(0);
   const [simulationState, setSimulationState] = useState('idle'); // 'idle', 'running', 'paused', 'completed'
   const [currentWeek, setCurrentWeek] = useState(0);
-  const [simulationSpeed, setSimulationSpeed] = useState(1);
+  // Simulation speed state (commented out as it's not currently used)
+  // const [simulationSpeed, setSimulationSpeed] = useState(1);
   const [parameters, setParameters] = useState({
     duration: 26, // weeks
     demandDistribution: 'normal',

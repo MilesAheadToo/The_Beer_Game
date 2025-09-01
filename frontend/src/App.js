@@ -9,6 +9,7 @@ import SupplyChain from './pages/SupplyChain';
 import Simulation from './pages/Simulation';
 import Analysis from './pages/Analysis';
 import Settings from './pages/Settings';
+import GamesList from './pages/GamesList';
 
 function App() {
   const [mobileOpen, setMobileOpen] = React.useState(false);
@@ -34,6 +35,7 @@ function App() {
         >
           <Routes>
             <Route path="/" element={<Dashboard />} />
+            <Route path="/games" element={<GamesList />} />
             <Route path="/supply-chain" element={<SupplyChain />} />
             <Route path="/simulation" element={<Simulation />} />
             <Route path="/analysis" element={<Analysis />} />

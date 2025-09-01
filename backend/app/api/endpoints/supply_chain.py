@@ -109,7 +109,7 @@ def run_simulation(simulation_id: int, num_steps: int = 10, db: Session = Depend
     
     db.commit()
     
-    return {"status": "completed", "steps": len(steps)}
+    return {"status": "completed", "steps": len(states)}
 
 @router.get("/simulations/{simulation_id}/steps/{step_number}")
 def get_simulation_step(simulation_id: int, step_number: int, db: Session = Depends(get_db)):

@@ -1,9 +1,10 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
-from app.api.endpoints import supply_chain
+from app.api.api_v1.api import api_router
+from app.api.endpoints.websocket import router as ws_router, manager
 from app.db.base import Base, engine
 
 # Create database tables
@@ -25,15 +26,29 @@ app.add_middleware(
 )
 
 # Include API routers
-app.include_router(
-    supply_chain.router,
-    prefix=f"{settings.API_V1_STR}/supply-chain",
-    tags=["supply-chain"]
-)
+app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# Include WebSocket router
+app.include_router(ws_router, prefix="")
 
 @app.get("/")
 async def root():
     return {
         "message": "Welcome to The Beer Game API",
-        "docs": "/docs"
+        "docs": "/docs",
+        "websocket": "/ws/games/{game_id}/players/{player_id}",
+        "api_version": settings.VERSION
     }
+
+# Add WebSocket endpoint for testing
+@app.websocket("/ws/test")
+async def websocket_test(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        while True:
+            data = await websocket.receive_text()
+            await websocket.send_text(f"Message received: {data}")
+    except Exception as e:
+        print(f"WebSocket error: {e}")
+    finally:
+        await websocket.close()

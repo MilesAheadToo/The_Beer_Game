@@ -1,9 +1,6 @@
 import React from 'react';
 import { Box, Grid, FormControl, InputLabel, Select, MenuItem, Button, Stack } from '@mui/material';
-import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
-import TuneIcon from '@mui/icons-material/Tune';
 import FileDownloadIcon from '@mui/icons-material/FileDownload';
-import SettingsIcon from '@mui/icons-material/Settings';
 
 const FilterBar = () => {
   const [quarter, setQuarter] = React.useState('Q1');
@@ -53,7 +50,6 @@ const FilterBar = () => {
         <Grid item xs={12} md={4}>
           <Stack direction="row" spacing={1} justifyContent={{ xs: 'flex-start', md: 'flex-end' }}>
             <Button variant="outlined" startIcon={<FileDownloadIcon />}>Export</Button>
-            <Button variant="outlined" startIcon={<SettingsIcon />}>Settings</Button>
           </Stack>
         </Grid>
       </Grid>

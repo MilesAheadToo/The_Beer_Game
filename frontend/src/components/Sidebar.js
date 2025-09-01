@@ -18,6 +18,7 @@ import {
   PlayCircleOutline as SimulationIcon,
   Analytics as AnalyticsIcon,
   Settings as SettingsIcon,
+  SportsEsports as GamesIcon,
 } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
 
@@ -36,6 +37,7 @@ const StyledDrawer = styled(Drawer)(({ theme }) => ({
 
 const menuItems = [
   { text: 'Dashboard', icon: <DashboardIcon />, path: '/' },
+  { text: 'Games', icon: <GamesIcon />, path: '/games' },
   { text: 'Supply Chain', icon: <SupplyChainIcon />, path: '/supply-chain' },
   { text: 'Simulation', icon: <SimulationIcon />, path: '/simulation' },
   { text: 'Analysis', icon: <AnalyticsIcon />, path: '/analysis' },
