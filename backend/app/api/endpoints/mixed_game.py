@@ -3,7 +3,14 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 
 from app.db.session import get_db
-from app.schemas.game import GameCreate, GameUpdate, GameState, Game as GameSchema, GameStatus
+from app.schemas.game import (
+    GameCreate, 
+    GameUpdate, 
+    GameState, 
+    Game as GameSchema, 
+    GameStatus,
+    GameInDBBase
+)
 from app.models.game import Game as GameModel
 from app.schemas.player import PlayerAssignment, PlayerResponse
 from app.services.mixed_game_service import MixedGameService

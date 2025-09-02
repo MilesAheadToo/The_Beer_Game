@@ -2,6 +2,7 @@ from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 import random
+import json
 
 from app.models.game import Game, GameStatus
 from app.models.player import Player, PlayerRole
@@ -253,8 +254,8 @@ class MixedGameService:
         query = """
             SELECT 
                 g.id, g.name, g.status, g.current_round, g.max_rounds,
-                g.created_at, g.updated_at, NULL as completed_at,
-                FALSE as is_public, '' as description,
+                g.created_at, g.updated_at, g.started_at, g.completed_at,
+                g.is_public, g.description, g.created_by, g.demand_pattern,
                 (SELECT COUNT(*) FROM players WHERE game_id = g.id) as player_count
             FROM games g
         """
@@ -268,22 +269,37 @@ class MixedGameService:
         # Execute the query
         result = self.db.execute(text(query), params)
         
-        # Convert result to list of dicts
+        # Convert result to list of dicts matching GameInDBBase schema
         games = []
         for row in result:
-            games.append({
+            try:
+                demand_pattern = json.loads(row[11]) if row[11] else {"type": "classic", "params": {}}
+            except (json.JSONDecodeError, TypeError):
+                demand_pattern = {"type": "classic", "params": {}}
+                
+            game_data = {
                 "id": row[0],
                 "name": row[1],
                 "status": row[2],
-                "current_round": row[3],
+                "current_round": row[3] or 0,
                 "max_rounds": row[4],
+                "demand_pattern": demand_pattern,
                 "created_at": row[5],
-                "started_at": row[6],
-                "completed_at": row[7],
-                "is_public": row[8],
-                "description": row[9],
-                "player_count": row[10]
-            })
+                "updated_at": row[6],
+                "started_at": row[7],
+                "completed_at": row[8],
+                "is_public": bool(row[9]) if row[9] is not None else False,
+                "description": row[10] or "",
+                "created_by": row[12],
+                "players": []  # Will be populated separately if needed
+            }
+            
+            # Ensure all required fields have values
+            for field in ["current_round", "max_rounds"]:
+                if game_data[field] is None:
+                    game_data[field] = 0
+                    
+            games.append(game_data)
             
         return games
     
