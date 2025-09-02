@@ -13,8 +13,12 @@ from app.services.game_service import GameService
 from app.core.demand_patterns import DemandPatternType
 
 # Database setup
-SQLALCHEMY_DATABASE_URL = "sqlite:///./test.db"
-engine = create_engine(SQLALCHEMY_DATABASE_URL)
+SQLALCHEMY_DATABASE_URL = "mysql+pymysql://root:19890617@db/beer_game_test?charset=utf8mb4"
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    pool_pre_ping=True,
+    pool_recycle=3600
+)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def setup_database():

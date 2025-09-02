@@ -1,9 +1,22 @@
-from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, JSON, Boolean, Enum
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, JSON, Boolean, Enum, and_
+from sqlalchemy.orm import relationship, Session
 from sqlalchemy.sql import func
 from enum import Enum as PyEnum
+from typing import Optional, List, Dict, Any
 from app.db.base import Base
 import datetime
+
+# Import database session
+try:
+    from app.db.session import SessionLocal
+except ImportError:
+    # Fallback for when running in a context where the app package isn't fully initialized
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy import create_engine
+    from app.core.config import settings
+    
+    engine = create_engine(settings.SQLALCHEMY_DATABASE_URI)
+    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class GameStatus(str, PyEnum):
     CREATED = "created"
@@ -44,10 +57,11 @@ class Player(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
-    user_id = Column(Integer, nullable=True)  # Null for AI players
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Null for AI players
     role = Column(Enum(PlayerRole), nullable=False)
     name = Column(String(100), nullable=False)
     is_ai = Column(Boolean, default=False)
+    user = relationship("User")
     
     game = relationship("Game", back_populates="players")
     inventory = relationship("PlayerInventory", back_populates="player")
@@ -55,41 +69,53 @@ class Player(Base):
     player_rounds = relationship("PlayerRound", back_populates="player")
     
     @property
-    def upstream_player(self, db):
-        # Get the player who is immediately upstream in the supply chain
-        role_order = [
-            PlayerRole.FACTORY,
-            PlayerRole.DISTRIBUTOR,
-            PlayerRole.WHOLESALER,
-            PlayerRole.RETAILER
-        ]
+    def upstream_player(self, db: Optional[Session] = None) -> Optional['Player']:
+        """Get the player's upstream player in the supply chain."""
+        if not db:
+            db = SessionLocal()
+            try:
+                return self.upstream_player(db)
+            finally:
+                db.close()
+                
+        if self.role == PlayerRole.RETAILER:
+            return None
+            
+        role_order = [PlayerRole.FACTORY, PlayerRole.DISTRIBUTOR, PlayerRole.WHOLESALER, PlayerRole.RETAILER]
         current_index = role_order.index(self.role)
-        if current_index > 0:
-            upstream_role = role_order[current_index - 1]
+        upstream_role = role_order[current_index + 1] if current_index + 1 < len(role_order) else None
+        
+        if upstream_role:
             return db.query(Player).filter(
                 Player.game_id == self.game_id,
                 Player.role == upstream_role
             ).first()
         return None
-    
-    @property
-    def downstream_player(self, db):
-        # Get the player who is immediately downstream in the supply chain
-        role_order = [
-            PlayerRole.FACTORY,
-            PlayerRole.DISTRIBUTOR,
-            PlayerRole.WHOLESALER,
-            PlayerRole.RETAILER
-        ]
+
+    def downstream_player(self, db: Optional[Session] = None) -> Optional['Player']:
+        """Get the player's downstream player in the supply chain."""
+        if not db:
+            db = SessionLocal()
+            try:
+                return self.downstream_player(db)
+            finally:
+                db.close()
+                
+        if self.role == PlayerRole.FACTORY:
+            return None
+            
+        role_order = [PlayerRole.FACTORY, PlayerRole.DISTRIBUTOR, PlayerRole.WHOLESALER, PlayerRole.RETAILER]
         current_index = role_order.index(self.role)
-        if current_index < len(role_order) - 1:
-            downstream_role = role_order[current_index + 1]
+        downstream_role = role_order[current_index - 1] if current_index > 0 else None
+        
+        if downstream_role:
             return db.query(Player).filter(
                 Player.game_id == self.game_id,
                 Player.role == downstream_role
             ).first()
         return None
 
+# ... rest of the code remains the same ...
 class PlayerInventory(Base):
     __tablename__ = "player_inventory"
     

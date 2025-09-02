@@ -30,14 +30,14 @@ def create_test_user():
                 print(f"Email: {result.email}")
                 return
         
-        # Create test user data
+        # Create admin user data
         user_data = {
-            'username': 'testuser',
-            'email': 'test@example.com',
-            'hashed_password': get_password_hash('testpassword'),
-            'full_name': 'Test User',
+            'username': 'admin',
+            'email': 'admin@example.com',
+            'hashed_password': get_password_hash('adminpassword'),
+            'full_name': 'Admin User',
             'is_active': True,
-            'is_superuser': False,
+            'is_superuser': True,
             'created_at': datetime.utcnow(),
             'updated_at': datetime.utcnow()
         }

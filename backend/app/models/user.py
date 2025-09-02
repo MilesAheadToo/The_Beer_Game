@@ -28,12 +28,13 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # Use string-based relationship to avoid circular imports
-    # The relationship will be set up after all models are loaded
+    # Relationships
     games = relationship("Game", 
                        secondary=user_games, 
                        back_populates="users",
-                       lazy='dynamic')
+                       lazy='selectin')
+    
+    players = relationship("Player", back_populates="user", lazy="selectin")
     
     def __repr__(self):
         return f"<User {self.username}>"

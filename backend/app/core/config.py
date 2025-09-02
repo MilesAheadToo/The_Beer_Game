@@ -1,8 +1,10 @@
-from pydantic import BaseSettings, Field
-from typing import List, Optional, Any, Dict, Union
+from pydantic import BaseSettings, Field, validator
+from typing import List, Optional, Any, Dict, Union, Set
 from datetime import timedelta
 import secrets
 import os
+import json
+from urllib.parse import urlparse
 
 class Settings(BaseSettings):
     # Application
@@ -10,6 +12,9 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
     DEBUG: bool = True
+    ENVIRONMENT: str = "development"
+    HOST: str = "0.0.0.0"
+    PORT: int = 8000
     
     # Security
     SECRET_KEY: str = secrets.token_urlsafe(32)
@@ -18,21 +23,41 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30  # 30 days
     
     # CORS
-    BACKEND_CORS_ORIGINS: List[str] = ["*"]
+    BACKEND_CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8000"
+    ]
     
-    # Database
-    SQLALCHEMY_DATABASE_URI: str = "sqlite:///./beer_game.db"
+    # Frontend URL for CORS and redirects
+    FRONTEND_URL: str = "http://localhost:3000"
     
-    # Remove MySQL configuration to prevent any accidental usage
-    MYSQL_SERVER: str = ""
-    MYSQL_USER: str = ""
-    MYSQL_PASSWORD: str = ""
-    MYSQL_DB: str = ""
+    # Database configuration
+    SQLALCHEMY_DATABASE_URI: str = ""
+    
+    class Config:
+        env_file = ".env"
+        
+    @validator("SQLALCHEMY_DATABASE_URI", pre=True)
+    def assemble_db_connection(cls, v: Optional[str], values: Dict[str, Any]) -> Any:
+        if v is not None and v != "":
+            return v
+            
+        server = os.getenv("MYSQL_SERVER", "db")
+        port = os.getenv("MYSQL_PORT", "3306")
+        user = os.getenv("MYSQL_USER", "beer_user")
+        password = os.getenv("MYSQL_PASSWORD", "beer_password")
+        db = os.getenv("MYSQL_DB", "beer_game")
+        
+        # Connection string with SSL disabled
+        return f"mysql+pymysql://{user}:{password}@{server}:{port}/{db}?charset=utf8mb4&ssl=None"
     
     # WebSocket
     WEBSOCKET_PATH: str = "/ws"
     WEBSOCKET_PING_INTERVAL: int = 25  # seconds
     WEBSOCKET_PING_TIMEOUT: int = 5    # seconds
+    WEBSOCKET_MAX_MESSAGE_SIZE: int = 1024 * 1024  # 1MB
     
     # Game Settings
     INITIAL_INVENTORY: int = 12
@@ -43,10 +68,70 @@ class Settings(BaseSettings):
     # AI Settings
     AI_REACTION_TIME: float = 1.0  # seconds to wait before AI makes a move
     
+    # Redis (for WebSocket message broker in production)
+    REDIS_URL: Optional[str] = None
+    
+    # Rate limiting
+    RATE_LIMIT: str = "100/minute"
+    
+    # Logging
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    
+    # CORS methods and headers
+    CORS_ALLOW_METHODS: List[str] = ["*"]
+    CORS_ALLOW_HEADERS: List[str] = ["*"]
+    CORS_EXPOSE_HEADERS: List[str] = []
+    CORS_ALLOW_CREDENTIALS: bool = True
+    
+    @validator("BACKEND_CORS_ORIGINS", pre=True)
+    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",") if i.strip()]
+        elif isinstance(v, (list, str)):
+            return v
+        raise ValueError(v)
+    
+    @property
+    def allowed_origins(self) -> Set[str]:
+        """Get the set of allowed origins for CORS."""
+        if "*" in self.BACKEND_CORS_ORIGINS:
+            return {"*"}
+        return {origin.strip() for origin in self.BACKEND_CORS_ORIGINS if origin.strip()}
+    
+    @property
+    def is_production(self) -> bool:
+        """Check if the application is running in production mode."""
+        return self.ENVIRONMENT == "production"
+    
+    @property
+    def websocket_url(self) -> str:
+        """Get the WebSocket URL for the current environment."""
+        if self.ENVIRONMENT == "production":
+            return f"wss://{self.HOST}{self.WEBSOCKET_PATH}"
+        return f"ws://{self.HOST}:{self.PORT}{self.WEBSOCKET_PATH}"
+    
     class Config:
         case_sensitive = True
         env_file = ".env"
         env_file_encoding = "utf-8"
+        
+        @classmethod
+        def customise_sources(
+            cls,
+            init_settings,
+            env_settings,
+            file_secret_settings,
+        ):
+            # Prioritize environment variables over .env file
+            return (
+                init_settings,
+                env_settings,
+                file_secret_settings,
+            )
+            
+        # Allow extra fields in the config
+        extra = "ignore"
         
         @classmethod
         def parse_env_var(cls, field_name: str, raw_val: str) -> Any:
@@ -58,22 +143,17 @@ class Settings(BaseSettings):
             return cls.json_loads(raw_val)
 
 def get_settings() -> Settings:
-    """Get the application settings.
-    
-    This function ensures that the database URI is properly set up.
-    """
+    """Get the application settings with MySQL configuration."""
     settings = Settings()
+    # Use MySQL configuration from environment variables
+    server = os.getenv("MYSQL_SERVER", "db")
+    port = os.getenv("MYSQL_PORT", "3306")
+    user = os.getenv("MYSQL_USER", "beer_user")
+    password = os.getenv("MYSQL_PASSWORD", "beer_password")
+    db = os.getenv("MYSQL_DB", "beer_game")
     
-    # Ensure we're using SQLite
-    if not settings.SQLALCHEMY_DATABASE_URI:
-        settings.SQLALCHEMY_DATABASE_URI = "sqlite:///./beer_game.db"
-    
-    # Make sure the database URL is using SQLite
-    if not settings.SQLALCHEMY_DATABASE_URI.startswith("sqlite"):
-        print(f"Warning: Using non-SQLite database: {settings.SQLALCHEMY_DATABASE_URI}")
-        print("Falling back to SQLite for this session.")
-        settings.SQLALCHEMY_DATABASE_URI = "sqlite:///./beer_game.db"
-    
+    settings.SQLALCHEMY_DATABASE_URI = f"mysql+pymysql://{user}:{password}@{server}:{port}/{db}?charset=utf8mb4"
+    print(f"Using MySQL database at: {user}@{server}:{port}/{db}")
     return settings
 
 # Global settings instance

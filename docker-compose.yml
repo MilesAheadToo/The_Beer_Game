@@ -3,51 +3,93 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+    container_name: beer-game-frontend
     ports:
       - "3000:80"
     environment:
-      - NODE_ENV=development
-      - REACT_APP_API_URL=http://localhost:8000
-    volumes:
-      - ./frontend:/app
-      - /app/node_modules
-    depends_on:
-      - backend
+      - NODE_ENV=production
+      - REACT_APP_API_URL=/api
     networks:
       - beer-game-network
+    depends_on:
+      - backend
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
+    container_name: the_beer_game_backend
+    restart: unless-stopped
     environment:
       - MYSQL_SERVER=db
-      - MYSQL_USER=root
-      - MYSQL_PASSWORD=19890617
+      - MYSQL_PORT=3306
+      - MYSQL_USER=beer_user
+      - MYSQL_PASSWORD=beer_password
       - MYSQL_DB=beer_game
-      - SQLALCHEMY_DATABASE_URI=mysql+pymysql://root:19890617@db/beer_game
-    depends_on:
-      - db
+      - MYSQL_ROOT_PASSWORD=19890617
+      - SECRET_KEY=your-secret-key-here
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+      - PYTHONUNBUFFERED=1
+      - TZ=UTC
+      - DB_CONNECTION_RETRIES=60
+      - INIT_DB=true
+      - DB_WAIT_TIMEOUT=30
+      - DB_CONNECTION_TIMEOUT=30
+      - PYTHONPATH=/app
+    ports:
+      - "8000:8000"
     volumes:
       - ./backend:/app
     networks:
-      - beer-game-network
+      beer-game-network:
+        aliases:
+          - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
 
   db:
     image: mariadb:10.6
-    command: --default-authentication-plugin=mysql_native_password
+    container_name: the_beer_game_db
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: 19890617
+      MYSQL_ROOT_PASSWORD: beer_password
       MYSQL_DATABASE: beer_game
-    ports:
-      - "3306:3306"
+      MYSQL_USER: beer_user
+      MYSQL_PASSWORD: beer_password
+      MYSQL_ROOT_HOST: '%'
+    command: --default-authentication-plugin=mysql_native_password --skip-ssl
     volumes:
-      - mysql_data:/var/lib/mysql
+      - db_data:/var/lib/mysql
+      - ./backend/mariadb-custom.cnf:/etc/mysql/conf.d/custom.cnf
     networks:
       - beer-game-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pbeer_password"]
+      interval: 5s
+      timeout: 5s
+      retries: 53
+    security_opt:
+      - seccomp:unconfined
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
 
   phpmyadmin:
     image: phpmyadmin/phpmyadmin:latest
@@ -67,4 +109,6 @@ networks:
     driver: bridge
 
 volumes:
+  db_data:
   mysql_data:
+  mariadb_logs:

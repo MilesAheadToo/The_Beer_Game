@@ -1,7 +1,8 @@
 from typing import List, Optional, Dict, Any, Union, Literal
 from enum import Enum
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, validator
 from datetime import datetime
+from .player import PlayerAssignment, PlayerResponse, PlayerUpdate, PlayerRole
 
 class DemandPatternType(str, Enum):
     CLASSIC = "classic"
@@ -43,8 +44,16 @@ class PlayerRole(str, Enum):
 class GameBase(BaseModel):
     name: str = Field(..., max_length=100)
     max_rounds: int = Field(default=52, ge=1, le=1000)
+    description: Optional[str] = Field(None, max_length=500)
+    is_public: bool = Field(default=True, description="Whether the game is visible to all users")
 
 class GameCreate(GameBase):
+    player_assignments: List[PlayerAssignment] = Field(
+        ...,
+        min_items=1,
+        max_items=4,
+        description="List of player assignments for the game"
+    )
     demand_pattern: DemandPattern = Field(
         default_factory=lambda: DemandPattern(
             type=DemandPatternType.CLASSIC,
@@ -58,20 +67,34 @@ class GameUpdate(BaseModel):
     status: Optional[GameStatus] = None
     current_round: Optional[int] = Field(None, ge=0)
     max_rounds: Optional[int] = Field(None, ge=1, le=1000)
+    description: Optional[str] = Field(None, max_length=500)
+    is_public: Optional[bool] = None
+    
+    @validator('status')
+    def validate_status_transition(cls, v, values, **kwargs):
+        # Add any status transition validation here
+        return v
 
 class GameInDBBase(GameBase):
     id: int
     status: GameStatus
     current_round: int
     demand_pattern: DemandPattern = Field(
-        default_factory=lambda: DemandPattern(
-            type=DemandPatternType.CLASSIC,
-            params={"stable_period": 5, "step_increase": 4}
-        ),
-        description="Configuration for the demand pattern used in the game"
-    )
+            default_factory=lambda: DemandPattern(
+                type=DemandPatternType.CLASSIC,
+                params={"stable_period": 5, "step_increase": 4}
+            ),
+            description="Configuration for the demand pattern used in the game"
+        )
     created_at: datetime
     updated_at: datetime
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_by: Optional[int] = Field(None, description="User ID of the game creator")
+    players: List[PlayerResponse] = Field(default_factory=list)
+    
+    class Config:
+        orm_mode = True
 
     class Config:
         from_attributes = True
@@ -112,13 +135,36 @@ class PlayerState(BaseModel):
     backorders: int = 0
     total_cost: float = 0.0
 
-class GameState(BaseModel):
-    id: int
-    name: str
-    status: GameStatus
-    current_round: int
-    max_rounds: int
-    players: List[PlayerState] = []
+class GameState(GameInDBBase):
+    """Extended game state with player states and current round information."""
+    players: List[PlayerState] = Field(default_factory=list)
+    current_demand: Optional[int] = Field(None, description="Current round's customer demand")
+    round_started_at: Optional[datetime] = Field(None, description="When the current round started")
+    round_ends_at: Optional[datetime] = Field(None, description="When the current round will end")
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "id": 1,
+                "name": "Supply Chain Game",
+                "status": "in_progress",
+                "current_round": 5,
+                "max_rounds": 20,
+                "current_demand": 8,
+                "players": [
+                    {
+                        "id": 1,
+                        "name": "Retailer (AI)",
+                        "role": "retailer",
+                        "is_ai": True,
+                        "current_stock": 12,
+                        "incoming_shipments": [],
+                        "backorders": 0,
+                        "total_cost": 24.5
+                    }
+                ]
+            }
+        }
 
 class OrderCreate(BaseModel):
     quantity: int = Field(..., ge=0, description="Number of units to order")
@@ -156,6 +202,11 @@ class PlayerRound(PlayerRoundBase):
 class GameRoundBase(BaseModel):
     round_number: int = Field(..., ge=1)
     customer_demand: int = Field(..., ge=0)
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    
+    class Config:
+        orm_mode = True
 
 class GameRoundCreate(GameRoundBase):
     pass

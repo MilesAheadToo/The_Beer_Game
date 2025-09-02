@@ -188,14 +188,22 @@ class SimulationStep(Base):
 
 def init_db():
     try:
-        # Create database engine
-        SQLALCHEMY_DATABASE_URI = "sqlite:///./beer_game.db"
-        print(f"Connecting to database at: {SQLALCHEMY_DATABASE_URI}")
+        # Get database configuration from environment
+        server = os.getenv("MYSQL_SERVER", "db")
+        user = os.getenv("MYSQL_USER", "root")
+        password = os.getenv("MYSQL_PASSWORD", "19890617")
+        db = os.getenv("MYSQL_DB", "beer_game")
         
+        SQLALCHEMY_DATABASE_URI = f"mysql+pymysql://{user}:{password}@{server}/{db}?charset=utf8mb4"
+        print(f"Connecting to MySQL database at: {server}/{db}")
+        
+        # Create database engine with connection pooling
         engine = create_engine(
-            SQLALCHEMY_DATABASE_URI, 
-            connect_args={"check_same_thread": False},
-            echo=True  # Enable SQL query logging
+            SQLALCHEMY_DATABASE_URI,
+            pool_pre_ping=True,
+            pool_recycle=3600,
+            pool_size=5,
+            max_overflow=10
         )
         
         # Drop all tables first to ensure a clean slate

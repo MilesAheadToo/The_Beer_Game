@@ -1,13 +1,13 @@
 # Build stage
-FROM node:16-alpine as build
+FROM node:16-alpine AS build
 
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install all dependencies including peer dependencies
+RUN npm install --legacy-peer-deps
 
 # Copy the rest of the application
 COPY . .
