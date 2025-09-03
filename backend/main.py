@@ -29,9 +29,70 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Create database tables
-def init_db():
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables created")
+def init_db(drop_tables: bool = False):
+    """Initialize the database with tables and initial data.
+    
+    Args:
+        drop_tables: If True, drops all tables before creating them. Use with caution in production.
+    """
+    from app.db.session import engine, Base
+    from sqlalchemy import text, inspect
+    
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info("Initializing database...")
+        
+        # Create a connection to execute raw SQL
+        with engine.connect() as conn:
+            # Check if tables exist
+            inspector = inspect(engine)
+            existing_tables = set(inspector.get_table_names())
+            
+            if drop_tables:
+                logger.warning("Dropping all tables (drop_tables=True)")
+                # Disable foreign key checks
+                conn.execute(text("SET FOREIGN_KEY_CHECKS=0"))
+                Base.metadata.drop_all(bind=engine)
+                # Re-enable foreign key checks
+                conn.execute(text("SET FOREIGN_KEY_CHECKS=1"))
+            
+            # Create tables in the correct order
+            logger.info("Creating tables in the correct order...")
+            
+            # Import all models to ensure they are registered with SQLAlchemy
+            from app.models.user import User, RefreshToken
+            from app.models.auth_models import PasswordHistory, PasswordResetToken
+            from app.models.session import TokenBlacklist, UserSession
+            from app.models.game import Game, Round, PlayerAction
+            from app.models.player import Player
+            
+            # Define the order of table creation
+            tables_in_order = [
+                User.__table__,
+                PasswordHistory.__table__,
+                PasswordResetToken.__table__,
+                RefreshToken.__table__,
+                TokenBlacklist.__table__,
+                UserSession.__table__,
+                Game.__table__,
+                Player.__table__,
+                Round.__table__,
+                PlayerAction.__table__
+            ]
+            
+            # Create tables in the specified order
+            for table in tables_in_order:
+                table.create(bind=engine, checkfirst=True)
+            
+            # Commit the transaction
+            conn.commit()
+        
+        logger.info("Database initialization completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Error initializing database: {e}")
+        raise
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -74,7 +135,8 @@ app.include_router(ws_router, prefix="/ws")
 @app.on_event("startup")
 async def startup_event():
     logger.info("Starting up application...")
-    init_db()
+    # Only create tables if they don't exist (don't drop existing tables)
+    init_db(drop_tables=False)
     logger.info("Application startup complete")
 
 @app.get("/")

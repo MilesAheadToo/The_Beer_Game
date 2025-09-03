@@ -16,6 +16,7 @@ python-jose[cryptography]==3.3.0
 python-multipart==0.0.5
 python-jose==3.3.0
 cryptography==42.0.2
+pyotp==2.9.0
 
 # Data Processing
 numpy==1.26.4

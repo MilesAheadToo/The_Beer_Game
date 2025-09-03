@@ -14,6 +14,7 @@ import MixedGamesList from './pages/MixedGamesList';
 import CreateMixedGame from './pages/CreateMixedGame';
 import GameBoard from './pages/GameBoard';
 import Login from './pages/Login';
+import UserManagement from './pages/admin/UserManagement';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import { isAuthenticated, logout } from './services/authService';
 
@@ -23,12 +24,29 @@ const PrivateRoute = ({ children }) => {
   const location = useLocation();
 
   useEffect(() => {
+    let isMounted = true;
+    
     const checkAuth = async () => {
-      const isAuth = await isAuthenticated();
-      setAuthenticated(isAuth);
-      setLoading(false);
+      try {
+        const isAuth = await isAuthenticated();
+        if (isMounted) {
+          setAuthenticated(isAuth);
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('Authentication check failed:', error);
+        if (isMounted) {
+          setAuthenticated(false);
+          setLoading(false);
+        }
+      }
     };
+
     checkAuth();
+    
+    return () => {
+      isMounted = false;
+    };
   }, [location]);
 
   if (loading) {
@@ -39,7 +57,13 @@ const PrivateRoute = ({ children }) => {
     );
   }
 
-  return authenticated ? children : <Navigate to="/login" state={{ from: location }} replace />;
+  if (!authenticated) {
+    // Store the intended location to redirect back after login
+    const from = location.pathname !== '/login' ? location.pathname + location.search : '/';
+    return <Navigate to="/login" state={{ from }} replace />;
+  }
+
+  return children;
 };
 
 function App() {
@@ -70,42 +94,75 @@ function App() {
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Routes>
-        <Route path="/login" element={<Login onLogin={() => setIsLoggedIn(true)} />} />
-        <Route path="*" element={
-          <PrivateRoute>
-            {renderContent(
-              <Box sx={{ display: 'flex' }}>
-                <CssBaseline />
-                <Navbar handleDrawerToggle={handleDrawerToggle} onLogout={handleLogout} />
-                <Sidebar mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} />
-                <Box
-                  component="main"
-                  sx={{
-                    flexGrow: 1,
-                    p: 3,
-                    width: { sm: `calc(100% - ${240}px)` },
-                    marginTop: '64px',
-                  }}
-                >
-                  <Routes>
-                    <Route path="/" element={<Dashboard />} />
-                    <Route path="games">
-                      <Route index element={<GamesList />} />
-                      <Route path="mixed" element={<MixedGamesList />} />
-                      <Route path="mixed/new" element={<CreateMixedGame />} />
-                      <Route path=":gameId" element={<GameBoard />} />
-                      <Route path="mixed/:gameId" element={<GameBoard />} />
-                    </Route>
-                    <Route path="/supply-chain" element={<SupplyChain />} />
-                    <Route path="/simulation" element={<Simulation />} />
-                    <Route path="/analysis" element={<Analysis />} />
-                    <Route path="/settings" element={<Settings />} />
-                  </Routes>
+        <Route 
+          path="/login" 
+          element={
+            isLoggedIn ? 
+            <Navigate to="/" replace /> : 
+            <Login onLogin={() => {
+              setIsLoggedIn(true);
+              // Force a page reload to ensure all auth state is properly initialized
+              window.location.href = '/';
+            }} />
+          } 
+        />
+        <Route
+          path="/*"
+          element={
+            <PrivateRoute>
+              {renderContent(
+                <Box sx={{ display: 'flex' }}>
+                  <CssBaseline />
+                  <Navbar handleDrawerToggle={handleDrawerToggle} onLogout={handleLogout} />
+                  <Sidebar mobileOpen={mobileOpen} handleDrawerToggle={handleDrawerToggle} />
+                  <Box
+                    component="main"
+                    sx={{
+                      flexGrow: 1,
+                      p: 3,
+                      width: { sm: `calc(100% - ${240}px)` },
+                      marginTop: '64px',
+                    }}
+                  >
+                    <Routes>
+                      <Route path="/" element={<Dashboard />} />
+                      <Route path="games">
+                        <Route index element={<GamesList />} />
+                        <Route path="mixed" element={<MixedGamesList />} />
+                        <Route path="mixed/new" element={<CreateMixedGame />} />
+                        <Route path=":gameId" element={<GameBoard />} />
+                        <Route path="mixed/:gameId" element={<GameBoard />} />
+                      </Route>
+                      <Route path="/supply-chain" element={<SupplyChain />} />
+                      <Route path="/simulation" element={<Simulation />} />
+                      <Route path="/analysis" element={<Analysis />} />
+                      <Route path="/settings" element={
+            <PrivateRoute>
+              <Settings />
+            </PrivateRoute>
+          } />
+          <Route path="/admin/users" element={
+            <PrivateRoute>
+              <UserManagement />
+            </PrivateRoute>
+          } />
+                      <Route path="*" element={<Navigate to="/" replace />} />
+                    </Routes>
+                  </Box>
                 </Box>
-              </Box>
-            )}
-          </PrivateRoute>
-        } />
+              )}
+            </PrivateRoute>
+          }
+        />
+        {/* Redirect root to login if not authenticated */}
+        <Route 
+          path="/" 
+          element={
+            isLoggedIn ? 
+            <Navigate to="/dashboard" replace /> : 
+            <Navigate to="/login" replace />
+          } 
+        />
       </Routes>
     </ThemeProvider>
   );

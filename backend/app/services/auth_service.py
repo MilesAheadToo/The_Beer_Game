@@ -1,16 +1,29 @@
 import secrets
+import pyotp
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Dict, Any
-from fastapi import Depends, HTTPException, status
+from typing import Optional, Dict, Any, List
+from fastapi import Depends, HTTPException, status, Request
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 
-from app.core.config import settings, create_access_token
+from app.core.config import settings
 from app.models.user import User, RefreshToken
-from app.schemas.user import UserCreate, UserInDB, Token, TokenData
-from app.core.security import get_password_hash, verify_password, oauth2_scheme
-from app.core.deps import get_db
+from app.models.auth_models import PasswordHistory, PasswordResetToken
+from app.schemas.user import (
+    UserCreate, 
+    UserInDB, 
+    Token, 
+    TokenData, 
+    PasswordResetRequest,
+    PasswordResetConfirm,
+    MFASetupResponse,
+    MFAVerifyRequest
+)
+from app.core.security import get_password_hash, verify_password, oauth2_scheme, verify_password_strength
+from app.db.deps import get_db
+from app.core.config import settings
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -22,81 +35,128 @@ class AuthService:
         self.db = db
     
     def create_user(self, user_create: UserCreate) -> User:
-        """Create a new user with hashed password."""
+        """Create a new user with hashed password and security features."""
         # Check if user already exists
         db_user = self.get_user_by_email(user_create.email)
         if db_user:
             raise ValueError("Email already registered")
             
+        # Check password strength
+        if not verify_password_strength(user_create.password):
+            raise ValueError("Password does not meet complexity requirements")
+            
         # Create new user
         hashed_password = get_password_hash(user_create.password)
+        now = datetime.utcnow()
         db_user = User(
             username=user_create.username,
             email=user_create.email,
             hashed_password=hashed_password,
             full_name=user_create.full_name,
-            is_active=True
+            is_active=True,
+            last_password_change=now,
+            failed_login_attempts=0,
+            is_locked=False,
+            mfa_enabled=False
         )
+        
+        # Add initial password to history
+        self._add_to_password_history(db_user.id, hashed_password)
         
         self.db.add(db_user)
         self.db.commit()
         self.db.refresh(db_user)
         return db_user
     
-    def authenticate_user(self, username: str, password: str) -> Optional[User]:
+    def authenticate_user(self, username: str, password: str, request: Request = None) -> Optional[User]:
         """
-        Authenticate a user with username/email and password.
+        Authenticate a user with username/email and password with security features.
         
         Args:
             username: Can be either username or email
             password: Plain text password
+            request: FastAPI request object for IP tracking
             
         Returns:
             User object if authentication succeeds, None otherwise
+            
+        Raises:
+            HTTPException: If account is locked or other security violations
         """
-        # First try to find user by email
-        user = self.get_user_by_email(username)
+        # Try to find user by email or username
+        user = self.db.query(User).filter(
+            or_(User.email == username, User.username == username)
+        ).first()
         
-        # If not found by email, try by username
         if not user:
-            user = self.get_user_by_username(username)
-            
-        if not user:
+            # User not found, but don't reveal that to prevent user enumeration
             return None
             
-        if not verify_password(password, user.hashed_password):
+        # Check if account is locked
+        if user.is_locked and user.lockout_until and user.lockout_until > datetime.utcnow():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is temporarily locked due to too many failed login attempts"
+            )
+            
+        # Verify password
+        if not verify_password(password, user.haved_password):
+            # Increment failed login attempts
+            user.failed_login_attempts += 1
+            
+            # Check if account should be locked
+            if user.failed_login_attempts >= settings.MAX_LOGIN_ATTEMPTS:
+                user.is_locked = True
+                user.lockout_until = datetime.utcnow() + timedelta(minutes=settings.ACCOUNT_LOCKOUT_MINUTES)
+                
+            self.db.commit()
             return None
+            
+        # Reset failed login attempts on successful login
+        if user.failed_login_attempts > 0:
+            user.failed_login_attempts = 0
+            user.is_locked = False
+            user.lockout_until = None
+            
+        # Update last login time
+        user.last_login = datetime.utcnow()
+        self.db.commit()
+        
         return user
     
-    def create_access_token(self, user: User) -> Token:
-        """Create access and refresh tokens for a user.
+    def create_access_token(self, user: User, mfa_verified: bool = False) -> Token:
+        """Create access and refresh tokens for a user with enhanced security.
         
         Args:
             user: The user object for which to create tokens
+            mfa_verified: Whether MFA has been verified for this session
             
         Returns:
             Token: An object containing access_token, refresh_token, and token_type
         """
-        from datetime import datetime, timedelta
-        from jose import jwt
-        
-        # Create access token with email as subject
+        # Create access token with email as subject and additional claims
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         expire = datetime.utcnow() + access_token_expires
+        
+        # Additional claims for enhanced security
         to_encode = {
             "exp": expire, 
-            "sub": str(user.email),  # Using email as subject for better uniqueness
-            "username": user.username  # Include username in the token if needed
+            "sub": str(user.email),
+            "username": user.username,
+            "mfa_verified": mfa_verified,
+            "jti": secrets.token_urlsafe(32)  # Unique token identifier for revocation
         }
+        
+        # Sign the token with the secret key
         access_token = jwt.encode(
             to_encode, 
-            settings.SECRET_KEY, 
+            settings.SECRET_KEY,
             algorithm=settings.ALGORITHM
         )
         
-        # Create refresh token
+        # Create refresh token with a longer expiration
         refresh_token_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-        refresh_token = self._create_refresh_token(user.id, refresh_token_expires)
+        refresh_token = self._create_refresh_token(user.id, refresh_token_expires, to_encode["jti"])
         
         return Token(
             access_token=access_token,
@@ -181,24 +241,222 @@ class AuthService:
     def get_user_by_email(self, email: str) -> Optional[User]:
         """Get a user by email."""
         return self.db.query(User).filter(User.email == email).first()
-    
-    def _create_refresh_token(self, user_id: int, expires_delta: timedelta) -> RefreshToken:
-        """Create and store a refresh token in the database."""
-        # Invalidate any existing refresh tokens for this user
-        self.db.query(RefreshToken).filter(RefreshToken.user_id == user_id).delete()
         
-        # Create new refresh token
-        expires_at = datetime.utcnow() + expires_delta
-        token = RefreshToken(
+    def _create_refresh_token(self, user_id: int, expires_delta: timedelta, jti: str = None) -> RefreshToken:
+        """Create and store a refresh token in the database."""
+        expires = datetime.utcnow() + expires_delta
+        token = secrets.token_urlsafe(64)  # Longer token for refresh tokens
+        db_token = RefreshToken(
+            token=token,
             user_id=user_id,
-            token=secrets.token_urlsafe(32),
-            expires_at=expires_at
+            expires_at=expires,
+            jti=jti or secrets.token_urlsafe(32),
+            created_at=datetime.utcnow(),
+            is_revoked=False
+        )
+        self.db.add(db_token)
+        self.db.commit()
+        return db_token
+        
+    def _add_to_password_history(self, user_id: int, hashed_password: str) -> None:
+        """Add a password to the user's password history.
+        
+        Args:
+            user_id: The ID of the user
+            hashed_password: The hashed password to add to history
+        """
+        # Get the current password history count
+        history_count = self.db.query(PasswordHistory).filter_by(user_id=user_id).count()
+        
+        # If we've reached the maximum history size, remove the oldest entry
+        if history_count >= settings.PASSWORD_HISTORY_SIZE:
+            oldest = self.db.query(PasswordHistory).filter_by(user_id=user_id)\
+                .order_by(PasswordHistory.created_at.asc()).first()
+            if oldest:
+                self.db.delete(oldest)
+        
+        # Add the new password to history
+        password_history = PasswordHistory(
+            user_id=user_id,
+            hashed_password=hashed_password,
+            created_at=datetime.utcnow()
+        )
+        self.db.add(password_history)
+        self.db.commit()
+    
+    def is_password_in_history(self, user_id: int, password: str) -> bool:
+        """Check if the given password is in the user's password history.
+        
+        Args:
+            user_id: The ID of the user
+            password: The password to check
+            
+        Returns:
+            bool: True if password is in history, False otherwise
+        """
+        # Get all password history entries for the user
+        history = self.db.query(PasswordHistory).filter_by(user_id=user_id).all()
+        
+        # Check if the password matches any in history
+        return any(pwd_context.verify(password, entry.hashed_password) for entry in history)
+    
+    def change_password(self, user: User, current_password: str, new_password: str) -> bool:
+        """Change a user's password with security checks.
+        
+        Args:
+            user: The user changing their password
+            current_password: The user's current password
+            new_password: The new password
+            
+        Returns:
+            bool: True if password was changed successfully, False otherwise
+            
+        Raises:
+            ValueError: If the current password is incorrect or new password is invalid
+        """
+        # Verify current password
+        if not verify_password(current_password, user.hashed_password):
+            raise ValueError("Current password is incorrect")
+            
+        # Check if new password is the same as current
+        if verify_password(new_password, user.hashed_password):
+            raise ValueError("New password must be different from current password")
+            
+        # Check password strength
+        if not verify_password_strength(new_password):
+            raise ValueError("New password does not meet complexity requirements")
+            
+        # Check if password was used before
+        if self.is_password_in_history(user.id, new_password):
+            raise ValueError("You cannot reuse a previous password")
+            
+        # Update password and add to history
+        new_hashed_password = get_password_hash(new_password)
+        user.hashed_password = new_hashed_password
+        user.last_password_change = datetime.utcnow()
+        
+        # Add to password history
+        self._add_to_password_history(user.id, new_hashed_password)
+        
+        # Save changes
+        self.db.commit()
+        return True
+        
+    def generate_mfa_secret(self, user: User) -> str:
+        """Generate a new MFA secret for a user.
+        
+        Args:
+            user: The user to generate the MFA secret for
+            
+        Returns:
+            str: The generated MFA secret
+        """
+        # Generate a new secret
+        secret = pyotp.random_base32()
+        
+        # Store the secret in the user's record
+        user.mfa_secret = secret
+        user.mfa_enabled = False  # Not enabled until verified
+        self.db.commit()
+        
+        return secret
+        
+    def generate_mfa_uri(self, user: User, secret: str) -> str:
+        """Generate a provisioning URI for the MFA app.
+        
+        Args:
+            user: The user to generate the URI for
+            secret: The MFA secret
+            
+        Returns:
+            str: The provisioning URI
+        """
+        return pyotp.totp.TOTP(secret).provisioning_uri(
+            name=user.email,
+            issuer_name=settings.PROJECT_NAME
         )
         
-        self.db.add(token)
+    def verify_mfa_code(self, user: User, code: str) -> bool:
+        """Verify an MFA code for a user.
+        
+        Args:
+            user: The user to verify the code for
+            code: The MFA code to verify
+            
+        Returns:
+            bool: True if the code is valid, False otherwise
+        """
+        if not user.mfa_secret:
+            return False
+            
+        totp = pyotp.TOTP(user.mfa_secret)
+        return totp.verify(code, valid_window=1)  # Allow 30s before/after for clock skew
+        
+    def enable_mfa(self, user: User, code: str) -> bool:
+        """Enable MFA for a user after verifying their first code.
+        
+        Args:
+            user: The user to enable MFA for
+            code: The MFA code to verify
+            
+        Returns:
+            bool: True if MFA was enabled, False if the code was invalid
+        """
+        if not user.mfa_secret:
+            return False
+            
+        if not self.verify_mfa_code(user, code):
+            return False
+            
+        user.mfa_enabled = True
         self.db.commit()
-        self.db.refresh(token)
-        return token
+        return True
+        
+    def disable_mfa(self, user: User) -> None:
+        """Disable MFA for a user.
+        
+        Args:
+            user: The user to disable MFA for
+        """
+        user.mfa_enabled = False
+        user.mfa_secret = None
+        self.db.commit()
+        
+    def generate_recovery_codes(self, user: User, count: int = 10) -> List[str]:
+        """Generate recovery codes for MFA.
+        
+        Args:
+            user: The user to generate recovery codes for
+            count: Number of recovery codes to generate (default: 10)
+            
+        Returns:
+            List[str]: List of recovery codes
+        """
+        codes = [secrets.token_urlsafe(16) for _ in range(count)]
+        user.mfa_recovery_codes = codes
+        self.db.commit()
+        return codes
+        
+    def verify_recovery_code(self, user: User, code: str) -> bool:
+        """Verify a recovery code and remove it if valid.
+        
+        Args:
+            user: The user to verify the recovery code for
+            code: The recovery code to verify
+            
+        Returns:
+            bool: True if the recovery code was valid, False otherwise
+        """
+        if not user.mfa_recovery_codes:
+            return False
+            
+        if code in user.mfa_recovery_codes:
+            # Remove the used code
+            user.mfa_recovery_codes = [c for c in user.mfa_recovery_codes if c != code]
+            self.db.commit()
+            return True
+            
+        return False
 
 # Dependency to get the current active user
 def get_current_active_user(

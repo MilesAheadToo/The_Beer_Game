@@ -22,6 +22,26 @@ def get_password_hash(password: str) -> str:
     """Hash a password."""
     return pwd_context.hash(password)
 
+
+def verify_password_strength(password: str) -> bool:
+    """Verify that a password meets strength requirements.
+    
+    Args:
+        password: The password to check
+        
+    Returns:
+        bool: True if password meets requirements, False otherwise
+    """
+    if len(password) < 8:
+        return False
+    if not any(c.isupper() for c in password):
+        return False
+    if not any(c.islower() for c in password):
+        return False
+    if not any(c.isdigit() for c in password):
+        return False
+    return True
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Create a JWT access token."""
     to_encode = data.copy()

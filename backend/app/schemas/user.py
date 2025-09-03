@@ -79,3 +79,43 @@ class UserPasswordChange(BaseModel):
         if not any(c.isdigit() for c in v):
             raise ValueError('Password must contain at least one number')
         return v
+
+
+class PasswordResetRequest(BaseModel):
+    """Schema for requesting a password reset."""
+    email: EmailStr
+
+
+class PasswordResetConfirm(BaseModel):
+    """Schema for confirming a password reset."""
+    token: str
+    new_password: str = Field(..., min_length=8, max_length=50)
+    
+    @validator('new_password')
+    def password_strength(cls, v):
+        if len(v) < 8:
+            raise ValueError('Password must be at least 8 characters long')
+        if not any(c.isupper() for c in v):
+            raise ValueError('Password must contain at least one uppercase letter')
+        if not any(c.islower() for c in v):
+            raise ValueError('Password must contain at least one lowercase letter')
+        if not any(c.isdigit() for c in v):
+            raise ValueError('Password must contain at least one number')
+        return v
+
+
+class MFASetupResponse(BaseModel):
+    """Response schema for MFA setup."""
+    secret: str
+    qr_code_uri: str
+    recovery_codes: List[str]
+
+
+class MFAVerifyRequest(BaseModel):
+    """Request schema for MFA verification."""
+    code: str
+
+
+class MFARecoveryCodes(BaseModel):
+    """Schema for MFA recovery codes."""
+    recovery_codes: List[str]

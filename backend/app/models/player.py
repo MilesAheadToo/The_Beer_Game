@@ -37,12 +37,12 @@ class PlayerStrategy(str, Enum):
     LLM_REINFORCEMENT = "llm_reinforcement"
 
 class Player(Base):
-    __tablename__ = "players"
+    __tablename__ = "players"  # Explicitly set table name to match foreign key references
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    game_id: Mapped[int] = mapped_column(Integer, ForeignKey("games.id"))
-    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
-    name: Mapped[str] = mapped_column(String, nullable=False)
+    game_id: Mapped[int] = mapped_column(Integer, ForeignKey("games.id", ondelete="CASCADE"))
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
     role: Mapped[PlayerRole] = mapped_column(SQLEnum(PlayerRole), nullable=False)
     type: Mapped[PlayerType] = mapped_column(SQLEnum(PlayerType), default=PlayerType.HUMAN)
     strategy: Mapped[PlayerStrategy] = mapped_column(SQLEnum(PlayerStrategy), default=PlayerStrategy.MANUAL)

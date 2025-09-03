@@ -218,28 +218,74 @@ def init_db():
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         db = SessionLocal()
         
-        # Create test user if it doesn't exist
-        print("Checking for test user...")
-        test_user = db.query(User).filter(User.email == "test@example.com").first()
-        if not test_user:
-            print("Creating test user...")
-            user = User(
-                username="testuser",
-                email="test@example.com",
-                hashed_password=get_password_hash("testpassword"),
-                full_name="Test User",
-                is_active=True
-            )
-            db.add(user)
-            db.commit()
-            db.refresh(user)
-            print(f"Test user created successfully with ID: {user.id}")
-        else:
-            print("Test user already exists!")
+        # Create default users if they don't exist
+        default_users = [
+            {
+                "username": "admin",
+                "email": "admin@daybreak.ai",
+                "password": "Daybreak@2025",
+                "full_name": "System Administrator",
+                "is_superuser": True,
+                "is_active": True
+            },
+            {
+                "username": "retailer",
+                "email": "retailer@daybreak.ai",
+                "password": "Daybreak@2025",
+                "full_name": "Retailer User",
+                "is_superuser": False,
+                "is_active": True
+            },
+            {
+                "username": "distributor",
+                "email": "distributor@daybreak.ai",
+                "password": "Daybreak@2025",
+                "full_name": "Distributor User",
+                "is_superuser": False,
+                "is_active": True
+            },
+            {
+                "username": "manufacturer",
+                "email": "manufacturer@daybreak.ai",
+                "password": "Daybreak@2025",
+                "full_name": "Manufacturer User",
+                "is_superuser": False,
+                "is_active": True
+            },
+            {
+                "username": "wholesaler",
+                "email": "wholesaler@daybreak.ai",
+                "password": "Daybreak@2025",
+                "full_name": "Wholesaler User",
+                "is_superuser": False,
+                "is_active": True
+            }
+        ]
+
+        print("Creating default users...")
+        for user_data in default_users:
+            user = db.query(User).filter(User.email == user_data["email"]).first()
+            if not user:
+                user = User(
+                    username=user_data["username"],
+                    email=user_data["email"],
+                    hashed_password=get_password_hash(user_data["password"]),
+                    full_name=user_data["full_name"],
+                    is_superuser=user_data["is_superuser"],
+                    is_active=user_data["is_active"]
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+                print(f"Created user: {user.email} (ID: {user.id})")
+            else:
+                print(f"User already exists: {user.email}")
         
-        # Verify the user was created
-        test_user = db.query(User).filter(User.email == "test@example.com").first()
-        print(f"Test user verification - Username: {test_user.username}, Email: {test_user.email}")
+        # Verify the users were created
+        print("\nVerifying users in database:")
+        users = db.query(User).all()
+        for u in users:
+            print(f"- {u.username} ({u.email}) - {'Admin' if u.is_superuser else 'User'}")
         
         db.close()
         return True

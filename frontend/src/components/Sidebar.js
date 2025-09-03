@@ -11,6 +11,7 @@ import {
   Toolbar,
   Box,
   Typography,
+  Collapse,
 } from '@mui/material';
 import {
   Dashboard as DashboardIcon,
@@ -19,8 +20,13 @@ import {
   Analytics as AnalyticsIcon,
   Settings as SettingsIcon,
   SportsEsports as GamesIcon,
+  AdminPanelSettings as AdminIcon,
+  People as UsersIcon,
+  ExpandLess,
+  ExpandMore,
 } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
+import { useAuth } from '../contexts/AuthContext';
 
 const drawerWidth = 240;
 
@@ -44,7 +50,14 @@ const menuItems = [
   { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
 ];
 
+const adminMenuItems = [
+  { text: 'User Management', icon: <UsersIcon />, path: '/admin/users' },
+];
+
 const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
+  const [adminOpen, setAdminOpen] = React.useState(false);
+  const { currentUser } = useAuth();
+  const isAdmin = currentUser?.email === 'admin@daybreak.ai';
   const location = useLocation();
 
   const drawer = (
@@ -85,6 +98,50 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
             </ListItemButton>
           </ListItem>
         ))}
+        
+        {/* Admin Section */}
+        {isAdmin && (
+          <>
+            <Divider sx={{ my: 1 }} />
+            <ListItemButton onClick={() => setAdminOpen(!adminOpen)}>
+              <ListItemIcon>
+                <AdminIcon />
+              </ListItemIcon>
+              <ListItemText primary="Admin" />
+              {adminOpen ? <ExpandLess /> : <ExpandMore />}
+            </ListItemButton>
+            <Collapse in={adminOpen} timeout="auto" unmountOnExit>
+              <List component="div" disablePadding>
+                {adminMenuItems.map((item) => (
+                  <ListItemButton
+                    key={item.text}
+                    component={Link}
+                    to={item.path}
+                    selected={location.pathname === item.path}
+                    sx={{
+                      pl: 4,
+                      '&.Mui-selected': {
+                        backgroundColor: 'primary.light',
+                        color: 'primary.contrastText',
+                        '&:hover': {
+                          backgroundColor: 'primary.light',
+                        },
+                        '& .MuiListItemIcon-root': {
+                          color: 'primary.contrastText',
+                        },
+                      },
+                    }}
+                  >
+                    <ListItemIcon sx={{ color: 'inherit' }}>
+                      {item.icon}
+                    </ListItemIcon>
+                    <ListItemText primary={item.text} />
+                  </ListItemButton>
+                ))}
+              </List>
+            </Collapse>
+          </>
+        )}
       </List>
     </div>
   );

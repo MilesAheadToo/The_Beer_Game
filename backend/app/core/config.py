@@ -18,9 +18,34 @@ class Settings(BaseSettings):
     
     # Security
     SECRET_KEY: str = secrets.token_urlsafe(32)
+    REFRESH_SECRET_KEY: str = secrets.token_urlsafe(32)
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30  # 30 days
+    
+    # Password settings
+    PASSWORD_MIN_LENGTH: int = 12
+    PASSWORD_MAX_ATTEMPTS: int = 5
+    PASSWORD_LOCKOUT_MINUTES: int = 15
+    PASSWORD_HISTORY_SIZE: int = 5
+    
+    # Session settings
+    SESSION_TIMEOUT_MINUTES: int = 30
+    MAX_SESSIONS_PER_USER: int = 5
+    
+    # Rate limiting
+    RATE_LIMIT: str = "100/minute"
+    AUTH_RATE_LIMIT: str = "5/minute"
+    
+    # Security headers
+    SECURE_HEADERS: Dict[str, str] = {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "X-XSS-Protection": "1; mode=block",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Content-Security-Policy": "default-src 'self'",
+        "Permissions-Policy": "geolocation=(), microphone=(), camera=()"
+    }
     
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = [
@@ -50,8 +75,11 @@ class Settings(BaseSettings):
         password = os.getenv("MYSQL_PASSWORD", "beer_password")
         db = os.getenv("MYSQL_DB", "beer_game")
         
-        # Connection string with SSL disabled
-        return f"mysql+pymysql://{user}:{password}@{server}:{port}/{db}?charset=utf8mb4&ssl=None"
+        # URL encode the password to handle special characters
+        from urllib.parse import quote_plus
+        encoded_password = quote_plus(password)
+        # Connection string with SSL disabled and URL-encoded password
+        return f"mysql+pymysql://{user}:{encoded_password}@{server}:{port}/{db}?charset=utf8mb4&ssl=None"
     
     # WebSocket
     WEBSOCKET_PATH: str = "/ws"

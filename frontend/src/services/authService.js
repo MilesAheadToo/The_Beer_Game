@@ -35,6 +35,28 @@ export const getAuthHeader = () => {
   return token ? `${tokenType} ${token}` : '';
 };
 
-export const isAuthenticated = () => {
-  return !!localStorage.getItem('access_token');
+export const isAuthenticated = async () => {
+  const token = localStorage.getItem('access_token');
+  if (!token) return false;
+
+  try {
+    const response = await fetch(`${API_URL}/auth/me`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'accept': 'application/json'
+      }
+    });
+    
+    if (response.ok) {
+      return true;
+    } else {
+      // If the token is invalid, clear it from storage
+      logout();
+      return false;
+    }
+  } catch (error) {
+    console.error('Error validating token:', error);
+    logout();
+    return false;
+  }
 };
