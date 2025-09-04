@@ -150,11 +150,17 @@ class SupplyChainTemporalGNN(nn.Module):
         # Ensure input has 4 dimensions [batch_size, seq_len, num_nodes, node_features]
         print(f"Input x shape: {x.shape}")
         
+        # Handle 6D input [1, 1, 1, seq_len, num_nodes, node_features] -> [1, seq_len, num_nodes, node_features]
+        if x.dim() == 6:
+            # Remove the extra dimensions at indices 1 and 2
+            x = x.squeeze(1).squeeze(1)
+            print(f"After removing extra dims (6D case), x shape: {x.shape}")
         # Handle 5D input [1, 1, seq_len, num_nodes, node_features] -> [1, seq_len, num_nodes, node_features]
-        if x.dim() == 5:
+        elif x.dim() == 5:
             # Remove the extra dimension at index 1
             x = x.squeeze(1)
-            print(f"After removing extra dim, x shape: {x.shape}")
+            print(f"After removing extra dim (5D case), x shape: {x.shape}")
+        # Handle 3D input [seq_len, num_nodes, node_features] -> [1, seq_len, num_nodes, node_features]
         elif x.dim() == 3:
             # Add batch dimension if missing
             x = x.unsqueeze(0)  # [1, seq_len, num_nodes, node_features]

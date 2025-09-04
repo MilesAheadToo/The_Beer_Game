@@ -37,6 +37,7 @@ services:
       - DB_WAIT_TIMEOUT=30
       - DB_CONNECTION_TIMEOUT=30
       - PYTHONPATH=/app
+      - DATABASE_URL=mysql+pymysql://beer_user:Daybreak2025@db:3306/beer_game
     ports:
       - "8000:8000"
     volumes:
@@ -64,26 +65,46 @@ services:
         hard: 65535
 
   db:
-    image: mariadb:10.6
+    image: mariadb:10.11
     container_name: the_beer_game_db
-    restart: always
+    restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: Daybreak2025
-      MYSQL_DATABASE: beer_game
-      MYSQL_USER: beer_user
-      MYSQL_PASSWORD: Daybreak2025
-      MYSQL_ROOT_HOST: '%'
-    command: --default-authentication-plugin=mysql_native_password --skip-ssl
+      MARIADB_ROOT_PASSWORD: Daybreak2025
+      MARIADB_DATABASE: beer_game
+      MARIADB_USER: beer_user
+      MARIADB_PASSWORD: Daybreak2025
+      MARIADB_ROOT_HOST: '%'
+      MARIADB_INITDB_SKIP_TZINFO: 1
+    ports:
+      - "3306:3306"
     volumes:
       - db_data:/var/lib/mysql
-      - ./backend/mariadb-custom.cnf:/etc/mysql/conf.d/custom.cnf
+      - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
+      - ./mariadb.cnf:/etc/mysql/conf.d/custom.cnf
+      - ./scripts/init_database.sh:/docker-entrypoint-initdb.d/init_database.sh
+    command: [
+      '--character-set-server=utf8mb4',
+      '--collation-server=utf8mb4_unicode_ci',
+      '--max_connections=200',
+      '--innodb-buffer-pool-size=256M',
+      '--innodb-flush-log-at-trx-commit=1',
+      '--innodb-flush-method=O_DIRECT',
+      '--skip-log-bin',
+      '--default-time-zone=+00:00',
+      '--log-error=/var/log/mysql/error.log',
+      '--general-log=0',
+      '--slow-query-log=1',
+      '--long-query-time=2',
+      '--slow-query-log-file=/var/log/mysql/mariadb-slow.log'
+    ]
     networks:
       - beer-game-network
     healthcheck:
       test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pDaybreak2025"]
       interval: 5s
       timeout: 5s
-      retries: 53
+      retries: 10
+      start_period: 30s
     security_opt:
       - seccomp:unconfined
     ulimits:

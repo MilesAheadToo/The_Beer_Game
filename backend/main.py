@@ -149,10 +149,25 @@ async def root():
         "environment": settings.ENVIRONMENT
     }
 
-# Health check endpoint
-@app.get("/health")
+# Health check endpoint with database connectivity check
+@app.get("/api/health")
 async def health_check():
-    return {"status": "healthy", "version": settings.VERSION}
+    try:
+        # Check database connection
+        db = SessionLocal()
+        db.execute("SELECT 1")
+        db.close()
+        return {
+            "status": "healthy",
+            "version": settings.VERSION,
+            "database": "connected"
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Service unavailable"
+        )
 
 # WebSocket test endpoint
 @app.websocket("/ws/test")

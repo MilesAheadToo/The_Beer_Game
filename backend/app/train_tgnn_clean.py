@@ -1,5 +1,6 @@
 import os
 import torch
+import torch.nn.functional as F
 import numpy as np
 from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter
@@ -384,18 +385,38 @@ def train_agents(
                             'edge_attr': batch['edge_attr'].to(device) if 'edge_attr' in batch else None
                         }
                         
-                        # Get action and value
+                        # Get model outputs
                         with torch.no_grad():
-                            action_probs, value = agent.model(
+                            outputs = agent.model(
                                 obs['node_features'].unsqueeze(0).to(device),
                                 obs['edge_index'].to(device),
                                 obs['edge_attr'].to(device) if 'edge_attr' in obs else None
                             )
                             
+                            # Get order quantities and demand forecasts
+                            order_quantities = outputs['order_quantity']
+                            demand_forecasts = outputs['demand_forecast']
+                            
                             # Calculate loss (simplified for validation)
                             action = actions[t][i].to(device)
-                            action_loss = F.mse_loss(action_probs.squeeze(), action.float())
-                            value_loss = F.mse_loss(value.squeeze(), torch.tensor([rewards[t]], device=device).float())
+                            # Ensure action has the same shape as order_quantities for the current node
+                            action = action.unsqueeze(1)  # [batch_size, 1]
+                            action_loss = F.mse_loss(order_quantities, action.float())
+                            
+                            # For value loss, we'll use the mean of demand_forecasts across nodes
+                            # and compare to the reward
+                            mean_demand = demand_forecasts.mean(dim=1, keepdim=True)  # [batch_size, 1]
+                            
+                            # Handle different reward formats
+                            if isinstance(rewards[t], (list, np.ndarray, torch.Tensor)):
+                                reward_value = float(rewards[t][0]) if len(rewards[t]) > 0 else 0.0
+                            else:
+                                reward_value = float(rewards[t])
+                                
+                            reward_tensor = torch.tensor([[reward_value]], device=device).float()  # [1, 1]
+                            value_loss = F.mse_loss(mean_demand, reward_tensor)
+                            
+                            # Combine losses
                             loss = action_loss + 0.5 * value_loss
                             
                             batch_val_loss += loss.item()

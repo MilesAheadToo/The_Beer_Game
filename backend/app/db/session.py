@@ -11,10 +11,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Get database connection details from environment variables
-DB_USER = os.getenv("MYSQL_USER")
-DB_PASSWORD = os.getenv("MYSQL_PASSWORD")
-DB_HOST = os.getenv("MYSQL_HOST", "db")
-DB_NAME = os.getenv("MYSQL_DATABASE") or os.getenv("MYSQL_DB")
+DB_USER = os.getenv("MARIADB_USER")
+DB_PASSWORD = os.getenv("MARIADB_PASSWORD")
+DB_HOST = os.getenv("MARIADB_HOST", "db")
+DB_NAME = os.getenv("MARIADB_DATABASE")
 
 # Log the database connection details for debugging
 logger.info(f"Database connection details - User: {DB_USER}, Host: {DB_HOST}, DB: {DB_NAME}")
@@ -22,21 +22,26 @@ logger.info(f"Database connection details - User: {DB_USER}, Host: {DB_HOST}, DB
 if not all([DB_USER, DB_PASSWORD, DB_NAME]):
     raise ValueError("Missing required database environment variables")
 
-# Construct the database URI
-SQLALCHEMY_DATABASE_URI = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}"
-logger.info(f"Connecting to database: {DB_USER}@{DB_HOST}/{DB_NAME}")
+# Construct the database URI with MariaDB dialect
+SQLALCHEMY_DATABASE_URI = f"mariadb+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}?charset=utf8mb4"
+logger.info(f"Connecting to MariaDB: {DB_USER}@{DB_HOST}/{DB_NAME}")
 
 # Create engine with connection pooling and error handling
 engine = create_engine(
     SQLALCHEMY_DATABASE_URI,
     poolclass=QueuePool,
-    pool_pre_ping=True,
-    pool_recycle=3600,  # Recycle connections after 1 hour
-    pool_size=5,        # Number of connections to keep open
-    max_overflow=10,    # Max number of connections to create beyond pool_size
+    pool_pre_ping=True,  # Enable connection health checks
+    pool_recycle=3600,   # Recycle connections after 1 hour
+    pool_size=5,         # Number of connections to keep open
+    max_overflow=10,     # Max number of connections to create beyond pool_size
     connect_args={
-        'connect_timeout': 10,  # 10 second timeout for initial connection
-    }
+        'connect_timeout': 10,    # 10 second timeout for initial connection
+        'read_timeout': 30,       # 30 second timeout for read operations
+        'write_timeout': 30,      # 30 second timeout for write operations
+        'ssl': False              # Disable SSL for now, configure as needed
+    },
+    echo_pool=True,      # Log connection pool events
+    echo=False           # Set to True for SQL query logging
 )
 
 # Test the connection

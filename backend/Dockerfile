@@ -14,6 +14,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     default-mysql-client \
+    libmariadb-dev \
+    libmariadb-dev-compat \
     iputils-ping \
     net-tools \
     dnsutils \
@@ -27,8 +29,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install additional Python packages for MySQL
-RUN pip install --no-cache-dir pymysql mysql-connector-python alembic
+# Install additional Python packages for MariaDB
+RUN pip install --no-cache-dir pymysql mysql-connector-python==8.0.33 alembic
 
 # Copy the current directory contents into the container at /app
 COPY . .

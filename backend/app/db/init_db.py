@@ -29,57 +29,105 @@ _models = [User, RefreshToken, Player, PasswordHistory, PasswordResetToken,
 logger.info(f"Registered models: {[model.__name__ for model in _models]}")
 
 # Get database connection details from environment variables
-DB_USER = os.getenv("MYSQL_USER")
-DB_PASSWORD = os.getenv("MYSQL_PASSWORD")
-DB_ROOT_PASSWORD = "beer_password"  # From docker-compose.yml
-DB_HOST = os.getenv("MYSQL_HOST", "db")
-DB_NAME = os.getenv("MYSQL_DATABASE") or os.getenv("MYSQL_DB")
+DB_USER = os.getenv("MARIADB_USER")
+DB_PASSWORD = os.getenv("MARIADB_PASSWORD")
+DB_ROOT_PASSWORD = os.getenv("MARIADB_ROOT_PASSWORD", "Daybreak2025")
+DB_HOST = os.getenv("MARIADB_HOST", "db")
+DB_NAME = os.getenv("MARIADB_DATABASE")
 
-# Construct the database URI
-SQLALCHEMY_DATABASE_URI = f"mysql+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}"
-logger.info(f"Initializing database at: {SQLALCHEMY_DATABASE_URI}")
+if not all([DB_USER, DB_PASSWORD, DB_NAME]):
+    raise ValueError("Missing required database environment variables")
+
+# Construct the database URIs
+SQLALCHEMY_DATABASE_URI = f"mariadb+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}?charset=utf8mb4"
+logger.info(f"Initializing MariaDB at: {DB_USER}@{DB_HOST}/{DB_NAME}")
 
 # First, try to connect to the database as root to create the database if needed
 root_engine = create_engine(
-    f"mysql+pymysql://root:{DB_ROOT_PASSWORD}@{DB_HOST}/mysql?connect_timeout=10",
+    f"mariadb+pymysql://root:{DB_ROOT_PASSWORD}@{DB_HOST}/mysql?connect_timeout=10&charset=utf8mb4",
     pool_pre_ping=True,
-    pool_recycle=3600
+    pool_recycle=3600,
+    connect_args={
+        'connect_timeout': 10,
+        'read_timeout': 30,
+        'write_timeout': 30,
+        'ssl': False
+    }
 )
 
-# Check if the database exists, create it if it doesn't
 try:
     with root_engine.connect() as conn:
         # Check if database exists
         result = conn.execute(text(f"SHOW DATABASES LIKE '{DB_NAME}'")).fetchone()
         if not result:
-            logger.info(f"Creating database {DB_NAME}")
-            conn.execute(text(f"CREATE DATABASE {DB_NAME}"))
-            conn.execute(text(f"GRANT ALL PRIVILEGES ON {DB_NAME}.* TO '{DB_USER}'@'%'"))
+            logger.info(f"Creating database {DB_NAME} with UTF8MB4 character set")
+            # Use CREATE DATABASE with explicit character set and collation
+            conn.execute(text(f"CREATE DATABASE `{DB_NAME}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"))
+            
+            # Create user if not exists and grant privileges
+            conn.execute(text(f"CREATE USER IF NOT EXISTS '{DB_USER}'@'%' IDENTIFIED BY '{DB_PASSWORD}'"))
+            conn.execute(text(f"GRANT ALL PRIVILEGES ON `{DB_NAME}`.* TO '{DB_USER}'@'%'"))
             conn.execute(text("FLUSH PRIVILEGES"))
-            logger.info(f"Database {DB_NAME} created successfully")
+            logger.info(f"Database {DB_NAME} created and privileges granted to {DB_USER}")
         else:
             logger.info(f"Database {DB_NAME} already exists")
-    
-    # Now connect to the specific database with proper connection parameters
+
+except Exception as e:
+    logger.error(f"Error initializing database: {e}")
+    raise
+
+finally:
+    root_engine.dispose()
+
+# Now create tables in the target database
+try:
+    # Create engine with MariaDB specific settings
     engine = create_engine(
-        f"{SQLALCHEMY_DATABASE_URI}?connect_timeout=10",
+        SQLALCHEMY_DATABASE_URI,
         pool_pre_ping=True,
-        pool_recycle=3600,  # Recycle connections after 1 hour
-        pool_size=5,
-        max_overflow=10
+        pool_recycle=3600,
+        connect_args={
+            'connect_timeout': 10,
+            'read_timeout': 30,
+            'write_timeout': 30,
+            'ssl': False
+        }
     )
     
-    # Test the connection
-    with engine.connect() as conn:
-        conn.execute(text("SELECT 1"))
-    
-    logger.info("Successfully connected to the database")
-    
-    # Create session factory
+    # Create all tables with MariaDB specific settings
+    logger.info("Creating database tables...")
+    with engine.begin() as connection:
+        # Set session variables for table creation
+        connection.execute(text("SET SESSION sql_require_primary_key=0"))  # Temporarily allow tables without PK
+        Base.metadata.create_all(bind=connection)
+        
+    logger.info("Database tables created successfully")
+
+    # Create a session to add initial data
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    
-except exc.SQLAlchemyError as e:
-    logger.error(f"Failed to connect to the database: {str(e)}")
+    db = SessionLocal()
+
+    try:
+        # Add any initial data here if needed
+        # Example: 
+        # if not db.query(User).filter(User.username == "admin").first():
+        #     admin_user = User(username="admin", email="admin@example.com", hashed_password=..., is_superuser=True)
+        #     db.add(admin_user)
+        #     db.commit()
+        #     logger.info("Created initial admin user")
+        pass
+    except Exception as e:
+        logger.error(f"Error adding initial data: {e}")
+        db.rollback()
+        raise
+    finally:
+        db.close()
+        engine.dispose()
+
+except Exception as e:
+    logger.error(f"Error creating database tables: {e}")
+    if 'engine' in locals():
+        engine.dispose()
     raise
 
 def init_db():
