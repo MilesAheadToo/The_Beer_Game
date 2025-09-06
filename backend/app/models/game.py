@@ -11,6 +11,7 @@ from .base import Base
 if TYPE_CHECKING:
     from .player import Player
     from .user import User
+    from .agent_config import AgentConfig
 
 class GameStatus(str, Enum):
     CREATED = "created"

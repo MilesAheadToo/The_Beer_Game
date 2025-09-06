@@ -27,8 +27,8 @@ RUN npm prune --production
 # Production stage
 FROM nginx:alpine
 
-# Install curl for healthcheck
-RUN apk add --no-cache curl
+# Install wget for healthcheck
+RUN apk add --no-cache wget
 
 # Copy built assets from the build stage
 COPY --from=build /app/build /usr/share/nginx/html
@@ -36,22 +36,15 @@ COPY --from=build /app/build /usr/share/nginx/html
 # Copy nginx config
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# Create a non-root user and set permissions
-RUN adduser -D -g 'www' www \
-    && chown -R www:www /usr/share/nginx/html \
-    && chown -R www:www /var/cache/nginx \
-    && chown -R www:www /var/log/nginx \
-    && chown -R www:www /etc/nginx/conf.d
-
-# Switch to non-root user
-USER www
-
-# Healthcheck
-HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost/ || exit 1
+# Set proper permissions
+RUN chmod -R 755 /usr/share/nginx/html && \
+    chmod 644 /etc/nginx/conf.d/default.conf
 
 # Expose port 80
 EXPOSE 80
 
-# Start nginx
+# Health check
+HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 CMD wget --no-verbose --tries=1 --spider http://localhost/ || exit 1
+
+# Start Nginx server
 CMD ["nginx", "-g", "daemon off;"]

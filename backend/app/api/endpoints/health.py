@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 from typing import Dict, Any
 
 from app.db.session import SessionLocal
@@ -19,8 +20,8 @@ async def health_check(db: Session = Depends(get_db)) -> Dict[str, str]:
     Health check endpoint that verifies database connectivity.
     """
     try:
-        # Test database connection
-        db.execute("SELECT 1")
+        # Test database connection with text() to avoid deprecation warning
+        db.execute(text("SELECT 1"))
         return {"status": "healthy", "database": "connected"}
     except Exception as e:
         raise HTTPException(

@@ -24,13 +24,13 @@ CREATE TABLE IF NOT EXISTS users (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Insert default users if they don't exist
--- Password for all users is 'password' (hashed with bcrypt)
+-- Password for all users is 'Daybreak@2025' (hashed with bcrypt)
 INSERT IGNORE INTO users (username, email, hashed_password, full_name, is_superuser, is_active) VALUES
-('admin', 'admin@daybreak.ai', '\$2b\$12\$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'System Administrator', TRUE, TRUE),
-('Retailer', 'retailer@daybreak.ai', '\$2b\$12\$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Retailer User', FALSE, TRUE),
-('Distributor', 'distributor@daybreak.ai', '\$2b\$12\$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Distributor User', FALSE, TRUE),
-('Manufacturer', 'manufacturer@daybreak.ai', '\$2b\$12\$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Manufacturer User', FALSE, TRUE),
-('Supplier', 'supplier@daybreak.ai', '\$2b\$12\$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Supplier User', FALSE, TRUE)
+('admin', 'admin@daybreak.ai', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'System Administrator', TRUE, TRUE),
+('Retailer', 'retailer@daybreak.ai', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Retailer User', FALSE, TRUE),
+('Distributor', 'distributor@daybreak.ai', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Distributor User', FALSE, TRUE),
+('Manufacturer', 'manufacturer@daybreak.ai', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Manufacturer User', FALSE, TRUE),
+('Supplier', 'supplier@daybreak.ai', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Supplier User', FALSE, TRUE)
 ON DUPLICATE KEY UPDATE 
     email = VALUES(email),
     full_name = VALUES(full_name),

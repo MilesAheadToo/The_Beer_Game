@@ -87,15 +87,15 @@ def init_db(drop_tables=False):
         if user_count == 0:
             from app.core.security import get_password_hash
             test_user = User(
-                username="testuser",
-                email="test@example.com",
-                hashed_password=get_password_hash("testpassword"),
+                username="admin",
+                email="admin@daybreak.ai",
+                hashed_password=get_password_hash("Daybreak@2025"),
                 full_name="Test User",
                 is_active=True
             )
             db.add(test_user)
             db.commit()
-            print("Created test user: testuser / testpassword")
+            print("Created test user: admin / Daybreak@2025")
         
     except Exception as e:
         print(f"Error accessing database: {e}")

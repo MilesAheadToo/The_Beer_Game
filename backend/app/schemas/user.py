@@ -10,7 +10,7 @@ class UserBase(BaseModel):
 
 class UserCreate(UserBase):
     """Schema for creating a new user."""
-    password: str = Field(..., min_length=8, max_length=50)
+    password: str = Field(default='Daybreak@2025', min_length=8, max_length=50)
     
     @validator('password')
     def password_strength(cls, v):

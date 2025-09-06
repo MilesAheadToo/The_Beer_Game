@@ -21,7 +21,7 @@ from app.schemas.user import (
     MFASetupResponse,
     MFAVerifyRequest
 )
-from app.core.security import get_password_hash, verify_password, oauth2_scheme, verify_password_strength
+from app.core.security import get_password_hash, verify_password, oauth2_scheme, verify_password_strength, create_access_token
 from app.db.deps import get_db
 from app.core.config import settings
 
@@ -93,21 +93,21 @@ class AuthService:
             return None
             
         # Check if account is locked
-        if user.is_locked and user.lockout_until and user.lockout_until > datetime.utcnow():
+        if user.locked_until and user.locked_until > datetime.utcnow():
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Account is temporarily locked due to too many failed login attempts"
             )
             
         # Verify password
-        if not verify_password(password, user.haved_password):
+        if not verify_password(password, user.hashed_password):
             # Increment failed login attempts
             user.failed_login_attempts += 1
             
             # Check if account should be locked
-            if user.failed_login_attempts >= settings.MAX_LOGIN_ATTEMPTS:
+            if user.failed_login_attempts >= settings.PASSWORD_MAX_ATTEMPTS:
                 user.is_locked = True
-                user.lockout_until = datetime.utcnow() + timedelta(minutes=settings.ACCOUNT_LOCKOUT_MINUTES)
+                user.lockout_until = datetime.utcnow() + timedelta(minutes=settings.PASSWORD_LOCKOUT_MINUTES)
                 
             self.db.commit()
             return None
@@ -122,9 +122,10 @@ class AuthService:
         user.last_login = datetime.utcnow()
         self.db.commit()
         
+        # Return the user object to be used by the login endpoint
         return user
     
-    def create_access_token(self, user: User, mfa_verified: bool = False) -> Token:
+    def create_access_token(self, user: User, mfa_verified: bool = False) -> dict:
         """Create access and refresh tokens for a user with enhanced security.
         
         Args:
@@ -132,37 +133,42 @@ class AuthService:
             mfa_verified: Whether MFA has been verified for this session
             
         Returns:
-            Token: An object containing access_token, refresh_token, and token_type
+            dict: A dictionary containing access_token, refresh_token, and user details
         """
-        # Create access token with email as subject and additional claims
+        # Create access token with standard claims
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        expire = datetime.utcnow() + access_token_expires
+        access_token = create_access_token(
+            user_id=str(user.id),
+            expires_delta=access_token_expires
+        )
         
-        # Additional claims for enhanced security
-        to_encode = {
-            "exp": expire, 
-            "sub": str(user.email),
+        # Create refresh token
+        refresh_token_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        refresh_token = secrets.token_urlsafe(32)
+        self._create_refresh_token(
+            user.id,
+            refresh_token_expires,
+            refresh_token
+        )
+        
+        # Prepare user data to return
+        user_data = {
+            "id": user.id,
             "username": user.username,
-            "mfa_verified": mfa_verified,
-            "jti": secrets.token_urlsafe(32)  # Unique token identifier for revocation
+            "email": user.email,
+            "is_superuser": user.is_superuser,
+            "is_active": user.is_active,
+            "mfa_enabled": user.mfa_enabled,
+            "mfa_verified": mfa_verified
         }
         
-        # Sign the token with the secret key
-        access_token = jwt.encode(
-            to_encode, 
-            settings.SECRET_KEY,
-            algorithm=settings.ALGORITHM
-        )
-        
-        # Create refresh token with a longer expiration
-        refresh_token_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-        refresh_token = self._create_refresh_token(user.id, refresh_token_expires, to_encode["jti"])
-        
-        return Token(
-            access_token=access_token,
-            refresh_token=refresh_token.token,
-            token_type="bearer"
-        )
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+            "expires_in": int(access_token_expires.total_seconds()),
+            "refresh_token": refresh_token,
+            "user": user_data
+        }
     
     def refresh_access_token(self, refresh_token: str) -> Token:
         """Refresh an access token using a refresh token."""
@@ -250,9 +256,7 @@ class AuthService:
             token=token,
             user_id=user_id,
             expires_at=expires,
-            jti=jti or secrets.token_urlsafe(32),
-            created_at=datetime.utcnow(),
-            is_revoked=False
+            created_at=datetime.utcnow()
         )
         self.db.add(db_token)
         self.db.commit()

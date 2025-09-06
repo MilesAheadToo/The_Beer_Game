@@ -111,7 +111,8 @@ origins = [
     "http://localhost:8000",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:8000",
-    settings.FRONTEND_URL
+    settings.FRONTEND_URL,
+    "*"  # For development only - restrict in production
 ]
 
 app.add_middleware(
@@ -120,7 +121,8 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"]
+    expose_headers=["*"],
+    max_age=600  # Cache preflight requests for 10 minutes
 )
 
 # Include API routers
@@ -155,7 +157,8 @@ async def health_check():
     try:
         # Check database connection
         db = SessionLocal()
-        db.execute("SELECT 1")
+        from sqlalchemy import text
+        db.execute(text("SELECT 1"))
         db.close()
         return {
             "status": "healthy",

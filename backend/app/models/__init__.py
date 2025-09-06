@@ -18,7 +18,11 @@ from .user import User, user_games
 
 # 2. Models that depend on User
 from .player import Player, PlayerRole, PlayerType, PlayerStrategy
+
+# 3. Game-related models
+from .supervisor_action import SupervisorAction
 from .game import Game, GameStatus, Round, PlayerAction
+from .agent_config import AgentConfig
 from .auth_models import PasswordHistory, PasswordResetToken
 from .session import TokenBlacklist, UserSession
 
@@ -44,6 +48,7 @@ __all__ = [
     'RefreshToken',
     'Player',
     'Game',
+    'AgentConfig',
     'PasswordHistory',
     'PasswordResetToken',
     'TokenBlacklist',

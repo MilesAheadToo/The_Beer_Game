@@ -1,3 +1,4 @@
+import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 from jose import JWTError, jwt
@@ -42,22 +43,53 @@ def verify_password_strength(password: str) -> bool:
         return False
     return True
 
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    """Create a JWT access token."""
-    to_encode = data.copy()
+def create_access_token(user_id: str, expires_delta: Optional[timedelta] = None) -> str:
+    """Create a JWT access token with standard claims.
+    
+    Args:
+        user_id: The user's unique identifier
+        expires_delta: Optional timedelta for token expiration
+        
+    Returns:
+        str: Encoded JWT token
+    """
+    to_encode = {
+        "sub": str(user_id),  # Subject (whom the token refers to)
+        "iat": datetime.utcnow(),  # Issued at
+        "jti": str(uuid.uuid4()),  # Unique identifier for the token
+    }
+    
+    # Set expiration (default 15 minutes if not specified)
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:
         expire = datetime.utcnow() + timedelta(minutes=15)
     to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    
+    # Create token with the secret key
+    encoded_jwt = jwt.encode(
+        to_encode,
+        settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM
+    )
     return encoded_jwt
 
 async def get_current_user(
     db: Session = Depends(get_db),
     token: str = Depends(oauth2_scheme)
 ):
-    """Get the current user from the JWT token."""
+    """Get the current user from the JWT token.
+    
+    Args:
+        db: Database session
+        token: JWT token from Authorization header
+        
+    Returns:
+        User: The authenticated user
+        
+    Raises:
+        HTTPException: If token is invalid or user not found
+    """
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -65,22 +97,49 @@ async def get_current_user(
     )
     
     try:
+        # Decode the token
         payload = jwt.decode(
             token,
             settings.SECRET_KEY,
-            algorithms=[settings.ALGORITHM]
+            algorithms=[settings.ALGORITHM],
+            options={"verify_aud": False}  # Skip audience verification if not used
         )
-        user_id: str = payload.get("sub")
-        if user_id is None:
+        
+        # Get user ID from subject claim
+        user_id = payload.get("sub")
+        if not user_id:
             raise credentials_exception
-    except JWTError:
-        raise credentials_exception
+            
+        # Get token expiration
+        expire = payload.get("exp")
+        if datetime.utcnow() > datetime.fromtimestamp(expire, timezone.utc):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has expired",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            
+    except JWTError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
-    # In a real application, you would fetch the user from the database here
-    # For now, we'll return a simple user object
-    user = {"id": user_id, "username": "testuser"}
-    if user is None:
+    # Fetch user from database
+    from app.models.user import User
+    user = db.query(User).filter(User.id == int(user_id)).first()
+    
+    if not user:
         raise credentials_exception
+        
+    # Check if user is active
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Inactive user"
+        )
+        
     return user
 
 async def get_current_active_user(current_user: dict = Depends(get_current_user)):

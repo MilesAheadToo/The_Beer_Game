@@ -11,10 +11,10 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Get database connection details from environment variables
-DB_USER = os.getenv("MARIADB_USER")
-DB_PASSWORD = os.getenv("MARIADB_PASSWORD")
-DB_HOST = os.getenv("MARIADB_HOST", "db")
-DB_NAME = os.getenv("MARIADB_DATABASE")
+DB_USER = os.getenv("MYSQL_USER")
+DB_PASSWORD = os.getenv("MYSQL_PASSWORD")
+DB_HOST = os.getenv("MYSQL_SERVER", "db")
+DB_NAME = os.getenv("MYSQL_DB")
 
 # Log the database connection details for debugging
 logger.info(f"Database connection details - User: {DB_USER}, Host: {DB_HOST}, DB: {DB_NAME}")
@@ -22,9 +22,14 @@ logger.info(f"Database connection details - User: {DB_USER}, Host: {DB_HOST}, DB
 if not all([DB_USER, DB_PASSWORD, DB_NAME]):
     raise ValueError("Missing required database environment variables")
 
+# URL encode the password to handle special characters
+from urllib.parse import quote_plus
+
 # Construct the database URI with MariaDB dialect
-SQLALCHEMY_DATABASE_URI = f"mariadb+pymysql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}/{DB_NAME}?charset=utf8mb4"
+encoded_password = quote_plus(DB_PASSWORD)
+SQLALCHEMY_DATABASE_URI = f"mariadb+pymysql://{DB_USER}:{encoded_password}@{DB_HOST}/{DB_NAME}?charset=utf8mb4"
 logger.info(f"Connecting to MariaDB: {DB_USER}@{DB_HOST}/{DB_NAME}")
+logger.debug(f"Database URI: mariadb+pymysql://{DB_USER}:***@{DB_HOST}/{DB_NAME}?charset=utf8mb4")
 
 # Create engine with connection pooling and error handling
 engine = create_engine(
