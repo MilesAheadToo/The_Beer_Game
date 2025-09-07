@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime
 
 class TimeSeriesPoint(BaseModel):
@@ -9,8 +9,8 @@ class TimeSeriesPoint(BaseModel):
     order: float = Field(0, description="Current order quantity")
     cost: float = Field(0, description="Accumulated cost for this week")
     backlog: float = Field(0, description="Current backlog amount")
-    demand: float | None = Field(None, description="Demand for this week (if applicable)")
-    supply: float | None = Field(None, description="Supply for this week (if applicable)")
+    demand: Optional[float] = Field(None, description="Demand for this week (if applicable)")
+    supply: Optional[float] = Field(None, description="Supply for this week (if applicable)")
 
 class PlayerMetrics(BaseModel):
     """Key performance metrics for a player."""

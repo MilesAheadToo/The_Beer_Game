@@ -1,7 +1,10 @@
 from datetime import datetime
-from typing import Optional, List, TYPE_CHECKING
-from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, Table
+from typing import Optional, List, TYPE_CHECKING, Any, Dict
+import json
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, Table, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSONB
+from pydantic import BaseModel, EmailStr, Field
 
 from .base import Base
 
@@ -22,17 +25,62 @@ user_games = Table(
     Column('game_id', Integer, ForeignKey('games.id'), primary_key=True)
 )
 
+class UserBase(BaseModel):
+    """Base Pydantic model for User data validation."""
+    email: EmailStr
+    username: Optional[str] = None
+    full_name: Optional[str] = None
+    is_active: bool = True
+    is_superuser: bool = False
+    roles: List[str] = []
+
+    class Config:
+        from_attributes = True  # Updated from orm_mode in Pydantic v2
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None,
+        }
+
+class UserCreate(UserBase):
+    """Model for creating a new user."""
+    password: str = Field(..., min_length=8)
+
+class UserUpdate(UserBase):
+    """Model for updating an existing user."""
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None
+
+class UserInDB(UserBase):
+    """Model for user data in the database."""
+    id: int
+    hashed_password: str
+    created_at: datetime
+    updated_at: datetime
+
+class UserPublic(UserBase):
+    """Public user model (excludes sensitive data)."""
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    last_login: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None,
+        }
+
 class User(Base):
     """User model for authentication and authorization."""
     __tablename__ = "users"
     
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    username: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
+    username: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=True)
     email: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
-    hashed_password: Mapped[str] = mapped_column(String(100), nullable=False)
+    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     full_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
+    roles: Mapped[Optional[List[str]]] = mapped_column(JSONB, default=list, nullable=True)
     last_login: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_password_change: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
@@ -44,6 +92,35 @@ class User(Base):
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
     )
     
+    # Helper methods
+    @property
+    def is_authenticated(self) -> bool:
+        """Check if the user is authenticated."""
+        return self.is_active
+
+    @property
+    def is_admin(self) -> bool:
+        """Check if the user has admin role."""
+        return "admin" in (self.roles or [])
+
+    def has_role(self, role: str) -> bool:
+        """Check if the user has a specific role."""
+        return self.roles and role in self.roles
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert user object to dictionary."""
+        return {
+            "id": self.id,
+            "email": self.email,
+            "username": self.username,
+            "full_name": self.full_name,
+            "is_active": self.is_active,
+            "is_superuser": self.is_superuser,
+            "roles": self.roles or [],
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
     # Relationships
     games: Mapped[List["Game"]] = relationship(
         "Game", 

@@ -1,165 +1,111 @@
-import { createContext, useContext, useEffect, useState, useCallback, useRef } from "react";
-import api from '../services/api';
-
-const REFRESH_THRESHOLD = 5 * 60 * 1000; // 5 minutes before token expires
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { toast } from 'react-toastify';
+import authService from '../services/authService';
 
 const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
 
 export function AuthProvider({ children }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(() => 
-    !!localStorage.getItem("access_token")
-  );
-  const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
-  const refreshTimeout = useRef();
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const navigate = useNavigate();
 
-  const login = useCallback(({ access_token, token_type = "Bearer", refresh_token, expires_in }) => {
-    localStorage.setItem("access_token", access_token);
-    localStorage.setItem("token_type", token_type.replace(/^bearer$/i, "Bearer"));
-    if (refresh_token) localStorage.setItem("refresh_token", refresh_token);
-    
-    // Set token expiration time (default to 1 hour if not provided)
-    const expiresAt = Date.now() + (expires_in || 3600) * 1000;
-    localStorage.setItem("expires_at", expiresAt.toString());
-    
-    scheduleTokenRefresh(expiresAt);
-    setIsAuthenticated(true);
-    
-    // Fetch user profile
-    fetchUserProfile();
-  }, [fetchUserProfile, scheduleTokenRefresh]);
+  const isAuthenticated = !!user;
 
-  const logout = useCallback(() => {
-    clearTimeout(refreshTimeout.current);
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("token_type");
-    localStorage.removeItem("refresh_token");
-    localStorage.removeItem("expires_at");
-    setUser(null);
-    setIsAuthenticated(false);
-  }, []);
-
-  const fetchUserProfile = async () => {
+  const login = async (credentials) => {
     try {
-      const userData = await api.get("/users/me");
+      setLoading(true);
+      setError(null);
+      
+      // Attempt login - authService will handle the cookie
+      const userData = await authService.login(credentials);
       setUser(userData);
-    } catch (error) {
-      console.error('Failed to fetch user profile:', error);
-      // Don't log out on profile fetch failure
+      
+      toast.success('Successfully logged in');
+      return userData;
+    } catch (err) {
+      console.error('Login error:', err);
+      const errorMessage = err.response?.data?.detail || 'Login failed. Please check your credentials.';
+      setError(errorMessage);
+      toast.error(errorMessage);
+      throw err;
+    } finally {
+      setLoading(false);
     }
   };
 
-  const refreshToken = useCallback(async () => {
-    const refreshToken = localStorage.getItem("refresh_token");
-    if (!refreshToken) {
-      logout();
-      return;
-    }
-
+  const logout = async (options = {}) => {
+    const { redirect = true, silent = false } = options;
+    
     try {
-      const tokens = await api.request("/auth/refresh", {
-        method: 'POST',
-        body: {
-          refresh_token: refreshToken,
-          grant_type: "refresh_token"
-        }
-      });
-
-      login({
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token || refreshToken,
-        expires_in: tokens.expires_in
-      });
-    } catch (error) {
-      console.error('Failed to refresh token:', error);
-      logout();
-    }
-  }, [login, logout]);
-
-  const scheduleTokenRefresh = useCallback((expiresAt) => {
-    const now = Date.now();
-    const expiresIn = expiresAt - now;
-    
-    // Clear any existing timeout
-    clearTimeout(refreshTimeout.current);
-    
-    if (expiresIn <= 0) {
-      logout();
-      return;
-    }
-    
-    // Schedule refresh 5 minutes before expiration
-    const refreshIn = Math.max(expiresIn - REFRESH_THRESHOLD, 1000);
-    refreshTimeout.current = setTimeout(refreshToken, refreshIn);
-  }, [logout, refreshToken]);
-
-  // Check auth state on mount
-  useEffect(() => {
-    const checkAuth = async () => {
-      const token = localStorage.getItem("access_token");
-      const expiresAt = localStorage.getItem("expires_at");
-      
-      if (!token || !expiresAt) {
-        setLoading(false);
-        return;
+      await authService.logout();
+      if (!silent) {
+        toast.success('You have been logged out successfully');
       }
-      
-      const expiresIn = parseInt(expiresAt) - Date.now();
-      
-      if (expiresIn <= 0) {
-        // Token expired, try to refresh
-        try {
-          await refreshToken();
-        } catch (error) {
-          logout();
-        }
-      } else {
-        // Schedule refresh
-        scheduleTokenRefresh(parseInt(expiresAt));
-        // Fetch user profile
-        await fetchUserProfile();
-      }
-      
+    } catch (err) {
+      console.error('Logout error:', err);
+    } finally {
+      // Clear user data
+      setUser(null);
       setLoading(false);
-    };
-    
-    checkAuth();
-    
-    // Cleanup on unmount
-    return () => clearTimeout(refreshTimeout.current);
-  }, [refreshToken, logout, scheduleTokenRefresh, fetchUserProfile]);
+      if (redirect && !window.location.pathname.startsWith('/login')) {
+        navigate('/login', { replace: true });
+      }
+    }
+  };
 
-  // Keep state in sync if another tab logs in/out
+  // Check auth status on mount
   useEffect(() => {
-    const onStorage = (e) => {
-      if (e.key === "access_token") {
-        const isAuthenticated = !!localStorage.getItem("access_token");
-        setIsAuthenticated(isAuthenticated);
-        if (isAuthenticated) {
-          fetchUserProfile();
-        } else {
-          setUser(null);
+    let isMounted = true;
+
+    const checkAuth = async () => {
+      try {
+        const userData = await authService.getCurrentUser();
+        if (isMounted) {
+          setUser(userData);
+          setError(null);
+        }
+      } catch (err) {
+        if (isMounted) {
+          console.error('Auth check failed:', err);
+          await logout({ silent: true });
+        }
+      } finally {
+        if (isMounted) {
+          setLoading(false);
         }
       }
     };
-    
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
+
+    checkAuth();
+
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  return (
-    <AuthContext.Provider value={{
+  const value = useMemo(
+    () => ({
+      user,
       isAuthenticated,
       loading,
-      user,
+      error,
       login,
       logout,
-      refreshToken
-    }}>
-      {children}
+      refreshUser: () => authService.getCurrentUser().then(setUser),
+    }),
+    [user, isAuthenticated, loading, error]
+  );
+
+  return (
+    <AuthContext.Provider value={value}>
+      {!loading ? children : (
+        <div className="flex items-center justify-center min-h-screen">
+          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+        </div>
+      )}
     </AuthContext.Provider>
   );
 }
-
-export default AuthContext;

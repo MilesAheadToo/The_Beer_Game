@@ -88,5 +88,3 @@ export const formatChartData = (timeSeries, role) => {
   }));
 };
 
-// Using named exports only for better tree-shaking and consistency
-export { getHumanDashboard, formatChartData };

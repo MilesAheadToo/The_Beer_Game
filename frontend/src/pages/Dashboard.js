@@ -10,7 +10,6 @@ import {
   Heading,
   useColorModeValue,
   VStack,
-  HStack,
   Icon,
   Flex,
   Card,
@@ -19,8 +18,8 @@ import {
 } from '@chakra-ui/react';
 import { FiPlus } from 'react-icons/fi';
 import PageLayout from '../components/PageLayout';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import api from '../services/api';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import FilterBar from '../components/FilterBar';
 import KPIStat from '../components/KPIStat';
 import SkuTable from '../components/SkuTable';
 
@@ -70,8 +69,10 @@ const Dashboard = () => {
   
   // State
   const [loading, setLoading] = useState(true);
+  const [gameResult, setGameResult] = useState(null);
   const navigate = useNavigate();
   const query = useQuery();
+  // Keep gameId for potential future use
   const gameId = query.get('gameId');
 
 

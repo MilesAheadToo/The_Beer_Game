@@ -1,277 +1,163 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
-from typing import Any, List, Optional
 
 from app.core.config import settings
-from app.core.deps import get_db, get_current_active_user
-from app.schemas.user import (
-    UserCreate, User, Token, UserUpdate, UserPasswordChange,
-    MFASetupResponse, MFAVerifyRequest, MFARecoveryCodes
+from app.core.security import (
+    create_access_token,
+    get_password_hash,
+    verify_password,
+    set_auth_cookies,
+    clear_auth_cookies,
+    get_current_user,
+    get_current_active_user,
 )
-from app.services.auth_service import AuthService
+from app.db.session import get_db
+from app.models.user import User, UserCreate, UserInDB, UserPublic, UserUpdate, UserBase, UserPasswordChange
+from app.repositories.users import (
+    create_user as create_user_repo,
+    get_user_by_email,
+    update_user as update_user_repo,
+)
+from app.services.auth_service import AuthService, get_auth_service
+from app.schemas.mfa import MFAVerifyRequest
 
 router = APIRouter()
 
-def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
-    """Dependency to get an instance of AuthService."""
-    return AuthService(db)
+class TokenResponse(BaseModel):
+    """Response model for authentication tokens."""
+    access_token: str
+    token_type: str = "bearer"
+    user: UserPublic
 
-@router.post("/register", response_model=User, status_code=status.HTTP_201_CREATED)
-def register(
-    user_in: UserCreate,
-    auth_service: AuthService = Depends(get_auth_service)
-) -> Any:
-    """
-    Register a new user.
-    
-    - **username**: Must be unique, 3-50 characters, alphanumeric with underscores or hyphens
-    - **email**: Must be a valid email address
-    - **password**: Must be at least 8 characters, with at least one uppercase, one lowercase, and one number
-    - **full_name**: Optional full name
-    """
-    try:
-        return auth_service.create_user(user_in)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+# Alias Token to TokenResponse for backward compatibility
+Token = TokenResponse
+
+class LoginRequest(BaseModel):
+    """Request model for login endpoint."""
+    email: EmailStr
+    password: str = Field(..., min_length=8)
+
+class RegisterRequest(UserCreate):
+    """Request model for registration endpoint."""
+    pass
 
 @router.post("/login", response_model=Token)
 async def login(
     request: Request,
+    response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
     auth_service: AuthService = Depends(get_auth_service)
 ) -> Any:
     """
     OAuth2 compatible token login, get an access token for future requests.
     
-    - **username**: Your username or email
+    - **username**: Your email
     - **password**: Your password
+    - **mfa_code**: MFA code if MFA is enabled (optional)
+    - **device_info**: Device information for audit logging (optional)
     
-    Returns an access token and refresh token. If MFA is enabled for the user,
-    returns a temporary token that can only be used for MFA verification.
+    Returns an access token in the response body and sets an HTTP-only refresh token cookie.
     """
-    try:
-        # Get client IP for rate limiting and logging
-        client_ip = request.client.host if request.client else "unknown"
-        print(f"Attempting to authenticate user: {form_data.username}")
-        user = auth_service.authenticate_user(
-            username=form_data.username,
-            password=form_data.password,
-            request=request
-        )
-        if not user:
-            print(f"Authentication failed for user: {form_data.username}")
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect username or password",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-        print(f"User {user.id} authenticated successfully")
-        
-        # If MFA is enabled, return a temporary token that can only be used for MFA verification
-        if user.mfa_enabled and user.mfa_secret:
-            # Create a temporary token with a short expiration
-            temp_token = auth_service.create_access_token(user, mfa_verified=False)
-            return Token(
-                access_token=temp_token.access_token,
-                refresh_token=temp_token.refresh_token,
-                token_type="bearer",
-                requires_mfa=True
-            )
-            
-        return auth_service.create_access_token(user, mfa_verified=True)
-    except Exception as e:
-        print(f"Error during login: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An error occurred during login: {str(e)}",
-        )
+    # Authenticate user
+    user = await auth_service.authenticate_user(
+        email=form_data.username,  # username is actually email
+        password=form_data.password,
+        mfa_code=form_data.client_secret if hasattr(form_data, 'client_secret') else None,
+        device_info=request.headers.get('User-Agent')
+    )
+    
+    # Generate tokens
+    tokens = await auth_service.create_tokens(user)
+    
+    # Set HTTP-only cookies
+    response.set_cookie(
+        key="refresh_token",
+        value=tokens.refresh_token,
+        httponly=True,
+        secure=not settings.DEBUG,
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+    )
+    
+    # Return access token and user info
+    return TokenResponse(
+        access_token=tokens.access_token,
+        token_type="bearer",
+        user=UserPublic.from_orm(user)
+    )
 
-@router.post("/mfa/setup", response_model=MFASetupResponse)
-def setup_mfa(
-    current_user: User = Depends(get_current_active_user),
-    auth_service: AuthService = Depends(get_auth_service)
+@router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
+async def register(
+    user_in: UserCreate,
+    response: Response,
+    db: Session = Depends(get_db)
 ) -> Any:
     """
-    Set up Multi-Factor Authentication for the current user.
+    Register a new user.
     
-    Generates a new MFA secret and returns it along with a provisioning URI
-    that can be used with authenticator apps like Google Authenticator.
+    - **email**: Must be a valid email address
+    - **password**: Must be at least 8 characters, with at least one uppercase, one lowercase, and one number
+    - **full_name**: User's full name
+    """
+    # Check if user with this email already exists
+    db_user = await get_user_by_email(db, user_in.email)
+    if db_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    
+    # Create new user
+    hashed_password = get_password_hash(user_in.password)
+    db_user = User(
+        email=user_in.email,
+        hashed_password=hashed_password,
+        full_name=user_in.full_name,
+        is_active=True,
+        is_superuser=False
+    )
+    
+    db.add(db_user)
+    await db.commit()
+    await db.refresh(db_user)
+    
+    return db_user
+
+@router.post("/logout")
+async def logout(
+    response: Response,
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Log out the current user by clearing authentication cookies.
     
     Requires authentication.
     """
-    if current_user.mfa_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="MFA is already enabled for this account"
-        )
-        
-    # Generate a new MFA secret
-    secret = auth_service.generate_mfa_secret(current_user)
-    
-    # Generate a provisioning URI for the authenticator app
-    uri = auth_service.generate_mfa_uri(current_user, secret)
-    
-    # Generate recovery codes
-    recovery_codes = auth_service.generate_recovery_codes(current_user)
-    
-    return {
-        "secret": secret,
-        "uri": uri,
-        "recovery_codes": recovery_codes
-    }
+    clear_auth_cookies(response)
+    return {"message": "Successfully logged out"}
 
-@router.post("/mfa/verify", response_model=Token)
-def verify_mfa(
-    mfa_verify: MFAVerifyRequest,
-    current_user: User = Depends(get_current_active_user),
-    auth_service: AuthService = Depends(get_auth_service)
-) -> Any:
-    """
-    Verify an MFA code and complete MFA setup.
-    
-    - **code**: The MFA code from the authenticator app
-    
-    Returns a new access token and refresh token if verification is successful.
-    
-    Requires authentication and an unverified MFA setup.
-    """
-    if current_user.mfa_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="MFA is already enabled for this account"
-        )
-        
-    if not current_user.mfa_secret:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="MFA is not set up for this account"
-        )
-    
-    # Verify the MFA code
-    if not auth_service.enable_mfa(current_user, mfa_verify.code):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid MFA code"
-        )
-    
-    # Generate new tokens with MFA verified
-    return auth_service.create_access_token(current_user, mfa_verified=True)
-
-@router.post("/mfa/disable", status_code=status.HTTP_204_NO_CONTENT)
-def disable_mfa(
-    current_user: User = Depends(get_current_active_user),
-    auth_service: AuthService = Depends(get_auth_service)
-) -> None:
-    """
-    Disable MFA for the current user.
-    
-    Requires authentication and MFA to be enabled.
-    """
-    if not current_user.mfa_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="MFA is not enabled for this account"
-        )
-    
-    auth_service.disable_mfa(current_user)
-
-@router.post("/mfa/recovery-codes", response_model=MFARecoveryCodes)
-def generate_recovery_codes(
-    current_user: User = Depends(get_current_active_user),
-    auth_service: AuthService = Depends(get_auth_service)
-) -> Any:
-    """
-    Generate new MFA recovery codes.
-    
-    This will invalidate any previously generated recovery codes.
-    
-    Requires authentication and MFA to be enabled.
-    """
-    if not current_user.mfa_enabled:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="MFA is not enabled for this account"
-        )
-    
-    recovery_codes = auth_service.generate_recovery_codes(current_user)
-    return {"recovery_codes": recovery_codes}
-
-@router.post("/mfa/verify-recovery", response_model=Token)
-def verify_recovery_code(
-    mfa_verify: MFAVerifyRequest,
-    auth_service: AuthService = Depends(get_auth_service)
-) -> Any:
-    """
-    Verify a recovery code and get a new access token.
-    
-    - **code**: The recovery code to verify
-    
-    Returns a new access token and refresh token if the recovery code is valid.
-    """
-    # Get user from the recovery code
-    user = auth_service.verify_recovery_code(mfa_verify.code)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired recovery code"
-        )
-    
-    # Generate new tokens with MFA verified
-    return auth_service.create_access_token(user, mfa_verified=True)
-
-@router.post("/refresh-token", response_model=Token)
-def refresh_token(
-    refresh_token: str,
-    auth_service: AuthService = Depends(get_auth_service)
-) -> Any:
-    """
-    Refresh an access token using a refresh token.
-    
-    - **refresh_token**: A valid refresh token
-    
-    Returns a new access token and the same refresh token.
-    """
-    try:
-        return auth_service.refresh_access_token(refresh_token)
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=str(e),
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-@router.get("/me", response_model=User)
-def read_users_me(
+@router.get("/me", response_model=UserPublic)
+async def read_users_me(
     current_user: User = Depends(get_current_active_user)
-) -> Any:
+):
     """
     Get current user information.
     
     Requires authentication.
     """
-    return {
-        "id": current_user.id,
-        "username": current_user.username,
-        "email": current_user.email,
-        "full_name": current_user.full_name,
-        "is_active": current_user.is_active,
-        "is_superuser": current_user.is_superuser,
-        "created_at": current_user.created_at,
-        "updated_at": current_user.updated_at
-    }
+    return current_user
 
-@router.put("/me", response_model=User)
-def update_user_me(
+@router.put("/me", response_model=UserPublic)
+async def update_user_me(
     user_in: UserUpdate,
     current_user: User = Depends(get_current_active_user),
     auth_service: AuthService = Depends(get_auth_service)
-) -> Any:
+):
     """
     Update current user information.
     
@@ -281,14 +167,14 @@ def update_user_me(
     
     Requires authentication.
     """
-    return auth_service.update_user(current_user.id, user_in)
+    return await auth_service.update_user(current_user.id, user_in)
 
-@router.post("/change-password", response_model=User)
-def change_password(
+@router.post("/change-password")
+async def change_password(
     password_change: UserPasswordChange,
     current_user: User = Depends(get_current_active_user),
     auth_service: AuthService = Depends(get_auth_service)
-) -> Any:
+):
     """
     Change the current user's password.
     
@@ -297,26 +183,127 @@ def change_password(
     
     Requires authentication.
     """
-    try:
-        return auth_service.change_password(
-            current_user.id,
-            password_change.current_password,
-            password_change.new_password
-        )
-    except ValueError as e:
+    await auth_service.change_password(
+        user=current_user,
+        current_password=password_change.current_password,
+        new_password=password_change.new_password
+    )
+    return {"message": "Password updated successfully"}
+
+# MFA Endpoints
+@router.post("/mfa/setup")
+async def setup_mfa(
+    current_user: User = Depends(get_current_active_user),
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """
+    Set up Multi-Factor Authentication for the current user.
+    
+    Generates a new MFA secret and returns it along with a provisioning URI
+    that can be used with authenticator apps like Google Authenticator.
+    
+    Requires authentication.
+    """
+    return await auth_service.setup_mfa(current_user)
+
+@router.post("/mfa/verify")
+async def verify_mfa(
+    mfa_verify: MFAVerifyRequest,
+    current_user: User = Depends(get_current_active_user),
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """
+    Verify an MFA code and complete MFA setup.
+    
+    - **code**: The MFA code from the authenticator app
+    
+    Returns a new access token and refresh token if verification is successful.
+    
+    Requires authentication and an unverified MFA setup.
+    """
+    return await auth_service.verify_mfa(current_user, mfa_verify.code)
+
+@router.post("/mfa/disable")
+async def disable_mfa(
+    current_user: User = Depends(get_current_active_user),
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """
+    Disable MFA for the current user.
+    
+    Requires authentication and MFA to be enabled.
+    """
+    await auth_service.disable_mfa(current_user)
+    return {"message": "MFA disabled successfully"}
+
+@router.post("/mfa/recovery-codes")
+async def generate_recovery_codes(
+    current_user: User = Depends(get_current_active_user),
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """
+    Generate new MFA recovery codes.
+    
+    This will invalidate any previously generated recovery codes.
+    
+    Requires authentication and MFA to be enabled.
+    """
+    return await auth_service.generate_recovery_codes(current_user)
+
+@router.post("/mfa/recover")
+async def verify_recovery_code(
+    mfa_verify: MFAVerifyRequest,
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """
+    Verify a recovery code and get a new access token.
+    
+    - **code**: The recovery code to verify
+    
+    Returns a new access token and refresh token if the recovery code is valid.
+    """
+    return await auth_service.verify_recovery_code(mfa_verify.code)
+
+@router.post("/refresh-token")
+async def refresh_token(
+    request: Request,
+    response: Response,
+    auth_service: AuthService = Depends(get_auth_service)
+):
+    """
+    Refresh the access token using the refresh token from cookie.
+    
+    Returns a new access token and updates the refresh token in the HTTP-only cookie.
+    """
+    refresh_token = request.cookies.get("refresh_token")
+    if not refresh_token:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not refresh access token"
         )
+    
+    tokens = await auth_service.refresh_tokens(refresh_token)
+    
+    # Set the new refresh token in HTTP-only cookie
+    response.set_cookie(
+        key="refresh_token",
+        value=tokens.refresh_token,
+        httponly=True,
+        secure=not settings.DEBUG,
+        samesite="lax",
+        max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
+    )
+    
+    return {"access_token": tokens.access_token, "token_type": "bearer"}
 
 # Admin-only endpoints
-@router.get("/users/", response_model=list[User])
-def read_users(
+@router.get("/users/", response_model=List[UserPublic])
+async def read_users(
     skip: int = 0,
     limit: int = 100,
     current_user: User = Depends(get_current_active_user),
     auth_service: AuthService = Depends(get_auth_service)
-) -> Any:
+):
     """
     Retrieve all users (admin only).
     
@@ -330,14 +317,14 @@ def read_users(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
-    return auth_service.get_users(skip=skip, limit=limit)
+    return await auth_service.get_users(skip=skip, limit=limit)
 
-@router.get("/users/{user_id}", response_model=User)
-def read_user(
+@router.get("/users/{user_id}", response_model=UserPublic)
+async def read_user(
     user_id: int,
     current_user: User = Depends(get_current_active_user),
     auth_service: AuthService = Depends(get_auth_service)
-) -> Any:
+):
     """
     Get a specific user by ID (admin only).
     
@@ -345,15 +332,9 @@ def read_user(
     
     Requires admin privileges.
     """
-    if not current_user.is_superuser and current_user.id != user_id:
+    if not current_user.is_superuser:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
-    user = auth_service.get_user(user_id)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    return user
+    return await auth_service.get_user(user_id)

@@ -1,29 +1,69 @@
-const BASE_URL = "http://localhost:8000/api/v1";
+import axios from 'axios';
+import { API_BASE_URL } from './api';
 
-export async function login({ username, password, grant_type = "password" }) {
-  const body = new URLSearchParams({ username, password, grant_type });
+// Create axios instance for auth endpoints
+const authApi = axios.create({
+  baseURL: API_BASE_URL,
+  withCredentials: true,
+  headers: {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'Accept': 'application/json',
+  },
+});
 
-  const res = await fetch(`${BASE_URL}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body
-  });
+/**
+ * Login with username/email and password
+ * @param {Object} credentials - Login credentials
+ * @param {string} credentials.username - Username or email
+ * @param {string} credentials.password - Password
+ * @returns {Promise<Object>} User data
+ */
+export async function login({ username, password }) {
+  const params = new URLSearchParams();
+  params.append('username', username);
+  params.append('password', password);
+  params.append('grant_type', 'password');
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `Login failed with ${res.status}`);
-  }
-
-  const data = await res.json();
-  // Return tokens; AuthContext will store them.
-  return {
-    access_token: data.access_token,
-    token_type: data.token_type,
-    refresh_token: data.refresh_token,
-  };
+  const response = await authApi.post('/auth/login', params);
+  
+  // The access token is now in an HTTP-only cookie
+  // We return the user data from the response
+  return response.data.user;
 }
 
-// Export other auth-related functions as needed
+/**
+ * Logout the current user
+ * @returns {Promise<void>}
+ */
+export async function logout() {
+  await authApi.post('/auth/logout');
+}
+
+/**
+ * Get current user data
+ * @returns {Promise<Object>} User data
+ */
+export async function getCurrentUser() {
+  const response = await authApi.get('/auth/me');
+  return response.data;
+}
+
+/**
+ * Change user password
+ * @param {string} currentPassword - Current password
+ * @param {string} newPassword - New password
+ * @returns {Promise<void>}
+ */
+export async function changePassword(currentPassword, newPassword) {
+  await authApi.post('/auth/change-password', {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
+}
+
 export default {
-  login
+  login,
+  logout,
+  getCurrentUser,
+  changePassword,
 };

@@ -23,11 +23,43 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8  # 8 days
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30  # 30 days
     
+    # CORS settings
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:8000"]
+    CORS_ALLOW_CREDENTIALS: bool = True
+    CORS_ALLOW_METHODS: List[str] = ["*"]
+    CORS_ALLOW_HEADERS: List[str] = ["*"]
+    
+    # Cookie settings
+    COOKIE_SECURE: bool = False  # Set to False for development without HTTPS
+    COOKIE_HTTP_ONLY: bool = True
+    COOKIE_SAME_SITE: str = "lax"  # or 'strict', 'none'
+    COOKIE_DOMAIN: Optional[str] = None
+    COOKIE_ACCESS_TOKEN_NAME: str = "access_token"
+    COOKIE_TOKEN_TYPE_NAME: str = "token_type"
+    COOKIE_PATH: str = "/"
+    COOKIE_MAX_AGE: int = 60 * 60 * 24 * 7  # 7 days
+    
+    # JWT Token settings
+    ACCESS_TOKEN_COOKIE_NAME: str = "access_token"
+    REFRESH_TOKEN_COOKIE_NAME: str = "refresh_token"
+    TOKEN_PREFIX: str = "Bearer"
+    
+    # CSRF settings
+    CSRF_COOKIE_NAME: str = "csrf_token"
+    CSRF_HEADER_NAME: str = "X-CSRF-Token"
+    CSRF_TOKEN_LENGTH: int = 32
+    CSRF_COOKIE_SECURE: bool = True
+    CSRF_COOKIE_HTTP_ONLY: bool = False  # Must be accessible from JS
+    CSRF_COOKIE_SAME_SITE: str = "lax"
+    CSRF_COOKIE_PATH: str = "/"
+    CSRF_EXPIRE_SECONDS: int = 60 * 60 * 24 * 7  # 7 days
+    
     # Password settings
     PASSWORD_MIN_LENGTH: int = 12
     PASSWORD_MAX_ATTEMPTS: int = 5
     PASSWORD_LOCKOUT_MINUTES: int = 15
     PASSWORD_HISTORY_SIZE: int = 5
+    MAX_LOGIN_ATTEMPTS: int = 5  # Maximum number of failed login attempts before lockout
     
     # Session settings
     SESSION_TIMEOUT_MINUTES: int = 30
@@ -57,6 +89,15 @@ class Settings(BaseSettings):
     
     # Frontend URL for CORS and redirects
     FRONTEND_URL: str = "http://localhost:3000"
+    FRONTEND_ORIGIN: str = "http://localhost:3000"
+    
+    # Refresh cookie config
+    REFRESH_COOKIE_NAME: str = "refresh_token"
+    REFRESH_COOKIE_PATH: str = "/api/v1/auth"
+    REFRESH_COOKIE_DOMAIN: Optional[str] = None  # Set to your domain in production
+    REFRESH_COOKIE_SAMESITE: str = "lax"  # 'lax' for production, 'none' for cross-origin
+    REFRESH_COOKIE_SECURE: bool = False  # Set to True in production (HTTPS)
+    REFRESH_COOKIE_HTTPONLY: bool = True
     
     # Database configuration
     SQLALCHEMY_DATABASE_URI: str = ""

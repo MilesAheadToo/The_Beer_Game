@@ -32,5 +32,3 @@ export const isModelTrained = async () => {
   }
 };
 
-// Using named exports only for better tree-shaking and consistency
-export { getModelStatus, isModelTrained };

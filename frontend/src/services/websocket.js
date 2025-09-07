@@ -4,17 +4,32 @@ class WebSocketService {
     this.callbacks = [];
     this.connected = false;
     this.reconnectAttempts = 0;
-    this.maxReconnectAttempts = 5;
+    this.maxReconnectAttempts = 10; // Increased max reconnection attempts
     this.reconnectDelay = 1000; // Start with 1 second delay
+    this.maxReconnectDelay = 30000; // Max 30 seconds delay between reconnections
+    this.reconnectTimeout = null;
+    this.connectionParams = null;
   }
 
   /**
    * Connect to the WebSocket server
    * @param {string} gameId - The ID of the game to connect to
    * @param {string} accessToken - The user's access token for authentication
+   * @param {string} playerId - The ID of the player connecting
    */
-  connect(gameId, accessToken) {
+  connect(gameId, accessToken, playerId = '1') {
+    console.log('[WebSocket] Initializing connection...', { gameId, playerId });
+    
+    // Clear any existing reconnection timeout
+    if (this.reconnectTimeout) {
+      console.log('[WebSocket] Clearing existing reconnection timeout');
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+
+    // Disconnect existing connection if any
     if (this.socket) {
+      console.log('[WebSocket] Disconnecting existing socket');
       this.disconnect();
     }
 
@@ -22,51 +37,122 @@ class WebSocketService {
       throw new Error('Access token is required to connect to WebSocket');
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
+    if (!playerId) {
+      console.warn('No player ID provided, using default (1)');
+      playerId = '1';
+    }
+
+    // Store connection parameters for reconnection
+    this.connectionParams = { gameId, accessToken, playerId };
     
-    this.socket = new WebSocket(`${protocol}//${host}/ws/games/${gameId}?token=${accessToken}`);
+    try {
+      // Use relative URL for WebSocket connection
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsHost = window.location.host;
+      const wsPath = `/ws/games/${gameId}/players/${playerId}`;
+      
+      // Encode the token to handle special characters
+      const encodedToken = encodeURIComponent(accessToken);
+      const wsUrl = `${wsProtocol}//${wsHost}${wsPath}?token=${encodedToken}`;
+      
+      console.log('[WebSocket] Connecting to:', wsUrl);
+      this.socket = new WebSocket(wsUrl);
 
-    this.socket.onopen = () => {
-      console.log('WebSocket Connected');
-      this.connected = true;
-      this.reconnectAttempts = 0;
-      this.reconnectDelay = 1000;
-      this.notifyCallbacks('connected', { connected: true });
-    };
+      this.socket.onopen = () => {
+        console.log('[WebSocket] Connection established');
+        this.connected = true;
+        this.reconnectAttempts = 0;
+        this.reconnectDelay = 1000;
+        this.notifyCallbacks('connected', { 
+          connected: true,
+          url: wsUrl,
+          timestamp: new Date().toISOString()
+        });
+      };
 
-    this.socket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        this.notifyCallbacks('message', data);
-      } catch (error) {
-        console.error('Error parsing WebSocket message:', error);
-      }
-    };
+      this.socket.onmessage = (event) => {
+        try {
+          console.log('[WebSocket] Message received:', event.data);
+          const data = JSON.parse(event.data);
+          this.notifyCallbacks('message', data);
+        } catch (error) {
+          console.error('[WebSocket] Error parsing message:', error, 'Raw data:', event.data);
+          this.notifyCallbacks('error', { 
+            error: 'Failed to parse message',
+            rawData: event.data,
+            timestamp: new Date().toISOString()
+          });
+        }
+      };
 
-    this.socket.onclose = (event) => {
-      console.log('WebSocket Disconnected', event);
-      this.connected = false;
-      this.notifyCallbacks('disconnected', { connected: false });
-      this.attemptReconnect(gameId);
-    };
+      this.socket.onclose = (event) => {
+        console.log('[WebSocket] Connection closed:', {
+          code: event.code,
+          reason: event.reason,
+          wasClean: event.wasClean,
+          timestamp: new Date().toISOString()
+        });
+        
+        this.connected = false;
+        this.notifyCallbacks('disconnected', { 
+          reason: event.reason, 
+          code: event.code,
+          wasClean: event.wasClean,
+          timestamp: new Date().toISOString()
+        });
+        
+        // Don't attempt to reconnect if this was a normal closure or unauthorized
+        if (event.code !== 1000 && event.code !== 1008) {
+          console.log(`[WebSocket] Will attempt to reconnect (code: ${event.code})`);
+          this.attemptReconnect();
+        } else {
+          console.log('[WebSocket] Normal closure, will not reconnect');
+        }
+      };
 
-    this.socket.onerror = (error) => {
-      console.error('WebSocket Error:', error);
-      this.notifyCallbacks('error', { error });
-    };
+      this.socket.onerror = (error) => {
+        console.error('[WebSocket] Error:', {
+          error: error,
+          readyState: this.socket?.readyState,
+          url: this.socket?.url,
+          timestamp: new Date().toISOString()
+        });
+        this.notifyCallbacks('error', { 
+          error: 'WebSocket error',
+          details: error,
+          timestamp: new Date().toISOString()
+        });
+      };
+      
+    } catch (error) {
+      console.error('Error creating WebSocket connection:', error);
+      this.attemptReconnect();
+    }
   }
 
-  attemptReconnect(gameId) {
+  attemptReconnect() {
+    if (!this.connectionParams) {
+      console.error('No connection parameters available for reconnection');
+      return;
+    }
+
     if (this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++;
-      const delay = this.reconnectDelay * Math.pow(2, this.reconnectAttempts);
+      const delay = Math.min(
+        this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+        this.maxReconnectDelay
+      );
       
-      console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+      console.log(`[WebSocket] Will attempt to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
       
-      setTimeout(() => {
+      this.reconnectTimeout = setTimeout(() => {
         if (!this.connected) {
-          this.connect(gameId);
+          console.log(`[WebSocket] Attempting to reconnect (attempt ${this.reconnectAttempts})`);
+          this.connect(
+            this.connectionParams.gameId,
+            this.connectionParams.accessToken,
+            this.connectionParams.playerId
+          );
         }
       }, delay);
     } else {
@@ -81,6 +167,42 @@ class WebSocketService {
       this.socket = null;
       this.connected = false;
     }
+    
+    // Clear any pending reconnection
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+  }
+  
+  /**
+   * Attempt to reconnect to the WebSocket server with exponential backoff
+   */
+  attemptReconnect() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error('Max reconnection attempts reached');
+      this.notifyCallbacks('error', { error: 'Connection lost. Please refresh the page.' });
+      return;
+    }
+    
+    if (!this.connectionParams) {
+      console.error('No connection parameters available for reconnection');
+      return;
+    }
+    
+    const { gameId, accessToken, playerId } = this.connectionParams;
+    
+    // Calculate delay with exponential backoff (capped at maxReconnectDelay)
+    const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts), this.maxReconnectDelay);
+    
+    console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
+    
+    this.reconnectTimeout = setTimeout(() => {
+      if (!this.connected) {
+        this.reconnectAttempts++;
+        this.connect(gameId, accessToken, playerId);
+      }
+    }, delay);
   }
 
   send(message) {

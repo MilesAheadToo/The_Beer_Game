@@ -36,7 +36,7 @@ import {
 } from 'chart.js';
 import { format } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
-import dashboardService from '../services/dashboardService';
+import { getHumanDashboard, formatChartData } from '../services/dashboardService';
 import PageLayout from '../components/PageLayout';
 
 // Register ChartJS components
@@ -73,7 +73,7 @@ const HumanDashboard = () => {
     const fetchDashboardData = async () => {
       try {
         setLoading(true);
-        const data = await dashboardService.getHumanDashboard();
+        const data = await getHumanDashboard();
         setDashboardData(data);
       } catch (err) {
         console.error('Error fetching dashboard data:', err);
@@ -143,7 +143,7 @@ const HumanDashboard = () => {
     if (!dashboardData?.time_series?.length) return null;
 
     const { time_series, player_role } = dashboardData;
-    const chartData = dashboardService.formatChartData(time_series, player_role);
+    const chartData = formatChartData(time_series, player_role);
     const labels = chartData.map(item => `Week ${item.week}`);
     
     const datasets = [

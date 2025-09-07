@@ -1,211 +1,172 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useLocation, useNavigate, Link } from 'react-router-dom';
-import { 
-  FaEye, 
-  FaEyeSlash, 
-  FaSignInAlt, 
-  FaLock, 
-  FaEnvelope
+import { useLocation, useNavigate } from 'react-router-dom';
+import {
+  FaEye,
+  FaEyeSlash,
+  FaSignInAlt,
+  FaLock,
+  FaEnvelope,
+  FaSpinner,
+  FaExclamationCircle
 } from 'react-icons/fa';
-import { 
-  Button, 
-  Box, 
-  VStack, 
-  Input, 
-  InputGroup, 
-  InputLeftElement,
-  InputRightElement, 
-  FormControl, 
-  FormLabel,
-  useColorModeValue,
-  Text,
-  IconButton
-} from '@chakra-ui/react';
-import PageLayout from '../components/PageLayout';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
-import api from '../services/api';
+import './Login.css';
 
 const daybreakLogo = '/daybreak_logo.png';
 
 function Login() {
-  const [email, setEmail] = useState('admin@daybreak.ai');
-  const [password, setPassword] = useState('Daybreak@2025');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const cardBg = useColorModeValue('white', 'gray.700');
-  const borderColor = useColorModeValue('gray.200', 'gray.600');
-  const { isAuthenticated, login: setAuthed } = useAuth();
-  const location = useLocation();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  const { login, isAuthenticated, loading } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const hasNavigated = useRef(false);
 
-  // if already authed, bounce to redirect or /games ONCE
+  // Redirect if already authenticated
   useEffect(() => {
     if (hasNavigated.current) return;
     if (isAuthenticated) {
       hasNavigated.current = true;
       const search = new URLSearchParams(location.search);
-      const redirectTo = search.get("redirect") || "/games";
-      console.log('Redirecting to:', redirectTo);
+      const redirectTo = search.get("redirect") || "/";
       navigate(redirectTo, { replace: true });
     }
   }, [isAuthenticated, location.search, navigate]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setSubmitting(true);
     setError('');
-
+    setIsSubmitting(true);
+    
     try {
-      const response = await api.login({ 
-        username: email, 
-        password,
-        grant_type: 'password' 
-      });
-
-      setAuthed({
-        access_token: response.access_token,
-        token_type: response.token_type,
-        refresh_token: response.refresh_token
-      });
-
-      // Immediate navigate to avoid any race with guards
-      const search = new URLSearchParams(location.search);
-      navigate(search.get("redirect") || "/games", { replace: true });
-
-    } catch (error) {
-      console.error('Login error:', error);
-      setError('Invalid email or password');
+      await login({ username, password });
+      // The AuthContext will handle the redirect on successful login
+    } catch (err) {
+      console.error('Login failed:', err);
+      setError('Invalid username or password');
     } finally {
-      setSubmitting(false);
+      setIsSubmitting(false);
     }
   };
-  
-  const togglePasswordVisibility = () => setShowPassword((v) => !v);
+
+  if (loading) {
+    return (
+      <div className="login-container">
+        <div className="login-card">
+          <div className="spinner">
+            <FaSpinner className="spin" />
+            <p>Loading...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <PageLayout title="Sign In">
-      <Box 
-        maxW="md" 
-        mx="auto" 
-        mt={12} 
-        p={8} 
-        bg={cardBg}
-        borderRadius="lg"
-        boxShadow="lg"
-        borderWidth="1px"
-        borderColor={borderColor}
+    <div className="login-container">
+      <motion.div 
+        className="login-card"
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
       >
-        <VStack spacing={6} align="stretch">
-          <Box textAlign="center">
-            <img 
-              src={daybreakLogo} 
-              alt="Daybreak Logo" 
-              style={{ 
-                height: '80px', 
-                margin: '0 auto 16px',
-                borderRadius: '8px'
-              }} 
-            />
-            <Text fontSize="2xl" fontWeight="bold" color="blue.600">Daybreak AI</Text>
-            <Text color="gray.500">Supply Chain Optimization Platform</Text>
-          </Box>
-          <Text color="gray.600">Sign in to continue to Daybreak Beer Game</Text>
-          <form onSubmit={handleSubmit}>
-            <VStack spacing={4}>
-              <FormControl isRequired>
-                <FormLabel>Email</FormLabel>
-                <InputGroup>
-                  <InputLeftElement pointerEvents="none">
-                    <FaEnvelope color="green.500" />
-                  </InputLeftElement>
-                  <Input
-                    type="email"
-                    placeholder="Enter your email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    isDisabled={submitting}
-                    aria-label="Email"
-                    size="md"
-                    pl={10}
-                  />
-                </InputGroup>
-              </FormControl>
+        <div className="login-header">
+          <img src={daybreakLogo} alt="Daybreak Logo" className="logo" />
+          <h1>Welcome Back</h1>
+          <p>Please sign in to continue</p>
+        </div>
 
-              <FormControl isRequired>
-                <FormLabel>Password</FormLabel>
-                <InputGroup>
-                  <InputLeftElement pointerEvents="none">
-                    <FaLock color="green.500" />
-                  </InputLeftElement>
-                  <Input
-                    type={showPassword ? 'text' : 'password'}
-                    placeholder="Enter your password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    isDisabled={submitting}
-                    aria-label="Password"
-                    size="md"
-                    pl={10}
-                  />
-                  <InputRightElement>
-                    <IconButton
-                      variant="ghost"
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      icon={showPassword ? <FaEyeSlash /> : <FaEye />}
-                      onClick={() => setShowPassword(!showPassword)}
-                      isDisabled={submitting}
-                      colorScheme="green"
-                      color="green.500"
-                      _hover={{ color: 'green.600' }}
-                    />
-                  </InputRightElement>
-                </InputGroup>
-              </FormControl>
-              {error && (
-                <Text color="red.500" fontSize="sm" mb={2}>{error}</Text>
-              )}
-              <Box display="flex" justifyContent="center" width="100%" mt={4}>
-                <Button
-                  type="submit"
-                  colorScheme="blue"
-                  size="md"
-                  width="200px"
-                  isLoading={submitting}
-                  loadingText="Signing In..."
-                  leftIcon={<FaSignInAlt />}
-                  textTransform="none"
-                  fontWeight="500"
-                  height="40px"
-                  _hover={{
-                    transform: 'translateY(-1px)',
-                  }}
-                  _active={{
-                    transform: 'none'
-                  }}
-                >
-                  Sign In
-                </Button>
-              </Box>
-              <Box textAlign="center" mt={4}>
-                <Text color="gray.600">
-                  Don't have an account?{' '}
-                  <Link to="/contact" color="blue.600" _hover={{ textDecoration: 'underline' }}>
-                    Contact Admin
-                  </Link>
-                </Text>
-                <Text mt={2}>
-                  <Link to="/forgot-password" color="blue.600" _hover={{ color: 'blue.700', textDecoration: 'underline' }}>
-                    Forgot Password?
-                  </Link>
-                </Text>
-              </Box>
-            </VStack>
-          </form>
-        </VStack>
-      </Box>
-    </PageLayout>
+        <AnimatePresence>
+          {error && (
+            <motion.div 
+              className="error-message"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+            >
+              <FaExclamationCircle /> {error}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <form onSubmit={handleSubmit} className="login-form">
+          <div className="form-group">
+            <label htmlFor="username">Email or Username</label>
+            <div className="input-group">
+              <FaEnvelope className="input-icon" />
+              <input
+                id="username"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="Enter your email or username"
+                required
+                autoComplete="username"
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <div className="password-header">
+              <label htmlFor="password">Password</label>
+              <a href="/forgot-password" className="forgot-password">
+                Forgot password?
+              </a>
+            </div>
+            <div className="input-group">
+              <FaLock className="input-icon" />
+              <input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Enter your password"
+                required
+                autoComplete="current-password"
+              />
+              <button
+                type="button"
+                className="toggle-password"
+                onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <FaEyeSlash /> : <FaEye />}
+              </button>
+            </div>
+          </div>
+
+          <button 
+            type="submit" 
+            className="login-button"
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <>
+                <FaSpinner className="spin" /> Signing in...
+              </>
+            ) : (
+              <>
+                <FaSignInAlt /> Sign In
+              </>
+            )}
+          </button>
+        </form>
+
+        <div className="login-footer">
+          <p>
+            Don't have an account?{' '}
+            <a href="/register" className="signup-link">
+              Sign up
+            </a>
+          </p>
+        </div>
+      </motion.div>
+    </div>
   );
 }
 

@@ -46,6 +46,7 @@ class BackgroundTaskManager:
         finally:
             self._tasks.pop(game_id, None)
 from app.schemas.game import GameCreate, PlayerCreate, GameState, PlayerState
+from app.models.supply_chain import PlayerRole, Game, Player, GameRound, PlayerRound, PlayerInventory
 from app.core.demand_patterns import get_demand_pattern, DemandPatternType
 
 class GameService:

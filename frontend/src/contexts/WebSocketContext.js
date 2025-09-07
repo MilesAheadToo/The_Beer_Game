@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { webSocketService } from '../services/websocket';
 import { useToast } from '@chakra-ui/react';
@@ -28,9 +28,100 @@ export const WebSocketProvider = ({ children }) => {
   };
 
   // Send a message through the WebSocket
-  const send = (type, data = {}) => {
+  const send = useCallback((type, data = {}) => {
     return webSocketService.send({ type, ...data });
-  };
+  }, []);
+
+  // Handle incoming WebSocket messages
+  const handleIncomingMessage = useCallback((event, data = {}) => {
+    // Handle both direct event and message objects with type/data
+    const message = typeof event === 'string' ? { type: event, ...data } : event;
+    const { type, ...messageData } = message;
+    
+    // Check for registered callbacks first
+    const callback = callbacks.current.get(type);
+    if (callback) {
+      callback(messageData);
+    }
+    
+    // Handle known message types
+    switch (type) {
+      case 'game_state':
+        setGameState(messageData.state || messageData);
+        setPlayers(messageData.players || []);
+        setCurrentRound(messageData.current_round || messageData.currentRound || 0);
+        setGameStatus(messageData.status || 'idle');
+        break;
+        
+      case 'round_started':
+        setCurrentRound(messageData.round_number || messageData.roundNumber);
+        setGameStatus('in_progress');
+        toast({
+          title: `Round ${messageData.round_number || messageData.roundNumber} Started`,
+          description: messageData.message || 'A new round has begun!',
+          status: 'info',
+          duration: 3000,
+          isClosable: true,
+        });
+        break;
+        
+      case 'round_ended':
+        setGameStatus('round_ended');
+        toast({
+          title: `Round ${messageData.round_number || messageData.roundNumber} Ended`,
+          description: messageData.message || 'The round has ended.',
+          status: 'info',
+          duration: 3000,
+          isClosable: true,
+        });
+        break;
+        
+      case 'game_ended':
+        setGameStatus('completed');
+        toast({
+          title: 'Game Over',
+          description: messageData.message || 'The game has ended.',
+          status: 'success',
+          duration: null, // Don't auto-close
+          isClosable: true,
+        });
+        break;
+        
+      case 'player_joined':
+        toast({
+          title: 'Player Joined',
+          description: `${messageData.player_name} has joined the game.`,
+          status: 'info',
+          duration: 3000,
+          isClosable: true,
+        });
+        break;
+        
+      case 'player_left':
+        toast({
+          title: 'Player Left',
+          description: `${messageData.player_name} has left the game.`,
+          status: 'warning',
+          duration: 3000,
+          isClosable: true,
+        });
+        break;
+        
+      case 'error':
+        toast({
+          title: 'Error',
+          description: messageData.message || 'An error occurred',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        });
+        break;
+        
+      default:
+        console.log('Unhandled WebSocket message type:', type);
+        break;
+    }
+  }, [toast]);
 
   // Initialize WebSocket connection
   useEffect(() => {
@@ -50,14 +141,15 @@ export const WebSocketProvider = ({ children }) => {
           break;
           
         case 'message':
-          handleIncomingMessage(data);
+          // Handle incoming message using the useCallback handler
+          handleIncomingMessage(data.type, data.data || data);
           break;
           
         case 'error':
           console.error('WebSocket error:', data);
           toast({
             title: 'Connection Error',
-            description: 'There was a problem with the game connection.',
+            description: data.message || 'There was a problem with the game connection.',
             status: 'error',
             duration: 5000,
             isClosable: true,
@@ -111,79 +203,6 @@ export const WebSocketProvider = ({ children }) => {
     };
   }, [params.gameId, accessToken, toast, handleIncomingMessage, send]);
 
-  // Handle incoming WebSocket messages
-  const handleIncomingMessage = useCallback((message) => {
-    console.log('WebSocket message received:', message);
-    
-    // Update local state based on message type
-    switch (message.type) {
-      case 'game_state':
-        setGameState(message.state);
-        setPlayers(message.players || []);
-        setCurrentRound(message.current_round || 0);
-        setGameStatus(message.status || 'unknown');
-        break;
-        
-      case 'round_started':
-        setCurrentRound(message.round_number);
-        toast({
-          title: `Round ${message.round_number} Started`,
-          description: message.message || 'A new round has begun!',
-          status: 'info',
-          duration: 3000,
-          isClosable: true,
-        });
-        break;
-        
-      case 'round_ended':
-        toast({
-          title: `Round ${message.round_number} Ended`,
-          description: message.message || 'The round has ended.',
-          status: 'info',
-          duration: 3000,
-          isClosable: true,
-        });
-        break;
-        
-      case 'player_joined':
-        toast({
-          title: 'Player Joined',
-          description: `${message.player_name} has joined the game.`,
-          status: 'info',
-          duration: 3000,
-          isClosable: true,
-        });
-        break;
-        
-      case 'player_left':
-        toast({
-          title: 'Player Left',
-          description: `${message.player_name} has left the game.`,
-          status: 'warning',
-          duration: 3000,
-          isClosable: true,
-        });
-        break;
-        
-      case 'game_ended':
-        setGameStatus('completed');
-        toast({
-          title: 'Game Over',
-          description: message.message || 'The game has ended.',
-          status: 'success',
-          duration: null, // Don't auto-close
-          isClosable: true,
-        });
-        break;
-        
-      default:
-        // Check if there's a registered callback for this message type
-        const callback = callbacks.current.get(message.type);
-        if (callback) {
-          callback(message);
-        }
-    }
-  }, [toast]);
 
   // Expose the WebSocket API to child components
   const api = {

@@ -10,6 +10,7 @@ alembic==1.13.1
 mysql-connector-python==8.0.33
 pymysql==1.1.0
 aiomysql==0.2.0  # Keep for async support if needed
+asyncmy==0.2.7  # Required for async MySQL/MariaDB connections
 
 # Authentication & Security
 passlib[bcrypt]==1.7.4

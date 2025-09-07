@@ -1,17 +1,28 @@
 #!/bin/bash
 
+#!/bin/bash
+
+# Get database credentials from environment variables or use defaults
+DB_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-Daybreak@2025}
+DB_NAME=${MYSQL_DATABASE:-beer_game}
+DB_USER=${MYSQL_USER:-beer_user}
+DB_PASSWORD=${MYSQL_PASSWORD:-Daybreak@2025}
+
+# Log the database initialization
+echo "Initializing database: $DB_NAME with user: $DB_USER"
+
 # Connect to MySQL and create the database and user
-mysql -h db -u root -pDaybreak@2025 <<EOF
+mysql -h db -u root -p"$DB_ROOT_PASSWORD" <<EOF
 -- Create database if not exists
-CREATE DATABASE IF NOT EXISTS beer_game;
+CREATE DATABASE IF NOT EXISTS \`$DB_NAME\`;
 
 -- Create user if not exists and grant privileges
-CREATE USER IF NOT EXISTS 'beer_user'@'%' IDENTIFIED BY 'Daybreak@2025';
-GRANT ALL PRIVILEGES ON beer_game.* TO 'beer_user'@'%';
+CREATE USER IF NOT EXISTS '$DB_USER'@'%' IDENTIFIED BY '$DB_PASSWORD';
+GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'%';
 FLUSH PRIVILEGES;
 
 -- Use the database
-USE beer_game;
+USE \`$DB_NAME\`;
 
 -- Create users table if not exists
 CREATE TABLE IF NOT EXISTS users (

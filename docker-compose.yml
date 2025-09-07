@@ -37,7 +37,12 @@ services:
       - DB_WAIT_TIMEOUT=30
       - DB_CONNECTION_TIMEOUT=30
       - PYTHONPATH=/app
-      - DATABASE_URL=mysql+pymysql://beer_user:Daybreak@2025@db:3306/beer_game
+      - DATABASE_URL=mysql+aiomysql://beer_user:Daybreak%402025@db:3307/beer_game
+      - DB_HOST=db
+      - DB_USER=beer_user
+      - DB_PASSWORD=Daybreak@2025
+      - DB_NAME=beer_game
+      - DB_PORT=3307
     ports:
       - "8000:8000"
     volumes:
@@ -70,11 +75,10 @@ services:
     restart: unless-stopped
     environment:
       MARIADB_ROOT_PASSWORD: Daybreak@2025
-      MARIADB_DATABASE: beer_game
-      MARIADB_USER: beer_user
-      MARIADB_PASSWORD: Daybreak@2025
-      MARIADB_ROOT_HOST: '%'
-      MARIADB_INITDB_SKIP_TZINFO: 1
+      MYSQL_DATABASE: beer_game
+      MYSQL_USER: beer_user
+      MYSQL_PASSWORD: Daybreak@2025
+      MYSQL_ROOT_PASSWORD: Daybreak@2025
     ports:
       - "3306:3306"
     volumes:
@@ -82,29 +86,14 @@ services:
       - ./init_db.sql:/docker-entrypoint-initdb.d/init_db.sql
       - ./mariadb.cnf:/etc/mysql/conf.d/custom.cnf
       - ./scripts/init_database.sh:/docker-entrypoint-initdb.d/init_database.sh
-    command: [
-      '--character-set-server=utf8mb4',
-      '--collation-server=utf8mb4_unicode_ci',
-      '--max_connections=200',
-      '--innodb-buffer-pool-size=256M',
-      '--innodb-flush-log-at-trx-commit=1',
-      '--innodb-flush-method=O_DIRECT',
-      '--skip-log-bin',
-      '--default-time-zone=+00:00',
-      '--log-error=/var/log/mysql/error.log',
-      '--general-log=0',
-      '--slow-query-log=1',
-      '--long-query-time=2',
-      '--slow-query-log-file=/var/log/mysql/mariadb-slow.log'
-    ]
-    networks:
-      - beer-game-network
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pDaybreak2025"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pDaybreak@2025"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 30s
+    networks:
+      - beer-game-network
     security_opt:
       - seccomp:unconfined
     ulimits:

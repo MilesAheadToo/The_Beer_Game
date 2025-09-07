@@ -289,6 +289,291 @@ const Settings = () => {
     return date.toLocaleDateString();
   };
 
+  const renderTabContent = () => {
+    switch (activeTab) {
+      case 0: // Profile
+        return (
+          <Box>
+            <Heading size="md" mb={4}>Profile Information</Heading>
+            <VStack spacing={4} align="stretch">
+              <HStack spacing={4}>
+                <Avatar size="xl" src={profileForm.avatar} />
+                <VStack align="start">
+                  <Button leftIcon={<FiUpload} size="sm">Change Photo</Button>
+                  <Text fontSize="sm" color="gray.500">JPG, GIF or PNG. Max size 2MB</Text>
+                </VStack>
+              </HStack>
+
+              <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+                <FormControl>
+                  <FormLabel>First Name</FormLabel>
+                  <Input 
+                    value={profileForm.firstName}
+                    onChange={(e) => setProfileForm({...profileForm, firstName: e.target.value})}
+                  />
+                </FormControl>
+                <FormControl>
+                  <FormLabel>Last Name</FormLabel>
+                  <Input 
+                    value={profileForm.lastName}
+                    onChange={(e) => setProfileForm({...profileForm, lastName: e.target.value})}
+                  />
+                </FormControl>
+                <FormControl>
+                  <FormLabel>Email</FormLabel>
+                  <Input 
+                    type="email" 
+                    value={profileForm.email}
+                    isDisabled
+                  />
+                </FormControl>
+                <FormControl>
+                  <FormLabel>Company</FormLabel>
+                  <Input 
+                    value={profileForm.company}
+                    onChange={(e) => setProfileForm({...profileForm, company: e.target.value})}
+                  />
+                </FormControl>
+              </SimpleGrid>
+
+              <FormControl>
+                <FormLabel>Bio</FormLabel>
+                <Textarea 
+                  placeholder="Tell us about yourself..."
+                  rows={4}
+                />
+              </FormControl>
+
+              <HStack justifyContent="flex-end" mt={4}>
+                <Button variant="outline" mr={2}>Cancel</Button>
+                <Button colorScheme="blue" onClick={handleSaveProfile}>Save Changes</Button>
+              </HStack>
+            </VStack>
+          </Box>
+        );
+
+      case 1: // Notifications
+        return (
+          <Box>
+            <Heading size="md" mb={4}>Notification Preferences</Heading>
+            <VStack spacing={6} align="stretch">
+              <Card variant="outline">
+                <CardHeader>
+                  <Heading size="md">Email Notifications</Heading>
+                </CardHeader>
+                <CardBody>
+                  <VStack align="stretch" spacing={4}>
+                    <HStack justify="space-between">
+                      <Box>
+                        <Text fontWeight="medium">Account Activity</Text>
+                        <Text fontSize="sm" color="gray.500">Receive emails about account activities</Text>
+                      </Box>
+                      <Switch 
+                        isChecked={notificationSettings.email}
+                        onChange={handleNotificationChange('email')}
+                        colorScheme="blue"
+                      />
+                    </HStack>
+                    <HStack justify="space-between">
+                      <Box>
+                        <Text fontWeight="medium">Weekly Reports</Text>
+                        <Text fontSize="sm" color="gray.500">Get weekly performance reports</Text>
+                      </Box>
+                      <Switch 
+                        isChecked={notificationSettings.weeklyReport}
+                        onChange={handleNotificationChange('weeklyReport')}
+                        colorScheme="blue"
+                      />
+                    </HStack>
+                  </VStack>
+                </CardBody>
+              </Card>
+
+              <Card variant="outline">
+                <CardHeader>
+                  <Heading size="md">Push Notifications</Heading>
+                </CardHeader>
+                <CardBody>
+                  <VStack align="stretch" spacing={4}>
+                    <HStack justify="space-between">
+                      <Box>
+                        <Text fontWeight="medium">Order Updates</Text>
+                        <Text fontSize="sm" color="gray.500">Get real-time order updates</Text>
+                      </Box>
+                      <Switch 
+                        isChecked={notificationSettings.push}
+                        onChange={handleNotificationChange('push')}
+                        colorScheme="blue"
+                      />
+                    </HStack>
+                  </VStack>
+                </CardBody>
+              </Card>
+            </VStack>
+          </Box>
+        );
+
+      case 2: // API Keys
+        return (
+          <Box>
+            <HStack justify="space-between" mb={6}>
+              <Heading size="md">API Keys</Heading>
+              <Button 
+                leftIcon={<FiPlus />} 
+                colorScheme="blue"
+                onClick={onOpen}
+              >
+                Create API Key
+              </Button>
+            </HStack>
+
+            {apiKeys.length === 0 ? (
+              <Box textAlign="center" py={10} borderWidth={1} borderRadius="md" borderStyle="dashed">
+                <FiKey size={48} style={{ margin: '0 auto 16px', color: '#718096' }} />
+                <Text fontSize="lg" mb={2}>No API Keys</Text>
+                <Text color="gray.500" mb={4}>Create your first API key to get started</Text>
+                <Button colorScheme="blue" onClick={onOpen}>Create API Key</Button>
+              </Box>
+            ) : (
+              <VStack spacing={4} align="stretch">
+                {apiKeys.map((key) => (
+                  <Card key={key.id} variant="outline">
+                    <CardBody>
+                      <HStack justify="space-between">
+                        <Box>
+                          <Text fontWeight="medium">{key.name}</Text>
+                          <Text fontSize="sm" color="gray.500">
+                            Created on {new Date(key.created).toLocaleDateString()}
+                            {key.lastUsed && ` • Last used ${formatRelativeTime(key.lastUsed)}`}
+                          </Text>
+                        </Box>
+                        <HStack>
+                          <Button 
+                            size="sm" 
+                            variant="outline" 
+                            onClick={() => copyToClipboard(key.key)}
+                          >
+                            Copy Key
+                          </Button>
+                          <Button 
+                            size="sm" 
+                            colorScheme="red" 
+                            variant="ghost"
+                            onClick={() => confirmDeleteKey(key.id)}
+                          >
+                            <FiTrash2 />
+                          </Button>
+                        </HStack>
+                      </HStack>
+                    </CardBody>
+                  </Card>
+                ))}
+              </VStack>
+            )}
+
+            <Alert status="info" mt={6} borderRadius="md">
+              <AlertIcon />
+              <Box>
+                <Text fontWeight="bold">Keep your API keys secure</Text>
+                <Text fontSize="sm">Do not share them in publicly accessible areas such as GitHub, client-side code, and so forth.</Text>
+              </Box>
+            </Alert>
+          </Box>
+        );
+
+      case 3: // Security
+        return (
+          <Box>
+            <Heading size="md" mb={4}>Security Settings</Heading>
+            
+            <Card variant="outline" mb={6}>
+              <CardHeader>
+                <Heading size="md">Change Password</Heading>
+              </CardHeader>
+              <CardBody>
+                <VStack spacing={4}>
+                  <FormControl>
+                    <FormLabel>Current Password</FormLabel>
+                    <InputGroup>
+                      <Input
+                        type={showPassword.current ? 'text' : 'password'}
+                        value={passwordForm.currentPassword}
+                        onChange={(e) => setPasswordForm({...passwordForm, currentPassword: e.target.value})}
+                      />
+                      <InputRightElement width="4.5rem">
+                        <Button h="1.75rem" size="sm" onClick={() => togglePasswordVisibility('current')}>
+                          {showPassword.current ? <FiEyeOff /> : <FiEye />}
+                        </Button>
+                      </InputRightElement>
+                    </InputGroup>
+                  </FormControl>
+                  
+                  <FormControl>
+                    <FormLabel>New Password</FormLabel>
+                    <InputGroup>
+                      <Input
+                        type={showPassword.new ? 'text' : 'password'}
+                        value={passwordForm.newPassword}
+                        onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})}
+                      />
+                      <InputRightElement width="4.5rem">
+                        <Button h="1.75rem" size="sm" onClick={() => togglePasswordVisibility('new')}>
+                          {showPassword.new ? <FiEyeOff /> : <FiEye />}
+                        </Button>
+                      </InputRightElement>
+                    </InputGroup>
+                  </FormControl>
+                  
+                  <FormControl>
+                    <FormLabel>Confirm New Password</FormLabel>
+                    <InputGroup>
+                      <Input
+                        type={showPassword.confirm ? 'text' : 'password'}
+                        value={passwordForm.confirmPassword}
+                        onChange={(e) => setPasswordForm({...passwordForm, confirmPassword: e.target.value})}
+                      />
+                      <InputRightElement width="4.5rem">
+                        <Button h="1.75rem" size="sm" onClick={() => togglePasswordVisibility('confirm')}>
+                          {showPassword.confirm ? <FiEyeOff /> : <FiEye />}
+                        </Button>
+                      </InputRightElement>
+                    </InputGroup>
+                  </FormControl>
+                  
+                  <HStack w="full" justify="flex-end" mt={4}>
+                    <Button 
+                      colorScheme="blue" 
+                      onClick={handleChangePassword}
+                      isLoading={isSubmitting}
+                    >
+                      Update Password
+                    </Button>
+                  </HStack>
+                </VStack>
+              </CardBody>
+            </Card>
+
+            <Card variant="outline">
+              <CardHeader>
+                <Heading size="md" color="red.500">Danger Zone</Heading>
+              </CardHeader>
+              <CardBody>
+                <Text mb={4}>
+                  Permanently delete your account and all associated data. This action cannot be undone.
+                </Text>
+                <Button colorScheme="red" variant="outline" leftIcon={<FiTrash2 />}>
+                  Delete My Account
+                </Button>
+              </CardBody>
+            </Card>
+          </Box>
+        );
+
+      default:
+        return null;
+    }
+  };
+
   return (
     <PageLayout title="Account Settings">
       <Tabs 
@@ -298,7 +583,7 @@ const Settings = () => {
         index={activeTab}
         onChange={(index) => setActiveTab(index)}
       >
-        <TabList mb={6} borderBottom="1px" borderColor={borderColor}>
+        <TabList mb={6} borderBottom="1px" borderColor={borderColor} overflowX="auto" overflowY="hidden">
           <Tab _selected={{ color: 'blue.600', borderBottom: '2px solid', borderColor: 'blue.500' }}>
             <HStack spacing={2}>
               <FiUser />
@@ -333,470 +618,139 @@ const Settings = () => {
         <TabPanels>
           {/* Profile Tab */}
           <TabPanel px={0}>
-            <Grid templateColumns={{ base: '1fr', lg: '300px 1fr' }} gap={8}>
-              <Box>
-                <Card variant="outline" bg={cardBg} borderColor={borderColor}>
-                  <CardBody>
-                    <VStack spacing={4}>
-                      <Avatar 
-                        size="2xl" 
-                        name={`${profileForm.firstName} ${profileForm.lastName}`} 
-                        src={profileForm.avatar}
-                        border="2px solid"
-                        borderColor="blue.200"
-                      />
-                      <VStack spacing={1} textAlign="center">
-                        <Text fontSize="xl" fontWeight="semibold">
-                          {profileForm.firstName} {profileForm.lastName}
-                        </Text>
-                        <Text color="gray.500">{profileForm.position}</Text>
-                        <Text fontSize="sm" color="gray.500">
-                          Member since {new Date('2023-01-15').toLocaleDateString('en-US', { year: 'numeric', month: 'long' })}
-                        </Text>
-                      </VStack>
-                      <Button 
-                        leftIcon={<FiUpload />} 
-                        variant="outline" 
-                        size="sm" 
-                        width="full"
-                        bg="white"
-                        color="blue.600"
-                        borderColor="blue.600"
-                        _hover={{
-                          bg: 'blue.50',
-                        }}
-                        _active={{
-                          bg: 'blue.100',
-                        }}
-                      >
-                        Change Photo
-                      </Button>
-                    </VStack>
-                  </CardBody>
-                </Card>
-
-                <Card variant="outline" bg={cardBg} borderColor={borderColor} mt={6}>
-                  <CardHeader pb={0}>
-                    <Text fontWeight="semibold">Login Activity</Text>
-                  </CardHeader>
-                  <CardBody>
-                    <VStack spacing={3} align="stretch">
-                      <Box>
-                        <Text fontSize="sm" color="gray.500">Last Login</Text>
-                        <Text>Today at {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</Text>
-                      </Box>
-                      <Box>
-                        <Text fontSize="sm" color="gray.500">Device</Text>
-                        <Text>Chrome on macOS</Text>
-                      </Box>
-                      <Box>
-                        <Text fontSize="sm" color="gray.500">IP Address</Text>
-                        <Text>192.168.1.1</Text>
-                      </Box>
-                    </VStack>
-                  </CardBody>
-                </Card>
-              </Box>
-
-              <Box>
-                <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6}>
-                  <CardHeader borderBottomWidth="1px" borderColor={borderColor}>
-                    <Text fontSize="lg" fontWeight="semibold">Personal Information</Text>
-                    <Text fontSize="sm" color="gray.500">Update your personal details here</Text>
-                  </CardHeader>
-                  <CardBody>
-                    <Grid templateColumns={{ base: '1fr', md: '1fr 1fr' }} gap={6}>
-                      <FormControl>
-                        <FormLabel>First Name</FormLabel>
-                        <Input 
-                          value={profileForm.firstName}
-                          onChange={(e) => setProfileForm({...profileForm, firstName: e.target.value})}
-                          placeholder="First name"
-                        />
-                      </FormControl>
-                      
-                      <FormControl>
-                        <FormLabel>Last Name</FormLabel>
-                        <Input 
-                          value={profileForm.lastName}
-                          onChange={(e) => setProfileForm({...profileForm, lastName: e.target.value})}
-                          placeholder="Last name"
-                        />
-                      </FormControl>
-                      
-                      <FormControl>
-                        <FormLabel>Email Address</FormLabel>
-                        <Input 
-                          type="email"
-                          value={profileForm.email}
-                          onChange={(e) => setProfileForm({...profileForm, email: e.target.value})}
-                          placeholder="Email address"
-                        />
-                        <FormHelperText>We'll never share your email.</FormHelperText>
-                      </FormControl>
-                      
-                      <FormControl>
-                        <FormLabel>Company</FormLabel>
-                        <Input 
-                          value={profileForm.company}
-                          onChange={(e) => setProfileForm({...profileForm, company: e.target.value})}
-                          placeholder="Company name"
-                        />
-                      </FormControl>
-                      
-                      <FormControl>
-                        <FormLabel>Position</FormLabel>
-                        <Input 
-                          value={profileForm.position}
-                          onChange={(e) => setProfileForm({...profileForm, position: e.target.value})}
-                          placeholder="Your position"
-                        />
-                      </FormControl>
-                      
-                      <FormControl>
-                        <FormLabel>Timezone</FormLabel>
-                        <Select 
-                          value={profileForm.timezone}
-                          onChange={(e) => setProfileForm({...profileForm, timezone: e.target.value})}
-                          placeholder="Select timezone"
-                        >
-                          <option value="UTC+00:00">UTC±00:00 (GMT)</option>
-                          <option value="UTC+01:00">UTC+01:00 (CET)</option>
-                          <option value="UTC-05:00">UTC-05:00 (EST)</option>
-                          <option value="UTC-08:00">UTC-08:00 (PST)</option>
-                        </Select>
-                      </FormControl>
-                      
-                      <FormControl gridColumn={{ base: '1 / -1', md: '1 / 2' }}>
-                        <FormLabel>Bio</FormLabel>
-                        <Textarea 
-                          placeholder="Tell us about yourself..."
-                          rows={4}
-                        />
-                        <FormHelperText>Brief description for your profile.</FormHelperText>
-                      </FormControl>
-                    </Grid>
-                  </CardBody>
-                  <CardFooter borderTopWidth="1px" borderColor={borderColor} justifyContent="flex-end">
-                    <Button 
-                      bg="blue.600"
-                      color="white"
-                      leftIcon={<FiSave />}
-                      onClick={handleSaveProfile}
-                      _hover={{
-                        bg: 'blue.700',
-                      }}
-                      _active={{
-                        bg: 'blue.800',
-                      }}
-                    >
-                      Save Changes
-                    </Button>
-                  </CardFooter>
-                </Card>
-
-                {/* Change Password Card */}
-                <Card variant="outline" bg={cardBg} borderColor={borderColor}>
-                  <CardHeader borderBottomWidth="1px" borderColor={borderColor}>
-                    <Text fontSize="lg" fontWeight="semibold">Change Password</Text>
-                    <Text fontSize="sm" color="gray.500">Update your password regularly to keep your account secure</Text>
-                  </CardHeader>
-                  <CardBody>
-                    <VStack spacing={4}>
-                      <FormControl>
-                        <FormLabel>Current Password</FormLabel>
-                        <InputGroup>
-                          <Input
-                            type={showPassword.current ? 'text' : 'password'}
-                            value={passwordForm.currentPassword}
-                            onChange={(e) => setPasswordForm({...passwordForm, currentPassword: e.target.value})}
-                            placeholder="Enter current password"
-                          />
-                          <InputRightElement>
-                            <IconButton
-                              icon={showPassword.current ? <FiEyeOff /> : <FiEye />}
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => togglePasswordVisibility('current')}
-                              aria-label={showPassword.current ? 'Hide password' : 'Show password'}
-                            />
-                          </InputRightElement>
-                        </InputGroup>
-                      </FormControl>
-                      
-                      <FormControl>
-                        <FormLabel>New Password</FormLabel>
-                        <InputGroup>
-                          <Input
-                            type={showPassword.new ? 'text' : 'password'}
-                            value={passwordForm.newPassword}
-                            onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})}
-                            placeholder="Enter new password"
-                          />
-                          <InputRightElement>
-                            <IconButton
-                              icon={showPassword.new ? <FiEyeOff /> : <FiEye />}
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => togglePasswordVisibility('new')}
-                              aria-label={showPassword.new ? 'Hide password' : 'Show password'}
-                            />
-                          </InputRightElement>
-                        </InputGroup>
-                        <FormHelperText>Must be at least 8 characters long</FormHelperText>
-                      </FormControl>
-                      
-                      <FormControl>
-                        <FormLabel>Confirm New Password</FormLabel>
-                        <InputGroup>
-                          <Input
-                            type={showPassword.confirm ? 'text' : 'password'}
-                            value={passwordForm.confirmPassword}
-                            onChange={(e) => setPasswordForm({...passwordForm, confirmPassword: e.target.value})}
-                            placeholder="Confirm new password"
-                            isInvalid={passwordForm.newPassword !== '' && 
-                                      passwordForm.confirmPassword !== '' && 
-                                      passwordForm.newPassword !== passwordForm.confirmPassword}
-                          />
-                          <InputRightElement>
-                            <IconButton
-                              icon={showPassword.confirm ? <FiEyeOff /> : <FiEye />}
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => togglePasswordVisibility('confirm')}
-                              aria-label={showPassword.confirm ? 'Hide password' : 'Show password'}
-                            />
-                          </InputRightElement>
-                        </InputGroup>
-                        {passwordForm.newPassword !== '' && 
-                         passwordForm.confirmPassword !== '' && 
-                         passwordForm.newPassword !== passwordForm.confirmPassword && (
-                          <FormHelperText color="red.500">
-                            Passwords do not match
-                          </FormHelperText>
-                        )}
-                      </FormControl>
-                    </VStack>
-                  </CardBody>
-                  <CardFooter borderTopWidth="1px" borderColor={borderColor} justifyContent="flex-end">
-                    <Button 
-                      bg="blue.600"
-                      color="white"
-                      leftIcon={<FiSave />}
-                      isDisabled={
-                        !passwordForm.currentPassword ||
-                        !passwordForm.newPassword ||
-                        passwordForm.newPassword !== passwordForm.confirmPassword ||
-                        passwordForm.newPassword.length < 8
-                      }
-                      onClick={handleChangePassword}
-                      _hover={{
-                        bg: 'blue.700',
-                      }}
-                      _active={{
-                        bg: 'blue.800',
-                      }}
-                      _disabled={{
-                        bg: 'gray.200',
-                        color: 'gray.500',
-                        cursor: 'not-allowed',
-                      }}
-                    >
-                      Update Password
-                    </Button>
-                  </CardFooter>
-                </Card>
-              </Box>
-            </Grid>
+            <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6}>
+              <CardHeader borderBottomWidth="1px" borderColor={borderColor}>
+                <Text fontSize="lg" fontWeight="semibold">Profile Information</Text>
+                <Text fontSize="sm" color="gray.500">Update your account's profile information and email address</Text>
+              </CardHeader>
+              <CardBody>
+                <VStack spacing={4} align="stretch">
+                  <FormControl>
+                    <FormLabel>Name</FormLabel>
+                    <Input placeholder="Your name" value={profile.name} onChange={(e) => setProfile({...profile, name: e.target.value})} />
+                  </FormControl>
+                  <FormControl>
+                    <FormLabel>Email</FormLabel>
+                    <Input type="email" placeholder="your.email@example.com" value={profile.email} onChange={(e) => setProfile({...profile, email: e.target.value})} />
+                  </FormControl>
+                  <FormControl>
+                    <FormLabel>Bio</FormLabel>
+                    <Textarea placeholder="Tell us about yourself" value={profile.bio} onChange={(e) => setProfile({...profile, bio: e.target.value})} />
+                  </FormControl>
+                  <HStack justify="flex-end" mt={4}>
+                    <Button colorScheme="blue" onClick={handleSaveProfile}>Save Changes</Button>
+                  </HStack>
+                </VStack>
+              </CardBody>
+            </Card>
           </TabPanel>
           
           {/* Notifications Tab */}
           <TabPanel px={0}>
             <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6}>
               <CardHeader borderBottomWidth="1px" borderColor={borderColor}>
-                <Text fontSize="lg" fontWeight="semibold">Email Notifications</Text>
-                <Text fontSize="sm" color="gray.500">Manage your email notification preferences</Text>
+                <Text fontSize="lg" fontWeight="semibold">Notification Preferences</Text>
+                <Text fontSize="sm" color="gray.500">Configure how you receive notifications</Text>
               </CardHeader>
               <CardBody>
-                <VStack spacing={6} align="stretch">
+                <VStack spacing={4} align="stretch">
                   <FormControl display="flex" alignItems="center" justifyContent="space-between">
                     <Box>
-                      <Text fontWeight="medium">Account Notifications</Text>
-                      <Text fontSize="sm" color="gray.500">Important updates about your account</Text>
+                      <FormLabel mb={0} fontWeight="normal">Email Notifications</FormLabel>
+                      <Text fontSize="sm" color="gray.500">Receive notifications via email</Text>
                     </Box>
-                    <Switch 
-                      colorScheme="blue"
-                      isChecked={notificationSettings.email}
-                      onChange={handleNotificationChange('email')}
-                    />
+                    <Switch isChecked={notificationSettings.email} onChange={handleNotificationChange('email')} />
                   </FormControl>
                   
-                  <FormControl display="flex" alignItems="center" justifyContent="space-between">
+                  <FormControl display="flex" alignItems="center" justifyContent="space-between" pl={8}>
                     <Box>
-                      <Text fontWeight="medium">Push Notifications</Text>
-                      <Text fontSize="sm" color="gray.500">Receive notifications in your browser</Text>
-                    </Box>
-                    <Switch 
-                      colorScheme="blue"
-                      isChecked={notificationSettings.push}
-                      onChange={handleNotificationChange('push')}
-                    />
-                  </FormControl>
-                  
-                  <FormControl display="flex" alignItems="center" justifyContent="space-between">
-                    <Box>
-                      <Text fontWeight="medium">Weekly Reports</Text>
+                      <FormLabel mb={0} fontWeight="normal">Weekly Digest</FormLabel>
                       <Text fontSize="sm" color="gray.500">Get a weekly summary of your activity</Text>
                     </Box>
-                    <Switch 
-                      colorScheme="blue"
-                      isChecked={notificationSettings.weeklyReport}
-                      onChange={handleNotificationChange('weeklyReport')}
-                    />
+                    <Switch isChecked={notificationSettings.weeklyReport} onChange={handleNotificationChange('weeklyReport')} isDisabled={!notificationSettings.email} />
                   </FormControl>
                   
                   <FormControl display="flex" alignItems="center" justifyContent="space-between">
                     <Box>
-                      <Text fontWeight="medium">Critical Alerts</Text>
-                      <Text fontSize="sm" color="gray.500">Immediate notifications for important events</Text>
+                      <FormLabel mb={0} fontWeight="normal">Push Notifications</FormLabel>
+                      <Text fontSize="sm" color="gray.500">Receive push notifications on your device</Text>
                     </Box>
-                    <Switch 
-                      colorScheme="blue"
-                      isChecked={notificationSettings.criticalAlerts}
-                      onChange={handleNotificationChange('criticalAlerts')}
-                    />
+                    <Switch isChecked={notificationSettings.push} onChange={handleNotificationChange('push')} />
+                  </FormControl>
+                  
+                  <FormControl display="flex" alignItems="center" justifyContent="space-between">
+                    <Box>
+                      <FormLabel mb={0} fontWeight="normal">SMS Alerts</FormLabel>
+                      <Text fontSize="sm" color="gray.500">Receive important alerts via SMS</Text>
+                    </Box>
+                    <Switch isChecked={notificationSettings.sms} onChange={handleNotificationChange('sms')} />
                   </FormControl>
                 </VStack>
               </CardBody>
-              <CardFooter borderTopWidth="1px" borderColor={borderColor} justifyContent="flex-end">
-                <Button 
-                  bg="blue.600"
-                  color="white"
-                  _hover={{
-                    bg: 'blue.700',
-                  }}
-                  _active={{
-                    bg: 'blue.800',
-                  }}
-                >
-                  Save Preferences
-                </Button>
+              <CardFooter borderTopWidth="1px" borderColor={borderColor} justify="flex-end">
+                <Button colorScheme="blue" onClick={handleSaveNotificationSettings}>Save Preferences</Button>
               </CardFooter>
             </Card>
-            
-            <Alert status="info" variant="left-accent" borderRadius="md" mb={6}>
-              <AlertIcon />
-              <Box>
-                <AlertTitle>Notification Settings</AlertTitle>
-                <AlertDescription fontSize="sm">
-                  Some notifications are required and cannot be turned off, such as important security alerts.
-                </AlertDescription>
-              </Box>
-            </Alert>
           </TabPanel>
           
           {/* API Keys Tab */}
           <TabPanel px={0}>
             <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6}>
-              <CardHeader 
-                borderBottomWidth="1px" 
-                borderColor={borderColor}
-                display="flex"
-                justifyContent="space-between"
-                alignItems="center"
-              >
-                <Box>
-                  <Text fontSize="lg" fontWeight="semibold">API Keys</Text>
-                  <Text fontSize="sm" color="gray.500">Manage your API access keys</Text>
-                </Box>
-                <Button 
-                  leftIcon={<FiPlus />} 
-                  bg="blue.600"
-                  color="white"
-                  size="sm"
-                  onClick={onOpen}
-                  _hover={{
-                    bg: 'blue.700',
-                  }}
-                  _active={{
-                    bg: 'blue.800',
-                  }}
-                >
-                  Create API Key
-                </Button>
-              </CardHeader>
-              
-              {apiKeys.length === 0 ? (
-                <CardBody textAlign="center" py={10}>
-                  <FiKey size={32} style={{ margin: '0 auto 16px', color: '#718096' }} />
-                  <Text fontWeight="medium" mb={2}>No API keys found</Text>
-                  <Text color="gray.500" mb={6} maxW="md" mx="auto">
-                    You don't have any API keys yet. Create your first API key to get started with the API.
-                  </Text>
-                  <Button 
-                    leftIcon={<FiPlus />} 
-                    bg="blue.600"
-                    color="white"
-                    onClick={onOpen}
-                    _hover={{
-                      bg: 'blue.700',
-                    }}
-                    _active={{
-                      bg: 'blue.800',
-                    }}
-                  >
-                    Create API Key
+              <CardHeader borderBottomWidth="1px" borderColor={borderColor}>
+                <HStack justify="space-between" align="center">
+                  <Box>
+                    <Text fontSize="lg" fontWeight="semibold">API Keys</Text>
+                    <Text fontSize="sm" color="gray.500">Manage your API access keys</Text>
+                  </Box>
+                  <Button leftIcon={<FiPlus />} colorScheme="blue" size="sm" onClick={onOpen}>
+                    Create New Key
                   </Button>
+                </HStack>
+              </CardHeader>
+              {apiKeys.length === 0 ? (
+                <CardBody>
+                  <VStack spacing={4} py={8} align="center">
+                    <FiKey size={48} color="#A0AEC0" />
+                    <Text>No API keys found</Text>
+                    <Text fontSize="sm" color="gray.500" textAlign="center" maxW="md">
+                      Create your first API key to start integrating with our API
+                    </Text>
+                    <Button leftIcon={<FiPlus />} colorScheme="blue" mt={4} onClick={onOpen}>
+                      Create New Key
+                    </Button>
+                  </VStack>
                 </CardBody>
               ) : (
                 <CardBody p={0}>
                   <List spacing={0}>
                     {apiKeys.map((key) => (
-                      <ListItem 
-                        key={key.id} 
-                        borderBottomWidth="1px" 
-                        borderColor={borderColor}
-                        _last={{ borderBottom: 'none' }}
-                        p={4}
-                      >
-                        <Box flex="1">
-                          <HStack spacing={3} mb={2}>
+                      <ListItem key={key.id} p={4} borderBottomWidth="1px" borderColor={borderColor}>
+                        <HStack justify="space-between" w="full">
+                          <Box>
                             <Text fontWeight="medium">{key.name}</Text>
-                            <Badge colorScheme={key.name === 'Production' ? 'green' : 'blue'} variant="subtle" size="sm">
-                              {key.name}
-                            </Badge>
-                          </HStack>
-                          <HStack spacing={4} fontSize="sm" color="gray.500">
-                            <HStack spacing={1}>
-                              <FiKey size={14} />
-                              <Text>sk_...{key.key.slice(-4)}</Text>
-                            </HStack>
-                            <HStack spacing={1}>
-                              <FiCalendar size={14} />
+                            <HStack spacing={2} color="gray.500" fontSize="sm">
+                              <Text>•••••••••{key.key.slice(-4)}</Text>
+                              <Text>•</Text>
                               <Text>Created {formatRelativeTime(key.created)}</Text>
                             </HStack>
-                            <HStack spacing={1}>
-                              <FiClock size={14} />
-                              <Text>Last used {formatRelativeTime(key.lastUsed)}</Text>
-                            </HStack>
+                          </Box>
+                          <HStack spacing={2}>
+                            <IconButton
+                              icon={<FiCopy />}
+                              variant="ghost"
+                              size="sm"
+                              aria-label="Copy API key"
+                              onClick={() => copyToClipboard(key.key)}
+                            />
+                            <IconButton
+                              icon={<FiTrash2 />}
+                              variant="ghost"
+                              size="sm"
+                              colorScheme="red"
+                              aria-label="Delete API key"
+                              onClick={() => confirmDeleteKey(key.id)}
+                            />
                           </HStack>
-                        </Box>
-                        <HStack spacing={2}>
-                          <IconButton
-                            icon={<FiCopy />}
-                            variant="ghost"
-                            size="sm"
-                            aria-label="Copy API key"
-                            onClick={() => copyToClipboard(key.key)}
-                          />
-                          <IconButton
-                            icon={<FiTrash2 />}
-                            variant="ghost"
-                            size="sm"
-                            colorScheme="red"
-                            aria-label="Delete API key"
-                            onClick={() => confirmDeleteKey(key.id)}
-                          />
                         </HStack>
                       </ListItem>
                     ))}
@@ -815,505 +769,95 @@ const Settings = () => {
                 </AlertDescription>
               </Box>
             </Alert>
-            
-            {/* Create API Key Modal */}
-            <Modal isOpen={isOpen} onClose={onClose} size="lg">
-              <ModalOverlay />
-              <ModalContent>
-                <ModalHeader>Create New API Key</ModalHeader>
-                <ModalCloseButton />
-                <ModalBody pb={6}>
-                  <VStack spacing={4}>
-                    <FormControl isRequired>
-                      <FormLabel>Name</FormLabel>
-                      <Input 
-                        placeholder="e.g., Production Server" 
-                        value={newApiKey.name}
-                        onChange={(e) => setNewApiKey({...newApiKey, name: e.target.value})}
-                      />
-                      <FormHelperText>Choose a name that helps you identify this key's purpose.</FormHelperText>
-                    </FormControl>
-                    
-                    <FormControl>
-                      <FormLabel>Description (Optional)</FormLabel>
-                      <Textarea 
-                        placeholder="What's this key for?"
-                        value={newApiKey.description}
-                        onChange={(e) => setNewApiKey({...newApiKey, description: e.target.value})}
-                        rows={3}
-                      />
-                    </FormControl>
-                    
-                    <FormControl>
-                      <FormLabel>Permissions</FormLabel>
-                      <VStack align="stretch" spacing={2}>
-                        <HStack justify="space-between">
-                          <Box>
-                            <Text fontWeight="medium">Read Access</Text>
-                            <Text fontSize="sm" color="gray.500">View resources</Text>
-                          </Box>
-                          <Switch defaultChecked colorScheme="blue" />
-                        </HStack>
-                        <HStack justify="space-between">
-                          <Box>
-                            <Text fontWeight="medium">Write Access</Text>
-                            <Text fontSize="sm" color="gray.500">Create and update resources</Text>
-                          </Box>
-                          <Switch defaultChecked colorScheme="blue" />
-                        </HStack>
-                        <HStack justify="space-between">
-                          <Box>
-                            <Text fontWeight="medium">Admin Access</Text>
-                            <Text fontSize="sm" color="gray.500">Full access including deletion</Text>
-                          </Box>
-                          <Switch colorScheme="blue" />
-                        </HStack>
-                      </VStack>
-                    </FormControl>
-                  </VStack>
-                </ModalBody>
-
-                <ModalFooter borderTopWidth="1px" borderColor={borderColor}>
-                  <Button 
-                    variant="outline" 
-                    mr={3} 
-                    onClick={onClose}
-                    borderColor="gray.300"
-                    _hover={{
-                      bg: 'gray.50',
-                    }}
-                  >
-                    Cancel
-                  </Button>
-                  <Button 
-                    bg="blue.600" 
-                    color="white"
-                    leftIcon={<FiKey />}
-                    onClick={handleAddApiKey}
-                    isDisabled={!newApiKey.name.trim()}
-                    _hover={{
-                      bg: 'blue.700',
-                    }}
-                    _active={{
-                      bg: 'blue.800',
-                    }}
-                    _disabled={{
-                      bg: 'gray.200',
-                      color: 'gray.500',
-                      cursor: 'not-allowed',
-                    }}
-                  >
-                    Create API Key
-                  </Button>
-                </ModalFooter>
-              </ModalContent>
-            </Modal>
           </TabPanel>
           
           {/* Security Tab */}
           <TabPanel px={0}>
             <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6}>
               <CardHeader borderBottomWidth="1px" borderColor={borderColor}>
-                <Text fontSize="lg" fontWeight="semibold">Two-Factor Authentication</Text>
-                <Text fontSize="sm" color="gray.500">Add an extra layer of security to your account</Text>
+                <Text fontSize="lg" fontWeight="semibold">Change Password</Text>
+                <Text fontSize="sm" color="gray.500">Update your account password</Text>
               </CardHeader>
               <CardBody>
-                <HStack justify="space-between" align="center">
-                  <Box>
-                    <Text fontWeight="medium">Two-Factor Authentication</Text>
-                    <Text fontSize="sm" color="gray.500">Require a verification code when signing in</Text>
-                  </Box>
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    color="blue.600"
-                    borderColor="blue.600"
-                    _hover={{
-                      bg: 'blue.50',
-                    }}
-                  >
-                    Enable 2FA
-                  </Button>
-                </HStack>
-              </CardBody>
-            </Card>
-            
-            <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6}>
-              <CardHeader borderBottomWidth="1px" borderColor={borderColor}>
-                <Text fontSize="lg" fontWeight="semibold">Active Sessions</Text>
-                <Text fontSize="sm" color="gray.500">Manage your logged-in devices</Text>
-              </CardHeader>
-              <CardBody p={0}>
-                <List spacing={0}>
-                  <ListItem p={4} borderBottomWidth="1px" borderColor={borderColor}>
-                    <HStack spacing={4}>
-                      <Box p={2} bg="blue.50" borderRadius="md" color="blue.500">
-                        <FiMonitor size={24} />
-                      </Box>
-                      <Box flex="1">
-                        <Text fontWeight="medium">macOS on Chrome</Text>
-                        <Text fontSize="sm" color="gray.500">San Francisco, CA, USA • {formatRelativeTime(Date.now() - 3600000)}</Text>
-                      </Box>
-                      <Badge colorScheme="green" variant="subtle">Current Session</Badge>
-                    </HStack>
-                  </ListItem>
-                  <ListItem p={4}>
-                    <HStack spacing={4}>
-                      <Box p={2} bg="gray.100" borderRadius="md" color="gray.500">
-                        <FiSmartphone size={24} />
-                      </Box>
-                      <Box flex="1">
-                        <Text fontWeight="medium">iOS on Mobile Safari</Text>
-                        <Text fontSize="sm" color="gray.500">New York, NY, USA • {formatRelativeTime(Date.now() - 86400000 * 2)}</Text>
-                      </Box>
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        colorScheme="red"
-                        _hover={{
-                          bg: 'red.50',
-                        }}
-                      >
-                        Sign Out
-                      </Button>
-                    </HStack>
-                  </ListItem>
-                </List>
-              </CardBody>
-              <CardFooter borderTopWidth="1px" borderColor={borderColor}>
-                <Button 
-                  variant="link" 
-                  color="blue.600" 
-                  size="sm"
-                  _hover={{
-                    textDecoration: 'none',
-                    color: 'blue.700',
-                  }}
-                >
-                  Sign out of all other devices
-                </Button>
-              </CardFooter>
-            </Card>
-            
-            <Card variant="outline" bg={useColorModeValue('red.50', 'red.900')} borderColor={useColorModeValue('red.200', 'red.800')}>
-              <CardHeader borderBottomWidth="1px" borderColor={useColorModeValue('red.200', 'red.800')}>
-                <Text fontSize="lg" fontWeight="semibold" color={useColorModeValue('red.700', 'red.200')}>
-                  Danger Zone
-                </Text>
-                <Text fontSize="sm" color={useColorModeValue('red.600', 'red.300')}>
-                  These actions are irreversible. Please be certain.
-                </Text>
-              </CardHeader>
-              <CardBody>
-                <VStack spacing={4} align="stretch">
-                  <HStack justify="space-between" align="center">
-                    <Box>
-                      <Text fontWeight="medium">Delete Account</Text>
-                      <Text fontSize="sm" color={useColorModeValue('red.600', 'red.300')}>
-                        Permanently delete your account and all associated data
-                      </Text>
-                    </Box>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      color="red.600"
-                      borderColor="red.600"
-                      _hover={{
-                        bg: 'red.50',
-                      }}
-                    >
-                      Delete Account
-                    </Button>
-                  </HStack>
+                <VStack spacing={4} maxW="md">
+                  <FormControl>
+                    <FormLabel>Current Password</FormLabel>
+                    <InputGroup>
+                      <Input
+                        type={showPassword.current ? 'text' : 'password'}
+                        value={passwordForm.currentPassword}
+                        onChange={(e) => setPasswordForm({...passwordForm, currentPassword: e.target.value})}
+                      />
+                      <InputRightElement width="4.5rem">
+                        <Button h="1.75rem" size="sm" onClick={() => togglePasswordVisibility('current')}>
+                          {showPassword.current ? <FiEyeOff /> : <FiEye />}
+                        </Button>
+                      </InputRightElement>
+                    </InputGroup>
+                  </FormControl>
                   
-                  <HStack justify="space-between" align="center">
-                    <Box>
-                      <Text fontWeight="medium">Export Data</Text>
-                      <Text fontSize="sm" color={useColorModeValue('red.600', 'red.300')}>
-                        Download all your data in a ZIP file
-                      </Text>
-                    </Box>
+                  <FormControl>
+                    <FormLabel>New Password</FormLabel>
+                    <InputGroup>
+                      <Input
+                        type={showPassword.new ? 'text' : 'password'}
+                        value={passwordForm.newPassword}
+                        onChange={(e) => setPasswordForm({...passwordForm, newPassword: e.target.value})}
+                      />
+                      <InputRightElement width="4.5rem">
+                        <Button h="1.75rem" size="sm" onClick={() => togglePasswordVisibility('new')}>
+                          {showPassword.new ? <FiEyeOff /> : <FiEye />}
+                        </Button>
+                      </InputRightElement>
+                    </InputGroup>
+                  </FormControl>
+                  
+                  <FormControl>
+                    <FormLabel>Confirm New Password</FormLabel>
+                    <InputGroup>
+                      <Input
+                        type={showPassword.confirm ? 'text' : 'password'}
+                        value={passwordForm.confirmPassword}
+                        onChange={(e) => setPasswordForm({...passwordForm, confirmPassword: e.target.value})}
+                      />
+                      <InputRightElement width="4.5rem">
+                        <Button h="1.75rem" size="sm" onClick={() => togglePasswordVisibility('confirm')}>
+                          {showPassword.confirm ? <FiEyeOff /> : <FiEye />}
+                        </Button>
+                      </InputRightElement>
+                    </InputGroup>
+                  </FormControl>
+                  
+                  <HStack w="full" justify="flex-end" mt={4}>
                     <Button 
-                      variant="outline" 
-                      size="sm" 
-                      leftIcon={<FiDownload />}
-                      color="gray.600"
-                      borderColor="gray.300"
-                      _hover={{
-                        bg: 'gray.50',
-                      }}
+                      colorScheme="blue" 
+                      onClick={handleChangePassword}
+                      isLoading={isSubmitting}
                     >
-                      Export Data
+                      Update Password
                     </Button>
                   </HStack>
                 </VStack>
+              </CardBody>
+            </Card>
+
+            <Card variant="outline">
+              <CardHeader>
+                <Heading size="md" color="red.500">Danger Zone</Heading>
+              </CardHeader>
+              <CardBody>
+                <Text mb={4}>
+                  Permanently delete your account and all associated data. This action cannot be undone.
+                </Text>
+                <Button colorScheme="red" variant="outline" leftIcon={<FiTrash2 />}>
+                  Delete My Account
+                </Button>
               </CardBody>
             </Card>
           </TabPanel>
         </TabPanels>
       </Tabs>
     </PageLayout>
-
-            <Paper sx={{ p: 3, mb: 3 }}>
-              <Typography variant="subtitle1" gutterBottom>
-                Email Notifications
-              </Typography>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={notificationSettings.email}
-                    onChange={handleNotificationChange('email')}
-                    color="primary"
-                  />
-                }
-                label="Enable email notifications"
-                sx={{ mb: 1, display: 'block' }}
-              />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={notificationSettings.weeklyReport}
-                    onChange={handleNotificationChange('weeklyReport')}
-                    color="primary"
-                    disabled={!notificationSettings.email}
-                  />
-                }
-                label="Weekly summary report"
-                sx={{ mb: 1, display: 'block', ml: 4 }}
-              />
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={notificationSettings.criticalAlerts}
-                    onChange={handleNotificationChange('criticalAlerts')}
-                    color="primary"
-                    disabled={!notificationSettings.email}
-                  />
-                }
-                label="Critical alerts"
-                sx={{ display: 'block', ml: 4 }}
-              />
-            </Paper>
-
-            <Paper sx={{ p: 3 }}>
-              <Typography variant="subtitle1" gutterBottom>
-                Push Notifications
-              </Typography>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={notificationSettings.push}
-                    onChange={handleNotificationChange('push')}
-                    color="primary"
-                  />
-                }
-                label="Enable push notifications"
-              />
-            </Paper>
-          </Box>
-        );
-
-      case 2: // API Keys
-        return (
-          <Box>
-            <Typography variant="h6" gutterBottom>
-              API Keys
-            </Typography>
-            <Typography variant="body2" color="textSecondary" paragraph>
-              Manage your API keys for programmatic access to the Supply Chain API.
-            </Typography>
-
-            <Box sx={{ display: 'flex', gap: 2, mb: 3 }}>
-              <TextField
-                label="Key Name"
-                value={newApiKey.name}
-                onChange={(e) => setNewApiKey({ ...newApiKey, name: e.target.value })}
-                size="small"
-                sx={{ flex: 1 }}
-                placeholder="e.g., Production, Development"
-              />
-              {editingKey ? (
-                <>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    startIcon={<SaveIcon />}
-                    onClick={handleUpdateApiKey}
-                    disabled={!newApiKey.name.trim()}
-                  >
-                    Update
-                  </Button>
-                  <Button
-                    variant="outlined"
-                    startIcon={<CancelIcon />}
-                    onClick={handleCancelEdit}
-                  >
-                    Cancel
-                  </Button>
-                </>
-              ) : (
-                <Button
-                  variant="contained"
-                  color="primary"
-                  startIcon={<AddIcon />}
-                  onClick={handleAddApiKey}
-                  disabled={!newApiKey.name.trim()}
-                >
-                  Add Key
-                </Button>
-              )}
-            </Box>
-
-            <Paper>
-              <List>
-                <ListSubheader>Your API Keys</ListSubheader>
-                {apiKeys.length === 0 ? (
-                  <ListItem>
-                    <ListItemText primary="No API keys found" />
-                  </ListItem>
-                ) : (
-                  apiKeys.map((key) => (
-                    <ListItem key={key.id} divider>
-                      <ListItemText
-                        primary={key.name}
-                        secondary={`Created: ${key.created} • ${key.key}`}
-                        sx={{ wordBreak: 'break-all' }}
-                      />
-                      <ListItemSecondaryAction>
-                        <IconButton
-                          edge="end"
-                          onClick={() => handleEditApiKey(key)}
-                          sx={{ mr: 1 }}
-                        >
-                          <EditIcon />
-                        </IconButton>
-                        <IconButton
-                          edge="end"
-                          onClick={() => handleDeleteApiKey(key.id)}
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </ListItemSecondaryAction>
-                    </ListItem>
-                  ))
-                )}
-              </List>
-            </Paper>
-
-            <Alert severity="info" sx={{ mt: 3 }}>
-              <strong>Keep your API keys secure.</strong> Do not share them in publicly accessible
-              areas such as GitHub, client-side code, and so forth.
-            </Alert>
-          </Box>
-        );
-
-      case 3: // Security
-        return (
-          <Box>
-            <Typography variant="h6" gutterBottom>
-              Security Settings
-            </Typography>
-            <Typography variant="body2" color="textSecondary" paragraph>
-              Manage your account security settings and active sessions.
-            </Typography>
-
-            <Paper sx={{ p: 3, mb: 3 }}>
-              <Typography variant="subtitle1" gutterBottom>
-                Two-Factor Authentication
-              </Typography>
-              <Typography variant="body2" paragraph>
-                Add an extra layer of security to your account by enabling two-factor authentication.
-              </Typography>
-              <Button variant="outlined" color="primary">
-                Set Up Two-Factor Authentication
-              </Button>
-            </Paper>
-
-            <Paper sx={{ p: 3, mb: 3 }}>
-              <Typography variant="subtitle1" gutterBottom>
-                Active Sessions
-              </Typography>
-              <Typography variant="body2" paragraph>
-                This is a list of devices that have logged into your account. Revoke any sessions that you do not recognize.
-              </Typography>
-              <List>
-                <ListItem divider>
-                  <ListItemText
-                    primary="Chrome on Windows 10"
-                    secondary={`Current session • Last active: ${new Date().toLocaleString()}`}
-                  />
-                  <ListItemSecondaryAction>
-                    <Button color="error" size="small">
-                      Revoke
-                    </Button>
-                  </ListItemSecondaryAction>
-                </ListItem>
-                <ListItem>
-                  <ListItemText
-                    primary="Firefox on macOS"
-                    secondary={`Last active: 2 days ago`}
-                  />
-                  <ListItemSecondaryAction>
-                    <Button color="error" size="small">
-                      Revoke
-                    </Button>
-                  </ListItemSecondaryAction>
-                </ListItem>
-              </List>
-            </Paper>
-
-            <Paper sx={{ p: 3 }}>
-              <Typography variant="subtitle1" gutterBottom color="error">
-                Danger Zone
-              </Typography>
-              <Typography variant="body2" paragraph>
-                Permanently delete your account and all associated data. This action cannot be undone.
-              </Typography>
-              <Button variant="outlined" color="error" startIcon={<DeleteIcon />}>
-                Delete My Account
-              </Button>
-            </Paper>
-          </Box>
-        );
-
-      default:
-        return null;
-    }
-  };
-
-  return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        Settings
-      </Typography>
-      
-      <Tabs
-        value={tabValue}
-        onChange={handleTabChange}
-        variant="scrollable"
-        scrollButtons="auto"
-        sx={{ mb: 3 }}
-      >
-        <Tab icon={<PersonIcon />} label="Profile" />
-        <Tab icon={<NotificationsIcon />} label="Notifications" />
-        <Tab icon={<ApiIcon />} label="API Keys" />
-        <Tab icon={<SecurityIcon />} label="Security" />
-      </Tabs>
-
-      {renderTabContent()}
-
-      <Snackbar
-        open={showKeyAlert}
-        autoHideDuration={6000}
-        onClose={() => setShowKeyAlert(false)}
-        message="New API key created. Make sure to copy it now as you won't be able to see it again!"
-        action={
-          <Button color="secondary" size="small" onClick={() => setShowKeyAlert(false)}>
-            OK
-          </Button>
-        }
-      />
-    </Box>
   );
 };
 

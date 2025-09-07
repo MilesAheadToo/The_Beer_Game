@@ -1,17 +1,19 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   Text, 
   Progress, 
   VStack, 
+  HStack,
   Button, 
   NumberInput, 
   NumberInputField, 
   NumberInputStepper, 
   NumberIncrementStepper, 
   NumberDecrementStepper,
-  useToast
+  useToast,
+  Badge
 } from '@chakra-ui/react';
-import { CheckCircleIcon, TimeIcon } from '@chakra-ui/icons';
+import { CheckCircleIcon, TimeIcon, WarningIcon } from '@chakra-ui/icons';
 import api from '../services/api';
 
 const RoundTimer = ({ gameId, playerId, roundNumber, onOrderSubmit, isPlayerTurn }) => {
@@ -21,50 +23,15 @@ const RoundTimer = ({ gameId, playerId, roundNumber, onOrderSubmit, isPlayerTurn
   const [roundEndsAt, setRoundEndsAt] = useState(null);
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const toast = useToast();
+  const timerRef = useRef(null);
 
-  // Fetch round status when component mounts or round changes
-  useEffect(() => {
-    const fetchRoundStatus = async () => {
-      try {
-        const status = await api.getRoundStatus(gameId);
-        setRoundEndsAt(new Date(status.ends_at));
-        
-        // Check if player has already submitted
-        if (status.submitted_players.some(p => p.id === playerId)) {
-          setHasSubmitted(true);
-          const playerOrder = status.submitted_players.find(p => p.id === playerId);
-          setOrderQuantity(playerOrder.quantity);
-        }
-      } catch (error) {
-        console.error('Error fetching round status:', error);
-      }
-    };
-
-    fetchRoundStatus();
-    
-    // Set up interval to update timer every second
-    const timer = setInterval(() => {
-      if (roundEndsAt) {
-        const now = new Date();
-        const diff = Math.max(0, Math.floor((roundEndsAt - now) / 1000));
-        setTimeLeft(diff);
-        
-        // If time's up and we haven't submitted, submit zero
-        if (diff <= 0 && !hasSubmitted && isPlayerTurn) {
-          handleSubmit();
-        }
-      }
-    }, 1000);
-    
-    return () => clearInterval(timer);
-  }, [gameId, playerId, roundNumber, roundEndsAt, hasSubmitted, isPlayerTurn]);
-
-  const handleSubmit = useCallback(async () => {
-    if (orderQuantity === null || orderQuantity < 0) return;
+  // Handle order submission
+  const handleSubmit = useCallback(async (quantity) => {
+    if (quantity === null || quantity < 0) return;
     
     setIsSubmitting(true);
     try {
-      await onOrderSubmit(orderQuantity);
+      await onOrderSubmit(quantity);
       setHasSubmitted(true);
       toast({
         title: 'Order submitted!',
@@ -84,7 +51,64 @@ const RoundTimer = ({ gameId, playerId, roundNumber, onOrderSubmit, isPlayerTurn
     } finally {
       setIsSubmitting(false);
     }
-  }, [orderQuantity, onOrderSubmit]);
+  }, [onOrderSubmit, toast]);
+
+  // Fetch round status when component mounts or round changes
+  useEffect(() => {
+    const fetchRoundStatus = async () => {
+      try {
+        const status = await api.getRoundStatus(gameId);
+        setRoundEndsAt(new Date(status.ends_at));
+        
+        // Check if player has already submitted
+        if (status.submitted_players?.some(p => p.id === playerId)) {
+          setHasSubmitted(true);
+          const playerOrder = status.submitted_players.find(p => p.id === playerId);
+          if (playerOrder) {
+            setOrderQuantity(playerOrder.quantity);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching round status:', error);
+      }
+    };
+
+    fetchRoundStatus();
+    
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [gameId, playerId, roundNumber]);
+
+  // Set up timer
+  useEffect(() => {
+    if (!roundEndsAt) return;
+    
+    const updateTimer = () => {
+      const now = new Date();
+      const diff = Math.max(0, Math.floor((roundEndsAt - now) / 1000));
+      setTimeLeft(diff);
+      
+      // If time's up and we haven't submitted, submit zero
+      if (diff <= 0 && !hasSubmitted && isPlayerTurn) {
+        handleSubmit(0);
+      }
+    };
+    
+    // Initial update
+    updateTimer();
+    
+    // Set up interval
+    timerRef.current = setInterval(updateTimer, 1000);
+    
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
+  }, [roundEndsAt, hasSubmitted, isPlayerTurn, handleSubmit]);
 
   const formatTime = (seconds) => {
     const mins = Math.floor(seconds / 60);

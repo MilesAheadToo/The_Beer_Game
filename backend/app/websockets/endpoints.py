@@ -16,10 +16,11 @@ from . import manager
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-@router.websocket("/ws/games/{game_id}")
+@router.websocket("/ws/games/{game_id}/players/{player_id}")
 async def websocket_endpoint(
     websocket: WebSocket,
     game_id: int,
+    player_id: int,
     token: str = None,
     db: AsyncSession = Depends(get_db)
 ):
@@ -27,21 +28,37 @@ async def websocket_endpoint(
     client_id = str(uuid.uuid4())
     user = None
     
+    # Log connection attempt
+    logger.info(f"WebSocket connection attempt - Game: {game_id}, Player: {player_id}, Client: {client_id}")
+    
     try:
-        # Authenticate the user using the token
+        # Accept the WebSocket connection first
+        await websocket.accept()
+        logger.info(f"WebSocket connection accepted - Game: {game_id}, Player: {player_id}, Client: {client_id}")
+        
+        # Authenticate the user using the token if provided
         if token:
             try:
                 user = await get_current_user(token)
-                logger.info(f"WebSocket connection from user {user.id} for game {game_id}")
+                logger.info(f"Authenticated WebSocket connection - User: {user.id}, Game: {game_id}, Player: {player_id}")
+                
+                # Verify the player ID matches the authenticated user if needed
+                # This is a good place to add additional authorization checks
+                
             except Exception as e:
-                logger.warning(f"WebSocket auth failed: {e}")
-                await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+                error_msg = f"WebSocket authentication failed: {str(e)}"
+                logger.warning(error_msg, exc_info=True)
+                await websocket.close(
+                    code=status.WS_1008_POLICY_VIOLATION, 
+                    reason=error_msg[:120]  # Reason has a max length
+                )
                 return
         else:
-            logger.info(f"Unauthenticated WebSocket connection for game {game_id}")
+            logger.warning(f"Unauthenticated WebSocket connection - Game: {game_id}, Player: {player_id}")
         
-        # Accept the WebSocket connection
-        await manager.connect(websocket, game_id, client_id)
+        # Register the connection with the manager
+        await manager.connect(websocket, game_id, client_id, player_id=player_id, db=db)
+        logger.info(f"WebSocket connection registered with manager - Game: {game_id}, Player: {player_id}, Client: {client_id}")
         
         # Main message loop
         while True:

@@ -10,8 +10,6 @@ import {
   Text, 
   Badge, 
   useToast,
-  Card,
-  CardBody,
   useColorModeValue,
   Tabs,
   TabList,
@@ -45,48 +43,51 @@ const GameBoard = () => {
   const { gameId } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
-  const [isLoading, setIsLoading] = useState(true);
+  const [gameState, setGameState] = useState(null);
   const [gameDetails, setGameDetails] = useState(null);
-  const [playerRole, setPlayerRole] = useState(null);
+  const [playerRole, setPlayerRole] = useState('');
   const [playerId, setPlayerId] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [orderQuantity, setOrderQuantity] = useState(0);
+  const [inventory, setInventory] = useState(0);
+  const [backlog, setBacklog] = useState(0);
+  const [cost, setCost] = useState(0);
   const [isPlayerTurn, setIsPlayerTurn] = useState(false);
-  const [roundStatus, setRoundStatus] = useState({
-    timeLeft: 60,
-    hasSubmitted: false,
-    submittedOrder: 0,
-    roundEndsAt: null
-  });
+  const [roundEndsAt, setRoundEndsAt] = useState(null);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
+  const { isOpen, onClose } = useDisclosure();
+  const { gameStatus } = useWebSocket();
   
-  const { 
-    gameState, 
-    gameStatus 
-  } = useWebSocket();
-  
-  // Modal for game settings
-  const { isOpen, onOpen, onClose } = useDisclosure();
-  
-  // Update round status when game state changes
+  // Update game state when game ID changes
   useEffect(() => {
-    const updateRoundStatus = async () => {
-      if (gameId && playerId) {
+    const fetchGameState = async () => {
+      if (gameId) {
         try {
-          const status = await api.getRoundStatus(gameId);
-          setRoundStatus(prev => ({
-            ...prev,
-            timeLeft: Math.max(0, Math.floor((new Date(status.ends_at) - new Date()) / 1000)),
-            hasSubmitted: status.submitted_players.some(p => p.id === playerId),
-            submittedOrder: status.submitted_players.find(p => p.id === playerId)?.quantity || 0,
-            roundEndsAt: status.ends_at
-          }));
+          const state = await api.getGameState(gameId);
+          setGameState(state);
+          
+          // Update derived state
+          if (state.current_round) {
+            setRoundEndsAt(new Date(state.current_round.ends_at));
+            setIsPlayerTurn(state.current_round.current_player_id === state.player_id);
+            setHasSubmitted(state.current_round.submitted_players.some(p => p.id === state.player_id));
+          }
         } catch (error) {
-          console.error('Error updating round status:', error);
+          console.error('Error fetching game state:', error);
+          toast({
+            title: 'Error',
+            description: 'Failed to load game state',
+            status: 'error',
+            duration: 5000,
+            isClosable: true,
+          });
         }
       }
     };
     
-    const interval = setInterval(updateRoundStatus, 1000);
-    return () => clearInterval(interval);
-  }, [gameId, playerId]);
+    fetchGameState();
+  }, [gameId, toast]);
   
   // Fetch game details on component mount
   useEffect(() => {

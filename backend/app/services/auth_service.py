@@ -3,6 +3,7 @@ import pyotp
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
 from fastapi import Depends, HTTPException, status, Request
+from sqlalchemy import select, or_
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
@@ -68,65 +69,135 @@ class AuthService:
         self.db.refresh(db_user)
         return db_user
     
-    def authenticate_user(self, username: str, password: str, request: Request = None) -> Optional[User]:
+    async def authenticate_user(self, username: str, password: str, mfa_code: Optional[str] = None, 
+                             client_ip: Optional[str] = None, user_agent: Optional[str] = None) -> Optional[Token]:
         """
         Authenticate a user with username/email and password with security features.
         
         Args:
-            username: Can be either username or email
-            password: Plain text password
-            request: FastAPI request object for IP tracking
+            username: The username or email of the user
+            password: The user's password
+            mfa_code: Optional MFA code if MFA is enabled
+            client_ip: Client IP address for audit logging
+            user_agent: User agent string for audit logging
             
         Returns:
-            User object if authentication succeeds, None otherwise
+            Token object with access and refresh tokens if authentication is successful
             
         Raises:
-            HTTPException: If account is locked or other security violations
+            HTTPException: If authentication fails
         """
-        # Try to find user by email or username
-        user = self.db.query(User).filter(
-            or_(User.email == username, User.username == username)
-        ).first()
+        # First, try to find the user by username or email
+        stmt = select(User).where(
+            or_(User.username == username, User.email == username)
+        )
+        result = await self.db.execute(stmt)
+        user = result.scalars().first()
         
         if not user:
-            # User not found, but don't reveal that to prevent user enumeration
+            # User not found - we don't want to reveal that the user doesn't exist
+            # So we'll just simulate password verification to prevent timing attacks
+            get_password_hash("dummy_password")
             return None
             
-        # Check if account is locked
-        if user.locked_until and user.locked_until > datetime.utcnow():
+        # Check if the account is locked
+        if user.failed_login_attempts >= settings.MAX_LOGIN_ATTEMPTS and \
+           user.last_failed_login and \
+           (datetime.utcnow() - user.last_failed_login).total_seconds() < settings.LOGIN_LOCKOUT_MINUTES * 60:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Account is temporarily locked due to too many failed login attempts"
+                detail=f"Account locked. Please try again in {settings.LOGIN_LOCKOUT_MINUTES} minutes or reset your password."
             )
             
-        # Verify password
+        # Verify the password
         if not verify_password(password, user.hashed_password):
-            # Increment failed login attempts
+            # Update failed login attempts
             user.failed_login_attempts += 1
-            
-            # Check if account should be locked
-            if user.failed_login_attempts >= settings.PASSWORD_MAX_ATTEMPTS:
-                user.is_locked = True
-                user.lockout_until = datetime.utcnow() + timedelta(minutes=settings.PASSWORD_LOCKOUT_MINUTES)
-                
-            self.db.commit()
+            user.last_failed_login = datetime.utcnow()
+            await self.db.commit()
             return None
             
-        # Reset failed login attempts on successful login
+        # If we get here, the password is correct
+        # Reset failed login attempts
         if user.failed_login_attempts > 0:
             user.failed_login_attempts = 0
-            user.is_locked = False
-            user.lockout_until = None
+            await self.db.commit()
             
-        # Update last login time
-        user.last_login = datetime.utcnow()
-        self.db.commit()
+        # If MFA is enabled, verify the MFA code
+        if user.mfa_enabled:
+            if not mfa_code:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="MFA code is required"
+                )
+                
+            if not await self.verify_mfa_code(user, mfa_code):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid MFA code"
+                )
         
-        # Return the user object to be used by the login endpoint
-        return user
+        # Generate tokens
+        access_token = await self.create_access_token(user.id)
+        refresh_token = await self.create_refresh_token(user.id)
+        
+        # Create a refresh token record in the database
+        await self.create_refresh_token_record(
+            user_id=user.id,
+            token=refresh_token,
+            ip_address=client_ip,
+            user_agent=user_agent
+        )
+        
+        return Token(
+            access_token=access_token,
+            token_type="bearer",
+            refresh_token=refresh_token
+        )
+        
+    async def create_refresh_token_record(self, user_id: int, token: str, 
+                                      ip_address: Optional[str] = None, 
+                                      user_agent: Optional[str] = None) -> RefreshToken:
+        """Create a new refresh token record in the database."""
+        expires_delta = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        expires_at = datetime.utcnow() + expires_delta
+        
+        refresh_token = RefreshToken(
+            token=token,
+            user_id=user_id,
+            expires_at=expires_at,
+            ip_address=ip_address,
+            user_agent=user_agent,
+            is_revoked=False
+        )
+        
+        self.db.add(refresh_token)
+        await self.db.commit()
+        await self.db.refresh(refresh_token)
+        
+        return refresh_token
     
-    def create_access_token(self, user: User, mfa_verified: bool = False) -> dict:
-        """Create access and refresh tokens for a user with enhanced security.
+    async def create_access_token(self, user_id: int) -> str:
+        """Create a new access token for the given user ID."""
+        expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        return create_access_token(user_id, expires_delta=expires_delta)
+        
+    async def create_refresh_token(self, user_id: int) -> str:
+        """Create a new refresh token for the given user ID."""
+        expires_delta = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+        return create_refresh_token(user_id, expires_delta=expires_delta)
+        
+    async def verify_mfa_code(self, user: User, code: str) -> bool:
+        """Verify an MFA code for the given user."""
+        if not user.mfa_secret:
+            return False
+            
+        totp = pyotp.TOTP(user.mfa_secret)
+        return totp.verify(code)
+    
+    async def create_access_token(self, user: User, mfa_verified: bool = False) -> dict:
+        """
+        Create access and refresh tokens for a user with enhanced security.
         
         Args:
             user: The user object for which to create tokens
@@ -135,69 +206,100 @@ class AuthService:
         Returns:
             dict: A dictionary containing access_token, refresh_token, and user details
         """
-        # Create access token with standard claims
+        # Create access token with user claims
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
-            user_id=str(user.id),
+            data={
+                "sub": str(user.id),
+                "email": user.email,
+                "is_superuser": user.is_superuser,
+                "mfa_verified": mfa_verified
+            },
             expires_delta=access_token_expires
         )
         
         # Create refresh token
-        refresh_token_expires = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-        refresh_token = secrets.token_urlsafe(32)
-        self._create_refresh_token(
-            user.id,
-            refresh_token_expires,
-            refresh_token
+        refresh_token = await self.create_refresh_token(user.id)
+        
+        # Create a refresh token record in the database
+        await self.create_refresh_token_record(
+            user_id=user.id,
+            token=refresh_token
         )
         
-        # Prepare user data to return
-        user_data = {
-            "id": user.id,
-            "username": user.username,
-            "email": user.email,
-            "is_superuser": user.is_superuser,
-            "is_active": user.is_active,
-            "mfa_enabled": user.mfa_enabled,
-            "mfa_verified": mfa_verified
-        }
-        
+        # Return tokens and user info
         return {
             "access_token": access_token,
             "token_type": "bearer",
-            "expires_in": int(access_token_expires.total_seconds()),
             "refresh_token": refresh_token,
-            "user": user_data
+            "user": {
+                "id": user.id,
+                "email": user.email,
+                "username": user.username,
+                "full_name": user.full_name,
+                "is_active": user.is_active,
+                "is_superuser": user.is_superuser,
+                "mfa_enabled": user.mfa_enabled,
+                "mfa_verified": mfa_verified
+            }
         }
     
-    def refresh_access_token(self, refresh_token: str) -> Token:
+    async def refresh_access_token(self, refresh_token: str) -> Token:
         """Refresh an access token using a refresh token."""
-        db_token = self.db.query(RefreshToken).filter(
+        stmt = select(RefreshToken).where(
             RefreshToken.token == refresh_token,
             RefreshToken.expires_at > datetime.utcnow()
-        ).first()
+        )
+        result = await self.db.execute(stmt)
+        db_token = result.scalars().first()
         
         if not db_token:
-            raise ValueError("Invalid refresh token")
-        
-        user = self.db.query(User).filter(User.id == db_token.user_id).first()
-        if not user or not user.is_active:
-            raise ValueError("User not found or inactive")
-        
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid or expired refresh token"
+            )
+            
+        if db_token.is_revoked:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Refresh token has been revoked"
+            )
+            
         # Create new access token
-        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        new_access_token = create_access_token(
-            data={"sub": user.username},
-            expires_delta=access_token_expires
+        access_token = await self.create_access_token(db_token.user_id)
+        
+        # Create new refresh token
+        new_refresh_token = await self.create_refresh_token(db_token.user_id)
+        
+        # Revoke the old refresh token
+        db_token.is_revoked = True
+        db_token.revoked_at = datetime.utcnow()
+        self.db.add(db_token)
+        
+        try:
+            await self.db.commit()
+            await self.db.refresh(db_token)
+        except Exception as e:
+            await self.db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to refresh access token"
+            )
+            
+        # Create a new refresh token record
+        await self.create_refresh_token_record(
+            user_id=db_token.user_id,
+            token=new_refresh_token
         )
         
+        # Return the new tokens
         return Token(
-            access_token=new_access_token,
-            refresh_token=refresh_token,
-            token_type="bearer"
+            access_token=access_token,
+            token_type="bearer",
+            refresh_token=new_refresh_token
         )
-    
-    def get_current_user(self, token: str = Depends(oauth2_scheme)) -> User:
+        
+    async def get_current_user(self, token: str = Depends(oauth2_scheme)) -> User:
         """Get the current user from a JWT token."""
         credentials_exception = HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -206,49 +308,43 @@ class AuthService:
         )
         
         try:
-            # Decode the JWT token
             payload = jwt.decode(
-                token,
-                settings.SECRET_KEY,
-                algorithms=[settings.ALGORITHM],
-                options={"require_exp": True}  # Ensure exp claim is present
+                token, 
+                settings.SECRET_KEY, 
+                algorithms=[settings.ALGORITHM]
             )
+            user_id = payload.get("sub")
             
-            # Get the email from the token
-            email: str = payload.get("sub")
-            if not email:
+            if user_id is None:
                 raise credentials_exception
                 
-            # Get the user from the database
-            user = self.get_user_by_email(email)
+            stmt = select(User).where(User.id == int(user_id))
+            result = await self.db.execute(stmt)
+            user = result.scalars().first()
+            
             if user is None:
                 raise credentials_exception
                 
-            # Check if user is active
-            if not user.is_active:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Inactive user"
-                )
-                
             return user
             
-        except JWTError as e:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid authentication credentials",
-                headers={"WWW-Authenticate": "Bearer"},
-            ) from e
+        except JWTError:
+            raise credentials_exception
     
-    def get_user_by_username(self, username: str) -> Optional[User]:
+    async def get_user_by_username(self, username: str) -> Optional[User]:
         """Get a user by username."""
-        return self.db.query(User).filter(User.username == username).first()
-    
-    def get_user_by_email(self, email: str) -> Optional[User]:
-        """Get a user by email."""
-        return self.db.query(User).filter(User.email == email).first()
+        stmt = select(User).where(User.username == username)
+        result = await self.db.execute(stmt)
+        return result.scalars().first()
         
-    def _create_refresh_token(self, user_id: int, expires_delta: timedelta, jti: str = None) -> RefreshToken:
+    async def get_user_by_email(self, email: str) -> Optional[User]:
+        """Get a user by email."""
+        from sqlalchemy.future import select
+        
+        stmt = select(User).where(User.email == email)
+        result = await self.db.execute(stmt)
+        return result.scalars().first()
+        
+    async def _create_refresh_token(self, user_id: int, expires_delta: timedelta, jti: str = None) -> RefreshToken:
         """Create and store a refresh token in the database."""
         expires = datetime.utcnow() + expires_delta
         token = secrets.token_urlsafe(64)  # Longer token for refresh tokens
@@ -259,37 +355,61 @@ class AuthService:
             created_at=datetime.utcnow()
         )
         self.db.add(db_token)
-        self.db.commit()
+        await self.db.commit()
+        await self.db.refresh(db_token)
         return db_token
         
-    def _add_to_password_history(self, user_id: int, hashed_password: str) -> None:
-        """Add a password to the user's password history.
+    async def _add_to_password_history(self, user_id: int, hashed_password: str) -> None:
+        """
+        Add a password to the user's password history.
         
         Args:
             user_id: The ID of the user
             hashed_password: The hashed password to add to history
         """
-        # Get the current password history count
-        history_count = self.db.query(PasswordHistory).filter_by(user_id=user_id).count()
+        from sqlalchemy.future import select
+        from sqlalchemy import func, delete
         
-        # If we've reached the maximum history size, remove the oldest entry
-        if history_count >= settings.PASSWORD_HISTORY_SIZE:
-            oldest = self.db.query(PasswordHistory).filter_by(user_id=user_id)\
-                .order_by(PasswordHistory.created_at.asc()).first()
-            if oldest:
-                self.db.delete(oldest)
+        # Get the current time
+        now = datetime.utcnow()
         
-        # Add the new password to history
+        # Create a new password history record
         password_history = PasswordHistory(
             user_id=user_id,
             hashed_password=hashed_password,
-            created_at=datetime.utcnow()
+            created_at=now
         )
+        
         self.db.add(password_history)
-        self.db.commit()
-    
-    def is_password_in_history(self, user_id: int, password: str) -> bool:
-        """Check if the given password is in the user's password history.
+        
+        # Get the count of password history records for this user
+        stmt = select(func.count(PasswordHistory.id)).where(
+            PasswordHistory.user_id == user_id
+        )
+        result = await self.db.execute(stmt)
+        count = result.scalar_one()
+        
+        # If we have more than the allowed history, delete the oldest ones
+        if count > settings.PASSWORD_HISTORY_LIMIT:
+            # Get the ID of the oldest record to keep
+            subq = select(PasswordHistory.id).where(
+                PasswordHistory.user_id == user_id
+            ).order_by(PasswordHistory.created_at.desc()).offset(
+                settings.PASSWORD_HISTORY_LIMIT - 1
+            ).limit(1).subquery()
+            
+            # Delete all records older than the one we want to keep
+            stmt = delete(PasswordHistory).where(
+                PasswordHistory.user_id == user_id,
+                PasswordHistory.id < select(subq.c.id).scalar_subquery()
+            )
+            await self.db.execute(stmt)
+        
+        await self.db.commit()
+        
+    async def is_password_in_history(self, user_id: int, password: str) -> bool:
+        """
+        Check if the given password is in the user's password history.
         
         Args:
             user_id: The ID of the user
@@ -298,14 +418,28 @@ class AuthService:
         Returns:
             bool: True if password is in history, False otherwise
         """
-        # Get all password history entries for the user
-        history = self.db.query(PasswordHistory).filter_by(user_id=user_id).all()
+        from sqlalchemy.future import select
         
-        # Check if the password matches any in history
-        return any(pwd_context.verify(password, entry.hashed_password) for entry in history)
-    
-    def change_password(self, user: User, current_password: str, new_password: str) -> bool:
-        """Change a user's password with security checks.
+        # Get the user's password history (most recent first)
+        stmt = select(PasswordHistory).where(
+            PasswordHistory.user_id == user_id
+        ).order_by(PasswordHistory.created_at.desc()).limit(
+            settings.PASSWORD_HISTORY_LIMIT
+        )
+        
+        result = await self.db.execute(stmt)
+        history = result.scalars().all()
+        
+        # Check if the password matches any in the history
+        for record in history:
+            if verify_password(password, record.hashed_password):
+                return True
+                
+        return False
+            
+    async def change_password(self, user: User, current_password: str, new_password: str) -> bool:
+        """
+        Change a user's password with security checks.
         
         Args:
             user: The user changing their password
@@ -331,6 +465,23 @@ class AuthService:
             raise ValueError("New password does not meet complexity requirements")
             
         # Check if password was used before
+        if await self.is_password_in_history(user.id, new_password):
+            raise ValueError("You have used this password before. Please choose a different one.")
+            
+        # Hash the new password
+        hashed_password = get_password_hash(new_password)
+        
+        # Update the user's password
+        user.hashed_password = hashed_password
+        user.password_changed_at = datetime.utcnow()
+        
+        # Add the new password to history
+        await self._add_to_password_history(user.id, hashed_password)
+        
+        # Save changes
+        await self.db.commit()
+        
+        return True
         if self.is_password_in_history(user.id, new_password):
             raise ValueError("You cannot reuse a previous password")
             
@@ -342,11 +493,7 @@ class AuthService:
         # Add to password history
         self._add_to_password_history(user.id, new_hashed_password)
         
-        # Save changes
-        self.db.commit()
-        return True
-        
-    def generate_mfa_secret(self, user: User) -> str:
+    async def generate_mfa_secret(self, user: User) -> str:
         """Generate a new MFA secret for a user.
         
         Args:
@@ -358,15 +505,17 @@ class AuthService:
         # Generate a new secret
         secret = pyotp.random_base32()
         
-        # Store the secret in the user's record
+        # Update the user's MFA secret
         user.mfa_secret = secret
         user.mfa_enabled = False  # Not enabled until verified
-        self.db.commit()
+        
+        await self.db.commit()
         
         return secret
         
-    def generate_mfa_uri(self, user: User, secret: str) -> str:
-        """Generate a provisioning URI for the MFA app.
+    async def generate_mfa_uri(self, user: User, secret: str) -> str:
+        """
+        Generate a provisioning URI for the MFA app.
         
         Args:
             user: The user to generate the URI for
@@ -380,8 +529,9 @@ class AuthService:
             issuer_name=settings.PROJECT_NAME
         )
         
-    def verify_mfa_code(self, user: User, code: str) -> bool:
-        """Verify an MFA code for a user.
+    async def verify_mfa_code(self, user: User, code: str) -> bool:
+        """
+        Verify an MFA code for a user.
         
         Args:
             user: The user to verify the code for
@@ -396,8 +546,9 @@ class AuthService:
         totp = pyotp.TOTP(user.mfa_secret)
         return totp.verify(code, valid_window=1)  # Allow 30s before/after for clock skew
         
-    def enable_mfa(self, user: User, code: str) -> bool:
-        """Enable MFA for a user after verifying their first code.
+    async def enable_mfa(self, user: User, code: str) -> bool:
+        """
+        Enable MFA for a user after verifying their first code.
         
         Args:
             user: The user to enable MFA for
@@ -409,25 +560,29 @@ class AuthService:
         if not user.mfa_secret:
             return False
             
-        if not self.verify_mfa_code(user, code):
+        totp = pyotp.TOTP(user.mfa_secret)
+        if not totp.verify(code):
             return False
             
         user.mfa_enabled = True
-        self.db.commit()
+        await self.db.commit()
+        
         return True
         
-    def disable_mfa(self, user: User) -> None:
-        """Disable MFA for a user.
+    async def disable_mfa(self, user: User) -> None:
+        """
+        Disable MFA for a user.
         
         Args:
             user: The user to disable MFA for
         """
         user.mfa_enabled = False
         user.mfa_secret = None
-        self.db.commit()
+        await self.db.commit()
         
-    def generate_recovery_codes(self, user: User, count: int = 10) -> List[str]:
-        """Generate recovery codes for MFA.
+    async def generate_recovery_codes(self, user: User, count: int = 10) -> List[str]:
+        """
+        Generate recovery codes for MFA.
         
         Args:
             user: The user to generate recovery codes for
@@ -436,13 +591,22 @@ class AuthService:
         Returns:
             List[str]: List of recovery codes
         """
+        # Generate new recovery codes
         codes = [secrets.token_urlsafe(16) for _ in range(count)]
-        user.mfa_recovery_codes = codes
-        self.db.commit()
+        
+        # Hash the codes before storing them
+        hashed_codes = [get_password_hash(code) for code in codes]
+        
+        # Store the hashed codes in the database
+        user.mfa_recovery_codes = hashed_codes
+        await self.db.commit()
+        
+        # Return the plaintext codes (only shown once!)
         return codes
         
-    def verify_recovery_code(self, user: User, code: str) -> bool:
-        """Verify a recovery code and remove it if valid.
+    async def verify_recovery_code(self, user: User, code: str) -> bool:
+        """
+        Verify a recovery code and remove it if valid.
         
         Args:
             user: The user to verify the recovery code for

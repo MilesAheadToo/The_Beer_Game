@@ -8,7 +8,7 @@ from ...crud import crud_dashboard as crud
 from ...database import get_db
 from ...core.security import get_current_active_user
 
-# Using a different name for the router to match the export in __init__.py
+# Router for dashboard endpoints
 dashboard_router = APIRouter()
 
 @dashboard_router.get("/human-dashboard", response_model=schemas.DashboardResponse)
