@@ -1,187 +1,148 @@
-import axios from 'axios';
+const BASE_URL = "http://localhost:8000/api/v1";
 
-const API_BASE_URL = 'http://localhost:8000/api/v1';
+/**
+ * Main API service for making authenticated requests to the backend
+ */
+const api = {
+  /**
+   * Authenticate a user and get access token
+   * @param {Object} credentials - Login credentials
+   * @param {string} credentials.username - User's email/username
+   * @param {string} credentials.password - User's password
+   * @param {string} [credentials.grant_type=password] - OAuth2 grant type
+   * @returns {Promise<{access_token: string, token_type: string, refresh_token: string}>} Auth tokens
+   */
+  login: async ({ username, password, grant_type = "password" }) => {
+    const body = new URLSearchParams({ username, password, grant_type });
 
-// Set up axios instance with default config
-const api = axios.create({
-  baseURL: API_BASE_URL,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
+    const res = await fetch(`${BASE_URL}/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body
+    });
 
-// Add request interceptor to include auth token
-api.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem('access_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(text || `Login failed with ${res.status}`);
     }
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
-  }
-);
 
-// Mixed Game API
-export const mixedGameApi = {
-  // Create a new mixed game
-  createGame: async (gameData) => {
+    const data = await res.json();
+    return {
+      access_token: data.access_token,
+      token_type: data.token_type,
+      refresh_token: data.refresh_token,
+    };
+  },
+  
+  /**
+   * Helper method for making authenticated requests
+   * @private
+   */
+  request: async (endpoint, options = {}) => {
     try {
-      const response = await api.post('/mixed-games/', gameData);
-      return response.data;
+      const res = await fetch(`${BASE_URL}${endpoint}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...options.headers
+        },
+        body: options.body && typeof options.body === 'object' 
+          ? JSON.stringify(options.body) 
+          : options.body
+      });
+      
+      if (!res.ok) {
+        const error = new Error(`Request failed with status ${res.status}`);
+        error.status = res.status;
+        try {
+          error.data = await res.json();
+        } catch {
+          error.data = await res.text().catch(() => null);
+        }
+        
+        // Handle 401 Unauthorized
+        if (res.status === 401) {
+          console.log('Authentication required');
+          
+          // Only redirect if we're not already on the login page
+          if (!window.location.pathname.includes('/login')) {
+            const redirect = encodeURIComponent(window.location.pathname + window.location.search);
+            window.location.href = `/login?redirect=${redirect}`;
+          }
+        }
+        
+        throw error;
+      }
+      
+      // For 204 No Content responses, return null
+      if (res.status === 204) return null;
+      
+      return res.json();
     } catch (error) {
-      console.error('Error creating mixed game:', error);
+      // Handle network errors
+      if (error.name === 'TypeError' && error.message.includes('Failed to fetch')) {
+        console.error('Network Error:', error.message);
+        throw new Error('Unable to connect to the server. Please check your internet connection.');
+      }
       throw error;
     }
   },
-
-  // Get all mixed games
+  
+  // Game API methods
   getGames: async (status) => {
-    try {
-      const params = status ? { status } : {};
-      const response = await api.get('/mixed-games/', { params });
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching mixed games:', error);
-      throw error;
-    }
+    const query = status ? `?status=${status}` : '';
+    return api.request(`/games${query}`);
   },
-
-  // Get a single mixed game by ID
+  
   getGame: async (gameId) => {
-    try {
-      const response = await api.get(`/mixed-games/${gameId}`);
-      return response.data;
-    } catch (error) {
-      console.error(`Error fetching mixed game ${gameId}:`, error);
-      throw error;
-    }
+    return api.request(`/games/${gameId}`);
   },
-
-  // Update a mixed game
-  updateGame: async (gameId, gameData) => {
-    try {
-      const response = await api.put(`/mixed-games/${gameId}`, gameData);
-      return response.data;
-    } catch (error) {
-      console.error(`Error updating mixed game ${gameId}:`, error);
-      throw error;
-    }
-  },
-
-  // Start a mixed game
-  startGame: async (gameId) => {
-    try {
-      const response = await api.post(`/mixed-games/${gameId}/start`);
-      return response.data;
-    } catch (error) {
-      console.error(`Error starting mixed game ${gameId}:`, error);
-      throw error;
-    }
-  },
-
-  // Stop a mixed game
-  stopGame: async (gameId) => {
-    try {
-      const response = await api.post(`/mixed-games/${gameId}/stop`);
-      return response.data;
-    } catch (error) {
-      console.error(`Error stopping mixed game ${gameId}:`, error);
-      throw error;
-    }
-  },
-
-  // Advance to next round
-  nextRound: async (gameId) => {
-    try {
-      const response = await api.post(`/mixed-games/${gameId}/next-round`);
-      return response.data;
-    } catch (error) {
-      console.error(`Error advancing to next round in game ${gameId}:`, error);
-      throw error;
-    }
-  },
-
-  // Get game state
-  getGameState: async (gameId) => {
-    try {
-      const response = await api.get(`/mixed-games/${gameId}/state`);
-      return response.data;
-    } catch (error) {
-      console.error(`Error getting state for game ${gameId}:`, error);
-      throw error;
-    }
-  }
-};
-
-// Original Game API
-export const gameApi = {
-  // Get all games
-  getGames: async () => {
-    try {
-      const response = await api.get('/mixed-games/');
-      return response.data;
-    } catch (error) {
-      console.error('Error fetching games:', error);
-      throw error;
-    }
-  },
-
-  // Get a single game by ID
-  getGame: async (gameId) => {
-    try {
-      const response = await api.get(`/games/${gameId}`);
-      return response.data;
-    } catch (error) {
-      console.error(`Error fetching game ${gameId}:`, error);
-      throw error;
-    }
-  },
-
-  // Create a new game
+  
   createGame: async (gameData) => {
-    try {
-      const response = await api.post('/games/', gameData);
-      return response.data;
-    } catch (error) {
-      console.error('Error creating game:', error);
-      throw error;
-    }
+    return api.request('/games', {
+      method: 'POST',
+      body: gameData
+    });
   },
-
-  // Update a game
+  
   updateGame: async (gameId, gameData) => {
-    try {
-      const response = await api.put(`/games/${gameId}`, gameData);
-      return response.data;
-    } catch (error) {
-      console.error(`Error updating game ${gameId}:`, error);
-      throw error;
-    }
+    return api.request(`/games/${gameId}`, {
+      method: 'PUT',
+      body: gameData
+    });
   },
-
-  // Delete a game
+  
   deleteGame: async (gameId) => {
-    try {
-      await api.delete(`/games/${gameId}`);
-    } catch (error) {
-      console.error(`Error deleting game ${gameId}:`, error);
-      throw error;
-    }
+    return api.request(`/games/${gameId}`, {
+      method: 'DELETE'
+    });
   },
-
-  // Start a game
+  
   startGame: async (gameId) => {
-    try {
-      const response = await api.post(`/games/${gameId}/start`);
-      return response.data;
-    } catch (error) {
-      console.error(`Error starting game ${gameId}:`, error);
-      throw error;
-    }
+    return api.request(`/games/${gameId}/start`, {
+      method: 'POST'
+    });
   },
+  
+  stopGame: async (gameId) => {
+    return api.request(`/games/${gameId}/stop`, {
+      method: 'POST'
+    });
+  },
+  
+  nextRound: async (gameId) => {
+    return api.request(`/games/${gameId}/next-round`, {
+      method: 'POST'
+    });
+  },
+  
+  getGameState: async (gameId) => {
+    return api.request(`/games/${gameId}/state`);
+  },
+  
+  getGameResults: async (gameId) => {
+    return api.request(`/games/${gameId}/results`);
+  }
 };
 
 export default api;

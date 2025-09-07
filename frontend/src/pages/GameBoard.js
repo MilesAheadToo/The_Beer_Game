@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { WebSocketTester } from '../components/WebSocketTester';
+import PageLayout from '../components/PageLayout';
 import { 
   Box, 
   Button, 
-  Container, 
   VStack, 
   HStack, 
   Text, 
@@ -41,6 +42,7 @@ import {
   NumberDecrementStepper,
   FormControl,
   FormLabel,
+  useColorModeValue,
   Tabs,
   TabList,
   TabPanels,
@@ -59,6 +61,7 @@ import {
   Wrap,
   WrapItem,
   Avatar,
+  Container,
 } from '@chakra-ui/react';
 import { 
   CheckCircleIcon, 
@@ -66,6 +69,7 @@ import {
   RepeatIcon, 
   InfoIcon, 
   ArrowForwardIcon,
+  ArrowBackIcon,
   ChatIcon,
   SettingsIcon,
   ViewIcon,
@@ -73,9 +77,13 @@ import {
   WarningIcon,
 } from '@chakra-ui/icons';
 import { useWebSocket } from '../contexts/WebSocketContext';
-import { mixedGameApi } from '../services/api';
+import api from '../services/api';
 
 const GameBoard = () => {
+  // Theme values - must be called unconditionally at the top level
+  const cardBg = useColorModeValue('white', 'gray.800');
+  const borderColor = useColorModeValue('gray.200', 'gray.700');
+  
   const { gameId } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
@@ -104,7 +112,7 @@ const GameBoard = () => {
     const fetchGameDetails = async () => {
       try {
         setIsLoading(true);
-        const game = await mixedGameApi.getGame(gameId);
+        const game = await api.getGame(gameId);
         setGameDetails(game);
         
         // Determine player role (in a real app, this would come from auth context)
@@ -167,10 +175,13 @@ const GameBoard = () => {
       setIsSubmitting(true);
       
       // In a real implementation, this would send the order via WebSocket
-      await mixedGameApi.submitOrder(gameId, {
-        round_number: currentRound,
-        quantity: orderQuantity,
-        role: playerRole,
+      await api.request(`/games/${gameId}/orders`, {
+        method: 'POST',
+        body: {
+          round_number: currentRound,
+          quantity: orderQuantity,
+          role: playerRole,
+        }
       });
       
       toast({
@@ -202,7 +213,7 @@ const GameBoard = () => {
   const handleNextRound = async () => {
     try {
       setIsSubmitting(true);
-      await mixedGameApi.nextRound(gameId);
+      await api.nextRound(gameId);
       toast({
         title: 'Round Advanced',
         description: 'The game has advanced to the next round.',
@@ -326,8 +337,14 @@ const GameBoard = () => {
                 onClick={handleSubmitOrder}
                 isLoading={isSubmitting}
                 loadingText="Submitting..."
+                isDisabled={!orderQuantity || !isPlayerTurn}
+                ml={2}
+                textTransform="none"
+                fontWeight="500"
+                height="32px"
+                px={4}
               >
-                Order
+                Place Order
               </Button>
             </HStack>
           </CardFooter>
@@ -378,9 +395,11 @@ const GameBoard = () => {
               leftIcon={<RepeatIcon />} 
               colorScheme="green"
               onClick={handleNextRound}
-              isLoading={isSubmitting}
-              loadingText="Advancing..."
               isDisabled={!isPlayerTurn}
+              textTransform="none"
+              fontWeight="500"
+              height="40px"
+              px={4}
             >
               Next Round
             </Button>
@@ -433,36 +452,55 @@ const GameBoard = () => {
   
   // Render loading state
   if (isLoading) {
+    const showWebSocketTester = process.env.NODE_ENV === 'development';
+
     return (
-      <Container maxW="container.xl" py={10}>
-        <Center height="50vh">
-          <VStack spacing={4}>
-            <Spinner size="xl" />
-            <Text>Loading game data...</Text>
-          </VStack>
-        </Center>
-      </Container>
+      <PageLayout title="Loading Game...">
+        <VStack spacing={6} align="stretch" minH="60vh" justify="center">
+          {showWebSocketTester && (
+            <Box mb={6}>
+              <WebSocketTester gameId={gameId} />
+            </Box>
+          )}
+          <Center>
+            <VStack spacing={4}>
+              <Spinner size="xl" />
+              <Text>Loading game data...</Text>
+            </VStack>
+          </Center>
+        </VStack>
+      </PageLayout>
     );
   }
-  
-  // Render error state if game not found
+
   if (!gameDetails) {
     return (
-      <Container maxW="container.xl" py={10}>
-        <Alert status="error" borderRadius="md">
-          <AlertIcon />
-          Game not found or you don't have permission to view it.
-        </Alert>
-        <Button mt={4} onClick={() => navigate('/games')}>
-          Back to Games
-        </Button>
-      </Container>
+      <PageLayout title="Game Not Found">
+        <VStack spacing={6} align="stretch" minH="60vh" justify="center">
+          <Alert status="error" borderRadius="md">
+            <AlertIcon />
+            Game not found or you don't have permission to view it.
+          </Alert>
+          <Button 
+            mt={4} 
+            onClick={() => navigate('/games')}
+            alignSelf="flex-start"
+            leftIcon={<ArrowBackIcon />}
+            textTransform="none"
+            fontWeight="500"
+            variant="outline"
+            colorScheme="blue"
+          >
+            Back to Games
+          </Button>
+        </VStack>
+      </PageLayout>
     );
   }
   
   // Main game board
   return (
-    <Container maxW="container.xl" py={6}>
+    <PageLayout title="Game Board">
       {/* Game Header */}
       <HStack justify="space-between" mb={6}>
         <VStack align="flex-start" spacing={1}>
@@ -474,6 +512,9 @@ const GameBoard = () => {
             leftIcon={<SettingsIcon />} 
             variant="outline"
             onClick={onOpen}
+            textTransform="none"
+            fontWeight="500"
+            colorScheme="blue"
           >
             Settings
           </Button>
@@ -481,6 +522,8 @@ const GameBoard = () => {
             leftIcon={<ViewIcon />} 
             colorScheme="blue"
             onClick={() => navigate(`/games/${gameId}/analytics`)}
+            textTransform="none"
+            fontWeight="500"
           >
             View Analytics
           </Button>
@@ -534,8 +577,11 @@ const GameBoard = () => {
                 leftIcon={<RepeatIcon />}
                 onClick={handleNextRound}
                 isDisabled={!isPlayerTurn || gameStatus !== 'in_progress'}
-                isLoading={isSubmitting}
-                loadingText="Advancing..."
+                colorScheme="blue"
+                textTransform="none"
+                fontWeight="500"
+                height="40px"
+                px={4}
               >
                 Next Round
               </Button>
@@ -544,12 +590,16 @@ const GameBoard = () => {
                 colorScheme={gameStatus === 'paused' ? 'green' : 'orange'}
                 onClick={() => {
                   if (gameStatus === 'paused') {
-                    mixedGameApi.resumeGame(gameId);
+                    api.request(`/games/${gameId}/resume`, { method: 'POST' });
                   } else {
-                    mixedGameApi.pauseGame(gameId);
+                    api.request(`/games/${gameId}/pause`, { method: 'POST' });
                   }
                 }}
-                isDisabled={!['in_progress', 'paused'].includes(gameStatus)}
+                isDisabled={!isPlayerTurn}
+                textTransform="none"
+                fontWeight="500"
+                height="40px"
+                px={4}
               >
                 {gameStatus === 'paused' ? 'Resume Game' : 'Pause Game'}
               </Button>
@@ -559,10 +609,14 @@ const GameBoard = () => {
                 variant="outline"
                 onClick={() => {
                   if (window.confirm('Are you sure you want to end the game? This cannot be undone.')) {
-                    mixedGameApi.endGame(gameId);
+                    api.request(`/games/${gameId}/end`, { method: 'POST' });
                   }
                 }}
-                isDisabled={!['in_progress', 'paused'].includes(gameStatus)}
+                isDisabled={!isPlayerTurn}
+                textTransform="none"
+                fontWeight="500"
+                height="40px"
+                px={4}
               >
                 End Game
               </Button>
@@ -660,13 +714,19 @@ const GameBoard = () => {
             </Tabs>
           </ModalBody>
           <ModalFooter>
-            <Button colorScheme="blue" onClick={onClose}>
+            <Button 
+              colorScheme="blue" 
+              onClick={onClose}
+              textTransform="none"
+              fontWeight="500"
+              px={6}
+            >
               Close
             </Button>
           </ModalFooter>
         </ModalContent>
       </Modal>
-    </Container>
+    </PageLayout>
   );
 };
 

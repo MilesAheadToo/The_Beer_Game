@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import PageLayout from '../components/PageLayout';
 import {
   Box,
   Typography,
@@ -358,13 +359,26 @@ const Analysis = () => {
   };
 
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        Supply Chain Analytics
-      </Typography>
-      
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
-        <Tabs value={tabValue} onChange={handleTabChange} aria-label="analysis tabs">
+    <PageLayout title="Supply Chain Analysis">
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 4 }}>
+        <Tabs 
+          value={tabValue} 
+          onChange={handleTabChange} 
+          aria-label="analysis tabs"
+          sx={{
+            '& .MuiTabs-flexContainer': {
+              gap: 2
+            },
+            '& .MuiTab-root': {
+              minHeight: 48,
+              fontWeight: 500,
+              '&.Mui-selected': {
+                color: 'primary.main',
+                fontWeight: 600
+              }
+            }
+          }}
+        >
           <Tab icon={<TimelineIcon />} label="Overview" />
           <Tab icon={<ChartIcon />} label="Bullwhip Effect" />
           <Tab icon={<TableIcon />} label="Detailed Analysis" />
@@ -372,8 +386,8 @@ const Analysis = () => {
       </Box>
 
       {renderTabContent()}
-    </Box>
+    </PageLayout>
   );
-};
+}
 
 export default Analysis;

@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { webSocketService } from '../services/websocket';
 import { useToast } from '@chakra-ui/react';
+import { useAuth } from './AuthContext';
 
 const WebSocketContext = createContext(null);
 
@@ -14,6 +15,7 @@ export const WebSocketProvider = ({ children }) => {
   const toast = useToast();
   const callbacks = useRef(new Map());
   const params = useParams();
+  const { accessToken } = useAuth();
 
   // Register a callback for specific message types
   const on = (eventType, callback) => {
@@ -33,7 +35,7 @@ export const WebSocketProvider = ({ children }) => {
   // Initialize WebSocket connection
   useEffect(() => {
     const gameId = params.gameId;
-    if (!gameId) return;
+    if (!gameId || !accessToken) return;
 
     const handleWebSocketMessage = (event, data) => {
       switch (event) {
@@ -74,16 +76,27 @@ export const WebSocketProvider = ({ children }) => {
       }
     };
 
-    // Connect to WebSocket
-    webSocketService.connect(gameId);
-    const unsubscribe = webSocketService.subscribe(handleWebSocketMessage);
+    try {
+      // Connect to WebSocket with the current access token
+      webSocketService.connect(gameId, accessToken);
+      const unsubscribe = webSocketService.subscribe(handleWebSocketMessage);
 
-    // Cleanup on unmount
-    return () => {
-      unsubscribe();
-      webSocketService.disconnect();
-    };
-  }, [params.gameId]);
+      // Cleanup on unmount
+      return () => {
+        unsubscribe();
+        webSocketService.disconnect();
+      };
+    } catch (error) {
+      console.error('Failed to connect to WebSocket:', error);
+      toast({
+        title: 'Connection Error',
+        description: 'Failed to connect to the game server. Please try again.',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    }
+  }, [params.gameId, accessToken, toast]);
 
   // Handle incoming WebSocket messages
   const handleIncomingMessage = (message) => {

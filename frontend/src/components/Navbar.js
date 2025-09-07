@@ -6,7 +6,7 @@ import NotificationsIcon from '@mui/icons-material/Notifications';
 import SettingsIcon from '@mui/icons-material/Settings';
 import Logout from '@mui/icons-material/Logout';
 import { styled } from '@mui/material/styles';
-import { getAuthHeader } from '../services/authService';
+import { useAuth } from '../contexts/AuthContext';
 
 const StyledAppBar = styled(AppBar)(({ theme }) => ({
   zIndex: theme.zIndex.drawer + 1,
@@ -16,7 +16,8 @@ const StyledAppBar = styled(AppBar)(({ theme }) => ({
   }),
 }));
 
-const Navbar = ({ handleDrawerToggle, onLogout }) => {
+const Navbar = ({ handleDrawerToggle }) => {
+  const { logout } = useAuth();
   const [anchorEl, setAnchorEl] = useState(null);
   const navigate = useNavigate();
   const open = Boolean(anchorEl);
@@ -29,10 +30,14 @@ const Navbar = ({ handleDrawerToggle, onLogout }) => {
     setAnchorEl(null);
   };
 
-  const handleLogout = () => {
-    onLogout();
-    handleClose();
-    navigate('/login');
+  const handleLogout = async () => {
+    try {
+      await logout();
+      handleClose();
+      navigate('/login');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
   };
 
   return (

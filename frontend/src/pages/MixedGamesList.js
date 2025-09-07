@@ -3,7 +3,6 @@ import { useNavigate, Link } from 'react-router-dom';
 import { 
   Box, 
   Button, 
-  Container, 
   Table, 
   Thead, 
   Tbody, 
@@ -28,8 +27,13 @@ import {
   HStack,
   VStack,
   Divider,
-  Tooltip
+  Tooltip,
+  useColorModeValue,
+  Flex,
+  Spinner,
+  Heading
 } from '@chakra-ui/react';
+import PageLayout from '../components/PageLayout';
 import { 
   AddIcon, 
   ChevronDownIcon, 
@@ -39,9 +43,10 @@ import {
   ArrowForwardIcon,
   TimeIcon,
   CheckIcon,
-  NotAllowedIcon
+  NotAllowedIcon,
+  ViewIcon
 } from '@chakra-ui/icons';
-import { mixedGameApi } from '../services/api';
+import api from '../services/api';
 
 const statusColors = {
   CREATED: 'blue',
@@ -69,7 +74,7 @@ const MixedGamesList = () => {
   const fetchGames = async () => {
     try {
       setIsLoading(true);
-      const data = await mixedGameApi.getGames();
+      const data = await api.getGames();
       setGames(data);
     } catch (error) {
       console.error('Error fetching games:', error);
@@ -91,7 +96,7 @@ const MixedGamesList = () => {
 
   const handleStartGame = async (gameId) => {
     try {
-      await mixedGameApi.startGame(gameId);
+      await api.startGame(gameId);
       toast({
         title: 'Game started',
         description: 'The game has been started successfully.',
@@ -114,7 +119,7 @@ const MixedGamesList = () => {
 
   const handleStopGame = async (gameId) => {
     try {
-      await mixedGameApi.stopGame(gameId);
+      await api.stopGame(gameId);
       toast({
         title: 'Game stopped',
         description: 'The game has been stopped.',
@@ -137,7 +142,7 @@ const MixedGamesList = () => {
 
   const handleNextRound = async (gameId) => {
     try {
-      await mixedGameApi.nextRound(gameId);
+      await api.nextRound(gameId);
       toast({
         title: 'Round advanced',
         description: 'The game has advanced to the next round.',
@@ -168,7 +173,7 @@ const MixedGamesList = () => {
     
     try {
       // In a real implementation, you would call the delete endpoint
-      // await mixedGameApi.deleteGame(selectedGame.id);
+      // await api.deleteGame(selectedGame.id);
       
       toast({
         title: 'Game deleted',
@@ -260,25 +265,47 @@ const MixedGamesList = () => {
     }
   };
 
+  const cardBg = useColorModeValue('white', 'gray.800');
+  const borderColor = useColorModeValue('gray.200', 'gray.700');
+
   return (
-    <Container maxW="container.xl" py={8}>
-      <Box mb={6} display="flex" justifyContent="space-between" alignItems="center">
-        <VStack align="flex-start" spacing={1}>
-          <Text fontSize="2xl" fontWeight="bold">Mixed Human/AI Games</Text>
-          <Text color="gray.600" fontSize="sm">
-            Manage games with both human and AI players
+    <PageLayout title="Mixed Games">
+      <Flex justify="space-between" align="center" mb={6} mt={4}>
+        <VStack align="flex-start" spacing={1} pt={2}>
+          <Heading size="xl" fontWeight="600">Mixed Games</Heading>
+          <Text color="gray.500" fontSize="md">
+            Manage and join mixed human-AI games
           </Text>
         </VStack>
-        <Button
-          leftIcon={<AddIcon />}
+        <Button 
+          as={Link} 
+          to="/games/mixed/new" 
           colorScheme="blue"
-          onClick={() => navigate('/games/mixed/new')}
+          leftIcon={<AddIcon />}
+          size="md"
+          height="44px"
+          px={6}
+          textTransform="none"
+          fontWeight="500"
+          _hover={{
+            transform: 'translateY(-1px)',
+          }}
+          _active={{
+            transform: 'none'
+          }}
         >
-          New Game
+          Create New Game
         </Button>
-      </Box>
+      </Flex>
 
-      <Box bg="white" p={6} rounded="lg" boxShadow="md">
+      <Box 
+        bg={cardBg} 
+        borderRadius="lg" 
+        borderWidth="1px" 
+        borderColor={borderColor}
+        overflow="hidden"
+        boxShadow="sm"
+      >
         <Table variant="simple">
           <Thead>
             <Tr>
@@ -294,7 +321,10 @@ const MixedGamesList = () => {
             {isLoading ? (
               <Tr>
                 <Td colSpan={6} textAlign="center" py={8}>
-                  <Text>Loading games...</Text>
+                  <Box textAlign="center" py={10}>
+                    <Spinner size="xl" />
+                    <Text mt={4} color="gray.600">Loading games...</Text>
+                  </Box>
                 </Td>
               </Tr>
             ) : games.length === 0 ? (
@@ -305,7 +335,7 @@ const MixedGamesList = () => {
                     <Button
                       leftIcon={<AddIcon />}
                       colorScheme="blue"
-                      onClick={() => navigate('/games/mixed/new')}
+                      onClick={() => navigate('/games/new')}
                     >
                       Create a new game
                     </Button>
@@ -318,7 +348,7 @@ const MixedGamesList = () => {
                   <Td>
                     <VStack align="flex-start" spacing={0}>
                       <Text fontWeight="medium">
-                        <Link to={`/games/mixed/${game.id}`} style={{ textDecoration: 'underline' }}>
+                        <Link to={`/games/${game.id}`} style={{ textDecoration: 'underline' }}>
                           {game.name}
                         </Link>
                       </Text>
@@ -378,7 +408,7 @@ const MixedGamesList = () => {
                         <MenuList>
                           <MenuItem 
                             icon={<EditIcon />}
-                            onClick={() => navigate(`/games/mixed/${game.id}/edit`)}
+                            onClick={() => navigate(`/games/${game.id}/edit`)}
                           >
                             Edit
                           </MenuItem>
@@ -389,6 +419,20 @@ const MixedGamesList = () => {
                             isDisabled={game.status === 'IN_PROGRESS'}
                           >
                             Delete
+                          </MenuItem>
+                          <MenuItem 
+                            as={Button}
+                            variant="ghost"
+                            leftIcon={<ViewIcon />}
+                            justifyContent="flex-start"
+                            onClick={() => navigate(`/dashboard?gameId=${game.id}`)}
+                            w="full"
+                            textAlign="left"
+                            px={4}
+                            py={2}
+                            borderRadius={0}
+                          >
+                            View Results
                           </MenuItem>
                         </MenuList>
                       </Menu>
@@ -428,7 +472,7 @@ const MixedGamesList = () => {
           </AlertDialogContent>
         </AlertDialogOverlay>
       </AlertDialog>
-    </Container>
+    </PageLayout>
   );
 };
 

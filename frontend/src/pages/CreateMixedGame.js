@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import { 
   Box, 
   Button, 
-  Container, 
   FormControl, 
   FormLabel, 
   Input, 
@@ -17,9 +16,21 @@ import {
   NumberInputStepper, 
   NumberIncrementStepper, 
   NumberDecrementStepper,
-  useToast
+  useToast,
+  Card,
+  CardBody,
+  CardHeader,
+  Heading,
+  Divider,
+  useColorModeValue,
+  Switch,
+  FormHelperText,
+  Grid,
+  GridItem,
+  Badge
 } from '@chakra-ui/react';
-import { mixedGameApi } from '../services/api';
+import PageLayout, { PageSection } from '../components/PageLayout';
+import api from '../services/api';
 
 const playerRoles = [
   { value: 'retailer', label: 'Retailer' },
@@ -69,46 +80,48 @@ const CreateMixedGame = () => {
   const [description, setDescription] = useState('');
   const [isPublic, setIsPublic] = useState(true);
   const [demandPattern, setDemandPattern] = useState(demandPatterns[0].value);
+  const cardBg = useColorModeValue('white', 'gray.800');
+  const borderColor = useColorModeValue('gray.200', 'gray.700');
   const [players, setPlayers] = useState(
     playerRoles.map(role => ({
       role: role.value,
-      playerType: 'HUMAN',
-      strategy: agentStrategies[0].value,
-      canSeeDemand: false,
-      userId: null // Will be set to current user or selected user
+      playerType: 'human',
+      strategy: 'NAIVE',
+      canSeeDemand: role.value === 'retailer',
+      userId: role.value === 'retailer' ? 'current-user-id' : ''
     }))
   );
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const toast = useToast();
 
-  const handlePlayerTypeChange = (role, type) => {
-    setPlayers(players.map(player => 
-      player.role === role 
+  const handlePlayerTypeChange = (index, type) => {
+    setPlayers(players.map((player, i) => 
+      i === index 
         ? { 
             ...player, 
             playerType: type,
             // Reset strategy to default when changing to human
-            ...(type === 'HUMAN' && { strategy: agentStrategies[0].value })
+            ...(type === 'human' && { strategy: agentStrategies[0].options[0].value })
           } 
         : player
     ));
   };
 
-  const handleStrategyChange = (role, strategy) => {
-    setPlayers(players.map(player => 
-      player.role === role ? { ...player, strategy } : player
+  const handleStrategyChange = (index, strategy) => {
+    setPlayers(players.map((player, i) => 
+      i === index ? { ...player, strategy } : player
     ));
   };
 
-  const handleDemandVisibilityChange = (role, canSeeDemand) => {
-    setPlayers(players.map(player => 
-      player.role === role ? { ...player, canSeeDemand } : player
+  const handleCanSeeDemandChange = (index, canSeeDemand) => {
+    setPlayers(players.map((player, i) => 
+      i === index ? { ...player, canSeeDemand } : player
     ));
   };
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     setIsLoading(true);
     
     try {
@@ -130,212 +143,324 @@ const CreateMixedGame = () => {
         }))
       };
       
-      const newGame = await mixedGameApi.createGame(gameData);
+      const newGame = await api.createGame(gameData);
+      return newGame;
       
-      toast({
-        title: 'Game created!',
-        description: 'The mixed game has been created successfully.',
-        status: 'success',
-        duration: 5000,
-        isClosable: true,
-      });
-      
-      // Navigate to the new game
-      navigate(`/games/mixed/${newGame.id}`);
     } catch (error) {
       console.error('Error creating game:', error);
-      toast({
-        title: 'Error creating game',
-        description: error.response?.data?.detail || 'Failed to create game',
-        status: 'error',
-        duration: 5000,
-        isClosable: true,
-      });
+      throw error;
     } finally {
       setIsLoading(false);
     }
   };
 
+  const handleCreateGame = async (e) => {
+    if (e) e.preventDefault();
+    try {
+      const response = await handleSubmit();
+      
+      // Show success toast
+      toast({
+        title: 'Game created!',
+        description: 'The mixed game has been created successfully.',
+        status: 'success',
+        duration: 2000,
+        isClosable: true,
+      });
+      
+      // Navigate to the game board after a short delay
+      setTimeout(() => {
+        if (response && response.id) {
+          navigate(`/games/mixed/${response.id}`);
+        } else {
+          navigate('/games');
+        }
+      }, 1500);
+      
+      return response;
+    } catch (error) {
+      console.error('Error creating game:', error);
+      toast({
+        title: 'Error creating game',
+        description: error.response?.data?.detail || 'Failed to create game. Please try again.',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+      throw error;
+    }
+  };
+
   return (
-    <Container maxW="container.lg" py={8}>
-      <Box bg="white" p={6} rounded="lg" boxShadow="md">
-        <Text fontSize="2xl" fontWeight="bold" mb={6}>
-          Create Mixed Human/AI Game
-        </Text>
-        
-        <form onSubmit={handleSubmit}>
-          <VStack spacing={6} align="stretch">
-            <FormControl isRequired>
-              <FormLabel>Game Name</FormLabel>
-              <Input 
-                value={gameName}
-                onChange={(e) => setGameName(e.target.value)}
-                placeholder="Enter game name"
-              />
-            </FormControl>
-            
-            <FormControl>
-              <FormLabel>Description</FormLabel>
-              <Input 
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Enter game description"
-              />
-            </FormControl>
-            
-            <FormControl isRequired>
-              <FormLabel>Maximum Rounds</FormLabel>
-              <NumberInput 
-                min={1} 
-                max={100} 
-                value={maxRounds}
-                onChange={(valueString) => setMaxRounds(parseInt(valueString) || 1)}
-              >
-                <NumberInputField />
-                <NumberInputStepper>
-                  <NumberIncrementStepper />
-                  <NumberDecrementStepper />
-                </NumberInputStepper>
-              </NumberInput>
-            </FormControl>
-            
-            <FormControl>
-              <FormLabel>Demand Pattern</FormLabel>
-              <Select 
-                value={demandPattern}
-                onChange={(e) => setDemandPattern(e.target.value)}
-              >
-                {demandPatterns.map(pattern => (
-                  <option key={pattern.value} value={pattern.value}>
-                    {pattern.label}
-                  </option>
-                ))}
-              </Select>
-            </FormControl>
-            
-            <FormControl>
-              <Checkbox 
-                isChecked={isPublic}
-                onChange={(e) => setIsPublic(e.target.checked)}
-              >
-                Make this game public
-              </Checkbox>
-            </FormControl>
-            
-            <Box mt={6}>
-              <Text fontSize="lg" fontWeight="semibold" mb={4}>
-                Player Assignments
-              </Text>
-              
-              <VStack spacing={6} align="stretch">
-                {players.map((player) => (
-                  <Box 
-                    key={player.role}
-                    p={4} 
-                    borderWidth="1px" 
-                    borderRadius="md"
-                    bg="gray.50"
+    <PageLayout title="Create Mixed Game">
+      <VStack as="form" onSubmit={handleCreateGame} spacing={6} align="stretch" maxW="4xl" mx="auto">
+        {/* Game Details Card */}
+        <Card variant="outline" bg={cardBg} borderColor={borderColor}>
+          <CardHeader pb={2}>
+            <Heading size="md">Game Settings</Heading>
+            <Text color="gray.500" fontSize="sm">Configure the basic settings for your game</Text>
+          </CardHeader>
+          <CardBody pt={0}>
+            <VStack spacing={5}>
+              <FormControl>
+                <FormLabel>Game Name</FormLabel>
+                <Input 
+                  value={gameName}
+                  onChange={(e) => setGameName(e.target.value)}
+                  placeholder="Enter game name"
+                  size="lg"
+                />
+              </FormControl>
+
+              <Grid templateColumns={{ base: '1fr', md: '1fr 1fr' }} gap={6} w="full">
+                <FormControl>
+                  <FormLabel>Maximum Rounds</FormLabel>
+                  <NumberInput 
+                    min={1} 
+                    max={999}
+                    value={maxRounds}
+                    onChange={(value) => setMaxRounds(parseInt(value) || 0)}
                   >
-                    <HStack justify="space-between" mb={3}>
-                      <Text fontWeight="medium">
-                        {playerRoles.find(r => r.value === player.role)?.label}
+                    <NumberInputField />
+                    <NumberInputStepper>
+                      <NumberIncrementStepper />
+                      <NumberDecrementStepper />
+                    </NumberInputStepper>
+                  </NumberInput>
+                  <FormHelperText>Maximum 999 rounds</FormHelperText>
+                </FormControl>
+
+                <FormControl display="flex" flexDirection="column" justifyContent="flex-end">
+                  <FormLabel mb={0}>Game Visibility</FormLabel>
+                  <HStack spacing={4} align="center">
+                    <Text fontSize="sm" color={isPublic ? 'gray.500' : 'gray.800'} fontWeight={isPublic ? 'normal' : 'medium'}>Private</Text>
+                    <Switch 
+                      isChecked={isPublic}
+                      onChange={(e) => setIsPublic(e.target.checked)}
+                      colorScheme="blue"
+                      size="lg"
+                    />
+                    <Text fontSize="sm" color={isPublic ? 'blue.600' : 'gray.500'} fontWeight={isPublic ? 'medium' : 'normal'}>
+                      {isPublic ? 'Public' : 'Private'}
+                    </Text>
+                  </HStack>
+                  <FormHelperText>
+                    {isPublic 
+                      ? 'Anyone can join this game' 
+                      : 'Only players with the link can join'}
+                  </FormHelperText>
+                </FormControl>
+              </Grid>
+
+              <FormControl>
+                <FormLabel>Description (Optional)</FormLabel>
+                <Input 
+                  as="textarea"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Enter a brief description of the game"
+                  rows={3}
+                  size="lg"
+                />
+              </FormControl>
+            </VStack>
+          </CardBody>
+        </Card>
+
+        {/* Player Configuration Card */}
+        <Card variant="outline" bg={cardBg} borderColor={borderColor} mt={6}>
+          <CardHeader pb={2}>
+            <Heading size="md">Player Configuration</Heading>
+            <Text color="gray.500" fontSize="sm">Configure human and AI players for each role</Text>
+          </CardHeader>
+          <Divider />
+          <CardBody>
+            <VStack spacing={6}>
+              {players.map((player, index) => (
+                <Box 
+                  key={player.role} 
+                  w="full"
+                  p={5} 
+                  borderWidth="1px"
+                  borderRadius="lg"
+                  borderColor={borderColor}
+                  bg={cardBg}
+                  _hover={{
+                    boxShadow: 'md',
+                    transform: 'translateY(-2px)',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <HStack justify="space-between" mb={4}>
+                    <HStack>
+                      <Text fontSize="lg" fontWeight="semibold" textTransform="capitalize">
+                        {player.role}
                       </Text>
-                      <HStack>
-                        <Button
-                          size="sm"
-                          colorScheme={player.playerType === 'HUMAN' ? 'blue' : 'gray'}
-                          variant={player.playerType === 'HUMAN' ? 'solid' : 'outline'}
-                          onClick={() => handlePlayerTypeChange(player.role, 'HUMAN')}
-                        >
-                          Human
-                        </Button>
-                        <Button
-                          size="sm"
-                          colorScheme={player.playerType === 'AGENT' ? 'teal' : 'gray'}
-                          variant={player.playerType === 'AGENT' ? 'solid' : 'outline'}
-                          onClick={() => handlePlayerTypeChange(player.role, 'AGENT')}
-                        >
-                          AI Agent
-                        </Button>
-                      </HStack>
+                      {player.role === 'retailer' && (
+                        <Badge colorScheme="blue" variant="subtle" borderRadius="full" px={2}>
+                          Required
+                        </Badge>
+                      )}
                     </HStack>
                     
-                    {player.playerType === 'AGENT' && (
-                      <VStack align="stretch" spacing={3} mt={3}>
-                        <FormControl>
-                          <FormLabel>Strategy</FormLabel>
-                          <Select
-                            value={player.strategy}
-                            onChange={(e) => handleStrategyChange(player.role, e.target.value)}
-                            size="sm"
-                          >
-                            <optgroup label="Basic Strategies">
-                              {agentStrategies[0].options.map(strategy => (
-                                <option key={strategy.value} value={strategy.value}>
-                                  {strategy.label}
-                                </option>
-                              ))}
-                            </optgroup>
-                            <optgroup label="Advanced Strategies">
-                              {agentStrategies[1].options.map(strategy => (
-                                <option key={strategy.value} value={strategy.value}>
-                                  {strategy.label}
-                                </option>
-                              ))}
-                            </optgroup>
-                            <optgroup label="AI-Powered (LLM)">
-                              {agentStrategies[2].options.map(strategy => (
-                                <option key={strategy.value} value={strategy.value}>
-                                  {strategy.label}
-                                </option>
-                              ))}
-                            </optgroup>
-                          </Select>
-                        </FormControl>
-                        
-                        <FormControl>
-                          <Checkbox
-                            isChecked={player.canSeeDemand}
-                            onChange={(e) => handleDemandVisibilityChange(player.role, e.target.checked)}
-                          >
-                            Can see actual customer demand
-                          </Checkbox>
-                        </FormControl>
-                      </VStack>
-                    )}
-                    
-                    {player.playerType === 'HUMAN' && (
-                      <Text fontSize="sm" color="gray.600" mt={2}>
-                        A human player will need to join this role.
-                      </Text>
-                    )}
-                  </Box>
-                ))}
-              </VStack>
-            </Box>
-            
-            <HStack justify="flex-end" mt={8}>
-              <Button 
-                type="button" 
-                variant="outline" 
-                onClick={() => navigate(-1)}
-                isDisabled={isLoading}
-              >
-                Cancel
-              </Button>
-              <Button 
-                type="submit" 
-                colorScheme="blue" 
-                isLoading={isLoading}
-                loadingText="Creating..."
-              >
-                Create Game
-              </Button>
-            </HStack>
-          </VStack>
-        </form>
-      </Box>
-    </Container>
+                    <HStack 
+                      spacing={0} 
+                      bg="gray.100" 
+                      p={1} 
+                      borderRadius="md"
+                      borderWidth="1px"
+                      borderColor="gray.200"
+                      _dark={{
+                        bg: 'gray.700',
+                        borderColor: 'gray.600'
+                      }}
+                    >
+                      <Button 
+                        size="sm" 
+                        variant={player.playerType === 'human' ? 'solid' : 'ghost'}
+                        colorScheme={player.playerType === 'human' ? 'blue' : 'gray'}
+                        onClick={() => handlePlayerTypeChange(index, 'human')}
+                        leftIcon={
+                          <Box 
+                            w={2} 
+                            h={2} 
+                            bg={player.playerType === 'human' ? 'white' : 'gray.500'} 
+                            borderRadius="full" 
+                          />
+                        }
+                        textTransform="none"
+                        fontWeight="500"
+                        borderRadius="md"
+                        flex={1}
+                        _active={{
+                          transform: 'none',
+                          bg: player.playerType === 'human' ? 'blue.600' : 'gray.200',
+                          _dark: {
+                            bg: player.playerType === 'human' ? 'blue.600' : 'gray.600'
+                          }
+                        }}
+                        _hover={{
+                          bg: player.playerType === 'human' ? 'blue.600' : 'gray.200',
+                          _dark: {
+                            bg: player.playerType === 'human' ? 'blue.600' : 'gray.600'
+                          }
+                        }}
+                      >
+                        Human
+                      </Button>
+                      <Button 
+                        size="sm" 
+                        variant={player.playerType === 'ai' ? 'solid' : 'ghost'}
+                        colorScheme={player.playerType === 'ai' ? 'blue' : 'gray'}
+                        onClick={() => handlePlayerTypeChange(index, 'ai')}
+                        leftIcon={
+                          <Box 
+                            w={2} 
+                            h={2} 
+                            bg={player.playerType === 'ai' ? 'white' : 'gray.500'} 
+                            borderRadius="full" 
+                          />
+                        }
+                        textTransform="none"
+                        fontWeight="500"
+                        borderRadius="md"
+                        flex={1}
+                        _active={{
+                          transform: 'none',
+                          bg: player.playerType === 'ai' ? 'blue.600' : 'gray.200',
+                          _dark: {
+                            bg: player.playerType === 'ai' ? 'blue.600' : 'gray.600'
+                          }
+                        }}
+                        _hover={{
+                          bg: player.playerType === 'ai' ? 'blue.600' : 'gray.200',
+                          _dark: {
+                            bg: player.playerType === 'ai' ? 'blue.600' : 'gray.600'
+                          }
+                        }}
+                      >
+                        AI Agent
+                      </Button>
+                    </HStack>
+                  </HStack>
+
+                  {player.playerType === 'ai' && (
+                    <FormControl mt={4}>
+                      <FormLabel>AI Strategy</FormLabel>
+                      <Select 
+                        value={player.strategy}
+                        onChange={(e) => handleStrategyChange(index, e.target.value)}
+                        size="md"
+                        bg="white"
+                        _dark={{
+                          bg: 'gray.700',
+                          borderColor: 'gray.600',
+                          _hover: { borderColor: 'gray.500' },
+                          _focus: { borderColor: 'blue.500', boxShadow: '0 0 0 1px #3182ce' }
+                        }}
+                      >
+                        {agentStrategies.map((group, i) => [
+                          <option key={`group-${i}`} disabled style={{ fontWeight: 'bold', backgroundColor: '#f5f5f5' }}>
+                            {group.group}
+                          </option>,
+                          ...group.options.map(option => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))
+                        ])}
+                      </Select>
+                      <FormHelperText>
+                        {player.strategy === 'NAIVE' && 'Simple strategy that matches orders to demand'}
+                        {player.strategy === 'BULLWHIP' && 'Tends to overreact to demand changes'}
+                        {player.strategy === 'CONSERVATIVE' && 'Maintains stable inventory levels'}
+                        {player.strategy === 'RANDOM' && 'Makes random order decisions'}
+                        {player.strategy === 'DEMAND_DRIVEN' && 'Advanced strategy that analyzes demand patterns'}
+                        {player.strategy === 'COST_OPTIMIZATION' && 'Optimizes for lowest possible costs'}
+                        {player.strategy === 'LLM_CONSERVATIVE' && 'AI-powered strategy using language models'}
+                        {player.strategy === 'LLM_BALANCED' && 'Advanced AI with learning capabilities'}
+                        {player.strategy === 'LLM_AGGRESSIVE' && 'Aggressive AI strategy'}
+                        {player.strategy === 'LLM_ADAPTIVE' && 'Adaptive AI strategy'}
+                      </FormHelperText>
+                    </FormControl>
+                  )}
+
+                  <FormControl display="flex" alignItems="center" mt={4}>
+                    <Switch
+                      id={`demand-${index}`}
+                      isChecked={player.canSeeDemand}
+                      onChange={(e) => handleCanSeeDemandChange(index, e.target.checked)}
+                      isDisabled={player.role === 'retailer'}
+                      colorScheme="blue"
+                      mr={3}
+                    />
+                    <FormLabel htmlFor={`demand-${index}`} mb={0} opacity={player.role === 'retailer' ? 0.7 : 1}>
+                      Can see customer demand
+                      {player.role === 'retailer' && ' (Always enabled for Retailer)'}
+                    </FormLabel>
+                  </FormControl>
+                </Box>
+              ))}
+            </VStack>
+          </CardBody>
+        </Card>
+
+        <Button 
+          type="submit"
+          isLoading={isLoading}
+          loadingText="Creating Game..."
+          colorScheme="blue"
+          size="lg"
+          mt={6}
+          width="100%"
+          textTransform="none"
+          fontWeight="500"
+          height="44px"
+        >
+          Create Game
+        </Button>
+      </VStack>
+    </PageLayout>
   );
 };
 

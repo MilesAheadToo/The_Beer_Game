@@ -112,17 +112,28 @@ origins = [
     "http://127.0.0.1:3000",
     "http://127.0.0.1:8000",
     settings.FRONTEND_URL,
-    "*"  # For development only - restrict in production
+    "http://localhost:3001",  # Common frontend dev port
+    "http://127.0.0.1:3001"   # Common frontend dev port
 ]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=600  # Cache preflight requests for 10 minutes
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=[
+        "*",
+        "Authorization",
+        "Content-Type",
+        "Access-Control-Allow-Credentials",
+        "Access-Control-Allow-Origin"
+    ],
+    expose_headers=[
+        "Content-Disposition",
+        "Content-Length",
+        "Content-Type"
+    ],
+    max_age=3600  # Cache preflight requests for 1 hour
 )
 
 # Include API routers

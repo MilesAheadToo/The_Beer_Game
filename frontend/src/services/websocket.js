@@ -8,16 +8,24 @@ class WebSocketService {
     this.reconnectDelay = 1000; // Start with 1 second delay
   }
 
-  connect(gameId) {
+  /**
+   * Connect to the WebSocket server
+   * @param {string} gameId - The ID of the game to connect to
+   * @param {string} accessToken - The user's access token for authentication
+   */
+  connect(gameId, accessToken) {
     if (this.socket) {
       this.disconnect();
     }
 
+    if (!accessToken) {
+      throw new Error('Access token is required to connect to WebSocket');
+    }
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
-    const token = localStorage.getItem('access_token');
     
-    this.socket = new WebSocket(`${protocol}//${host}/ws/games/${gameId}?token=${token}`);
+    this.socket = new WebSocket(`${protocol}//${host}/ws/games/${gameId}?token=${accessToken}`);
 
     this.socket.onopen = () => {
       console.log('WebSocket Connected');

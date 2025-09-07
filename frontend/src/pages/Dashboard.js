@@ -1,6 +1,28 @@
-import React from 'react';
-import { Box, Grid, Typography } from '@mui/material';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { 
+  Box, 
+  Grid, 
+  GridItem,
+  Button, 
+  CircularProgress,
+  Text,
+  Heading,
+  useColorModeValue,
+  VStack,
+  HStack,
+  Icon,
+  Flex,
+  Card,
+  CardHeader,
+  CardBody,
+  CardFooter
+} from '@chakra-ui/react';
+import { FiPlus } from 'react-icons/fi';
+import PageLayout from '../components/PageLayout';
+import { toast } from 'react-toastify';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
+import api from '../services/api';
 import FilterBar from '../components/FilterBar';
 import KPIStat from '../components/KPIStat';
 import ChartCard from '../components/ChartCard';
@@ -40,89 +62,244 @@ const stockVsForecast = [
   { name: 'Part F', stock: 6780, forecast: 5200 },
 ];
 
+function useQuery() {
+  const { search } = useLocation();
+  return new URLSearchParams(search);
+}
+
 const Dashboard = () => {
+  // Theme values - must be called unconditionally at the top level
+  const cardBg = useColorModeValue('white', 'gray.800');
+  const borderColor = useColorModeValue('gray.200', 'gray.700');
+  
+  // State
+  const [games, setGames] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [gameResult, setGameResult] = useState(null);
+  const [loadingResult, setLoadingResult] = useState(false);
+  const navigate = useNavigate();
+  const query = useQuery();
+  const gameId = query.get('gameId');
+
+  // Fetch game results when gameId changes
+  useEffect(() => {
+    let alive = true;
+    
+    const fetchGameResults = async () => {
+      if (!gameId) return;
+      
+      try {
+        setLoadingResult(true);
+        const data = await api.getGameResults(gameId);
+        if (alive) {
+          setGameResult(data);
+        }
+      } catch (error) {
+        console.error('Failed to load game results', error);
+        if (alive) {
+          toast.error('Failed to load game results');
+        }
+      } finally {
+        if (alive) setLoadingResult(false);
+      }
+    };
+    
+    fetchGameResults();
+    
+    return () => {
+      alive = false;
+    };
+  }, [gameId]);
+
+  useEffect(() => {
+    const checkAuthAndFetchGames = async () => {
+      try {
+        setLoading(true);
+        // First check if we're actually authenticated
+        const token = localStorage.getItem('access_token');
+        if (!token) {
+          console.log('No access token found, redirecting to login');
+          navigate('/login');
+          return;
+        }
+        
+        // Simulate loading data
+        const timer = setTimeout(() => {
+          setLoading(false);
+          setGameResult({
+            roundsCompleted: 5,
+            status: 'In Progress',
+          });
+        }, 1000);
+        
+        return () => clearTimeout(timer);
+      } catch (error) {
+        console.error('Error in checkAuthAndFetchGames:', error);
+        setLoading(false);
+      }
+    };
+    
+    checkAuthAndFetchGames();
+  }, [navigate]);
+
+  if (loading) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minH="50vh">
+        <CircularProgress isIndeterminate color="blue.500" />
+      </Box>
+    );
+  }
+
   return (
-    <Box>
-      <Typography variant="h4" gutterBottom>
-        Demand Planning System
-      </Typography>
+    <PageLayout title="Dashboard">
+      <Box p={4}>
+        <Flex justify="space-between" align="center" mb={6} mt={2}>
+          <VStack align="flex-start" spacing={1}>
+            <Heading size="xl" fontWeight="600">Dashboard</Heading>
+            <Text color="gray.500" fontSize="md">
+              Overview of your supply chain performance
+            </Text>
+          </VStack>
+        </Flex>
+        <FilterBar />
+        
+        {/* KPI Cards */}
+        <Grid templateColumns={{ base: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' }} gap={4} mb={6}>
+          <GridItem>
+            <KPIStat 
+              title="Total Inventory Value" 
+              value="$1,245,678" 
+              change={+2.3} 
+              icon="inventory"
+            />
+          </GridItem>
+          <GridItem>
+            <KPIStat 
+              title="Stockouts (Last 30d)" 
+              value="12" 
+              change={-15.4} 
+              icon="warning"
+              trend="down"
+            />
+          </GridItem>
+          <GridItem>
+            <KPIStat 
+              title="On-Time Delivery" 
+              value="94.5%" 
+              change={1.2} 
+              icon="delivery"
+            />
+          </GridItem>
+          <GridItem>
+            <KPIStat 
+              title="Forecast Accuracy" 
+              value="88.2%" 
+              change={0.8} 
+              icon="forecast"
+            />
+          </GridItem>
+        </Grid>
 
-      <FilterBar />
+        {/* Main Content Grid */}
+        <Grid templateColumns={{ base: '1fr', lg: '2fr 1fr' }} gap={6} mb={6}>
+          {/* Left Column */}
+          <GridItem>
+            {/* Demand Chart */}
+            <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6}>
+              <CardHeader>
+                <Heading size="md">Demand Forecast vs Actual</Heading>
+              </CardHeader>
+              <CardBody>
+                <Box h="300px">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={demandSeries}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Line type="monotone" dataKey="actual" stroke="#8884d8" name="Actual" strokeWidth={2} />
+                      <Line type="monotone" dataKey="forecast" stroke="#82ca9d" name="Forecast" strokeWidth={2} strokeDasharray="5 5" />
+                      <Line type="monotone" dataKey="target" stroke="#ff7300" name="Target" strokeWidth={1} strokeDasharray="3 3" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </Box>
+              </CardBody>
+            </Card>
 
-      {/* KPI cards */}
-      <Grid container spacing={2} sx={{ mb: 2 }}>
-        <Grid item xs={12} md={3}>
-          <KPIStat title="Total Demand Forecast" value="248,500" subtitle="units" delta="+1.2% from last period" deltaPositive />
+            {/* Stock vs Forecast */}
+            <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6}>
+              <CardHeader display="flex" justifyContent="space-between" alignItems="center">
+                <Heading size="md">Stock vs Forecast (Next 4 Weeks)</Heading>
+                <Button 
+                  leftIcon={<Icon as={FiPlus} />}
+                  bg="blue.600"
+                  color="white"
+                  _hover={{
+                    bg: 'blue.700',
+                    transform: 'translateY(-1px)',
+                    boxShadow: 'md',
+                  }}
+                  _active={{
+                    bg: 'blue.800',
+                    transform: 'translateY(0)',
+                  }}
+                  onClick={() => navigate('/create-forecast')}
+                >
+                  New Forecast
+                </Button>
+              </CardHeader>
+              <CardBody>
+                <Box h="300px">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={stockVsForecast}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="stock" fill="#8884d8" name="Current Stock" />
+                      <Bar dataKey="forecast" fill="#ffc658" name="4-Week Forecast" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Box>
+              </CardBody>
+            </Card>
+          </GridItem>
+          {/* Right Column */}
+          <GridItem>
+            {/* Stock vs Safety Stock */}
+            <Card variant="outline" bg={cardBg} borderColor={borderColor} h="100%" mb={6}>
+              <CardHeader>
+                <Heading size="md">Stock vs Safety Stock</Heading>
+              </CardHeader>
+              <CardBody>
+                <Box h="300px">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={stockVsSafety}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="name" />
+                      <YAxis />
+                      <Tooltip />
+                      <Legend />
+                      <Bar dataKey="stock" fill="#8884d8" name="Current Stock" />
+                      <Bar dataKey="safety" fill="#82ca9d" name="Safety Stock" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </Box>
+              </CardBody>
+            </Card>
+          </GridItem>
         </Grid>
-        <Grid item xs={12} md={3}>
-          <KPIStat title="Current Inventory" value="186,240" subtitle="units" delta="-3.5% from last period" />
-        </Grid>
-        <Grid item xs={12} md={3}>
-          <KPIStat title="Forecast Accuracy" value="87.4%" subtitle="+2.7% from last period" delta="+2.7%" deltaPositive />
-        </Grid>
-        <Grid item xs={12} md={3}>
-          <KPIStat title="Stockout Risk" value="3" subtitle="SKUs at risk" />
-        </Grid>
-      </Grid>
 
-      {/* Demand Forecast Overview */}
-      <Grid container spacing={2} sx={{ mb: 2 }}>
-        <Grid item xs={12}>
-          <ChartCard title="Demand Forecast Overview" subtitle="Historical actuals vs forecasted demand for the next 12 weeks">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={demandSeries}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="actual" stroke="#1e88e5" name="Actual Demand" />
-                <Line type="monotone" dataKey="forecast" stroke="#e53935" name="Forecasted Demand" strokeDasharray="4 2" />
-                <Line type="monotone" dataKey="target" stroke="#43a047" name="Target Demand" />
-              </LineChart>
-            </ResponsiveContainer>
-          </ChartCard>
-        </Grid>
-      </Grid>
-
-      {/* Bar charts row */}
-      <Grid container spacing={2} sx={{ mb: 2 }}>
-        <Grid item xs={12} md={6}>
-          <ChartCard title="Current Inventory vs Safety Stock" subtitle="Monitor stock levels against safety thresholds" height={300}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stockVsSafety}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" interval={0} angle={-20} textAnchor="end" height={60} />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="stock" fill="#1e88e5" name="Current Stock" />
-                <Bar dataKey="safety" fill="#e53935" name="Safety Stock" />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-        </Grid>
-        <Grid item xs={12} md={6}>
-          <ChartCard title="Stock vs Forecast Demand" subtitle="Compare current inventory with projected demand" height={300}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stockVsForecast}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="name" interval={0} angle={-20} textAnchor="end" height={60} />
-                <YAxis />
-                <Tooltip />
-                <Legend />
-                <Bar dataKey="stock" fill="#1e88e5" name="Current Stock" />
-                <Bar dataKey="forecast" fill="#43a047" name="Forecast Demand" />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-        </Grid>
-      </Grid>
-
-      {/* SKU Overview Table */}
-      <Typography variant="h6" gutterBottom>SKU Overview</Typography>
-      <SkuTable />
-    </Box>
+        {/* Full Width Section */}
+        <Card variant="outline" bg={cardBg} borderColor={borderColor}>
+          <CardBody p={0}>
+            <SkuTable data={[]} />
+          </CardBody>
+        </Card>
+      </Box>
+    </PageLayout>
   );
 };
 

@@ -56,9 +56,14 @@ const adminMenuItems = [
 
 const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
   const [adminOpen, setAdminOpen] = React.useState(false);
-  const { currentUser } = useAuth();
+  const { user: currentUser } = useAuth() || {};
   const isAdmin = currentUser?.email === 'admin@daybreak.ai';
   const location = useLocation();
+  
+  // If we're still loading the user, don't render anything
+  if (!currentUser) {
+    return null;
+  }
 
   const drawer = (
     <div>
