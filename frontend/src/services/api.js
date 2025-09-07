@@ -136,12 +136,30 @@ const api = {
     });
   },
   
-  getGameState: async (gameId) => {
-    return api.request(`/games/${gameId}/state`);
+  getGameState(gameId) {
+    return this.request(`/games/${gameId}/state`);
   },
   
-  getGameResults: async (gameId) => {
-    return api.request(`/games/${gameId}/results`);
+  getGameResults(gameId) {
+    return this.request(`/games/${gameId}/results`);
+  },
+  
+  // Get the current round status including time remaining
+  getRoundStatus(gameId) {
+    return this.request(`/games/${gameId}/rounds/current/status`);
+  },
+  
+  // Submit or update an order for the current round
+  submitOrder(gameId, playerId, quantity) {
+    return this.request(`/games/${gameId}/players/${playerId}/orders`, {
+      method: 'POST',
+      body: { quantity }
+    });
+  },
+  
+  // Get the current player's order for the round
+  getPlayerOrder(gameId, playerId, roundNumber) {
+    return this.request(`/games/${gameId}/players/${playerId}/rounds/${roundNumber}/order`);
   }
 };
 

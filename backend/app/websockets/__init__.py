@@ -1,18 +1,21 @@
 from fastapi import WebSocket
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any, cast
 import json
 import asyncio
 from datetime import datetime
-from ..models.game import GameStatus
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from ..models.supply_chain import Game, GameStatus, Player
 from ..services.mixed_game_service import MixedGameService
-from ..db.session import SessionLocal
+from ..db.session import get_db
 
 class ConnectionManager:
     def __init__(self):
         self.active_connections: Dict[int, Dict[str, WebSocket]] = {}
         self.game_rooms: Dict[int, set] = {}
 
-    async def connect(self, websocket: WebSocket, game_id: int, client_id: str):
+    async def connect(self, websocket: WebSocket, game_id: int, client_id: str, db: AsyncSession):
         await websocket.accept()
         if game_id not in self.active_connections:
             self.active_connections[game_id] = {}
@@ -22,7 +25,7 @@ class ConnectionManager:
         self.game_rooms[game_id].add(client_id)
         
         # Send current game state to the new connection
-        await self.send_game_state(game_id, client_id)
+        await self.send_game_state(game_id, client_id, db)
         
         # Notify other clients about the new connection
         await self.broadcast({
@@ -51,46 +54,46 @@ class ConnectionManager:
                         print(f"Error broadcasting to {client_id}: {e}")
                         self.disconnect(game_id, client_id)
 
-    async def send_game_state(self, game_id: int, client_id: str):
+    async def send_game_state(self, game_id: int, client_id: str, db: AsyncSession):
         """Send the current game state to a specific client"""
-        db = SessionLocal()
         try:
             game_service = MixedGameService(db)
-            game_state = game_service.get_game_state(game_id)
-            
-            if game_state:
-                await self.send_personal_message({
-                    "type": "game_state",
-                    "state": game_state,
-                    "timestamp": datetime.utcnow().isoformat()
-                }, game_id, client_id)
+            game_state = await game_service.get_game_state(game_id)
+            await self.send_personal_message({
+                "type": "game_state",
+                "data": game_state.dict()
+            }, game_id, client_id)
         except Exception as e:
-            print(f"Error getting game state: {e}")
+            print(f"Error sending game state: {e}")
             await self.send_personal_message({
                 "type": "error",
-                "message": "Failed to load game state",
-                "timestamp": datetime.utcnow().isoformat()
+                "message": f"Failed to load game state: {str(e)}"
             }, game_id, client_id)
         finally:
             db.close()
 
-    async def broadcast_game_state(self, game_id: int):
+    async def broadcast_game_state(self, game_id: int, game_state = None):
         """Broadcast the current game state to all connected clients"""
-        db = SessionLocal()
         try:
-            game_service = MixedGameService(db)
-            game_state = game_service.get_game_state(game_id)
+            if game_state is None:
+                async with get_db() as db:
+                    game_service = MixedGameService(db)
+                    game_state = await game_service.get_game_state(game_id)
             
-            if game_state:
-                await self.broadcast({
-                    "type": "game_state",
-                    "state": game_state,
-                    "timestamp": datetime.utcnow().isoformat()
-                }, game_id)
+            await self.broadcast({
+                "type": "game_state",
+                "data": game_state.dict() if hasattr(game_state, 'dict') else game_state
+            }, game_id)
         except Exception as e:
             print(f"Error broadcasting game state: {e}")
-        finally:
-            db.close()
+            # Try to send error to all clients
+            try:
+                await self.broadcast({
+                    "type": "error",
+                    "message": f"Failed to update game state: {str(e)}"
+                }, game_id)
+            except:
+                pass
 
 # Create a singleton instance
 manager = ConnectionManager()

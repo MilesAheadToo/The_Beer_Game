@@ -1,22 +1,12 @@
 from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, JSON, Boolean, Enum, and_
-from sqlalchemy.orm import relationship, Session
-from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql import func, select
 from enum import Enum as PyEnum
 from typing import Optional, List, Dict, Any
 from app.db.base import Base
 import datetime
-
-# Import database session
-try:
-    from app.db.session import SessionLocal
-except ImportError:
-    # Fallback for when running in a context where the app package isn't fully initialized
-    from sqlalchemy.orm import sessionmaker
-    from sqlalchemy import create_engine
-    from app.core.config import settings
-    
-    engine = create_engine(settings.SQLALCHEMY_DATABASE_URI)
-    SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+from app.db.session import get_db
 
 class GameStatus(str, PyEnum):
     CREATED = "created"
@@ -38,6 +28,8 @@ class Game(Base):
     status = Column(Enum(GameStatus), default=GameStatus.CREATED)
     current_round = Column(Integer, default=0)
     max_rounds = Column(Integer, default=52)  # Default to 52 weeks (1 year)
+    round_time_limit = Column(Integer, default=60)  # Default 60 seconds per round
+    current_round_ends_at = Column(DateTime, nullable=True)  # When the current round will end
     demand_pattern = Column(JSON, default={
         "type": "classic",
         "params": {
@@ -69,53 +61,58 @@ class Player(Base):
     player_rounds = relationship("PlayerRound", back_populates="player")
     
     @property
-    def upstream_player(self, db: Optional[Session] = None) -> Optional['Player']:
+    async def upstream_player(self, db: Optional[AsyncSession] = None):
         """Get the player's upstream player in the supply chain."""
         if not db:
-            db = SessionLocal()
-            try:
-                return self.upstream_player(db)
-            finally:
-                db.close()
+            async with get_db() as db_session:
+                return await self.upstream_player(db_session)
                 
         if self.role == PlayerRole.RETAILER:
             return None
             
-        role_order = [PlayerRole.FACTORY, PlayerRole.DISTRIBUTOR, PlayerRole.WHOLESALER, PlayerRole.RETAILER]
-        current_index = role_order.index(self.role)
-        upstream_role = role_order[current_index + 1] if current_index + 1 < len(role_order) else None
+        upstream_role = {
+            PlayerRole.WHOLESALER: PlayerRole.RETAILER,
+            PlayerRole.DISTRIBUTOR: PlayerRole.WHOLESALER,
+            PlayerRole.FACTORY: PlayerRole.DISTRIBUTOR
+        }.get(self.role)
         
-        if upstream_role:
-            return db.query(Player).filter(
+        if not upstream_role:
+            return None
+            
+        result = await db.execute(
+            select(Player).where(
                 Player.game_id == self.game_id,
                 Player.role == upstream_role
-            ).first()
-        return None
+            )
+        )
+        return result.scalars().first()
 
-    def downstream_player(self, db: Optional[Session] = None) -> Optional['Player']:
+    async def downstream_player(self, db: Optional[AsyncSession] = None):
         """Get the player's downstream player in the supply chain."""
         if not db:
-            db = SessionLocal()
-            try:
-                return self.downstream_player(db)
-            finally:
-                db.close()
+            async with get_db() as db_session:
+                return await self.downstream_player(db_session)
                 
         if self.role == PlayerRole.FACTORY:
             return None
             
-        role_order = [PlayerRole.FACTORY, PlayerRole.DISTRIBUTOR, PlayerRole.WHOLESALER, PlayerRole.RETAILER]
-        current_index = role_order.index(self.role)
-        downstream_role = role_order[current_index - 1] if current_index > 0 else None
+        downstream_role = {
+            PlayerRole.RETAILER: PlayerRole.WHOLESALER,
+            PlayerRole.WHOLESALER: PlayerRole.DISTRIBUTOR,
+            PlayerRole.DISTRIBUTOR: PlayerRole.FACTORY
+        }.get(self.role)
         
-        if downstream_role:
-            return db.query(Player).filter(
+        if not downstream_role:
+            return None
+            
+        result = await db.execute(
+            select(Player).where(
                 Player.game_id == self.game_id,
                 Player.role == downstream_role
-            ).first()
-        return None
+            )
+        )
+        return result.scalars().first()
 
-# ... rest of the code remains the same ...
 class PlayerInventory(Base):
     __tablename__ = "player_inventory"
     
@@ -148,10 +145,34 @@ class GameRound(Base):
     game_id = Column(Integer, ForeignKey("games.id"), nullable=False)
     round_number = Column(Integer, nullable=False)
     customer_demand = Column(Integer, nullable=False)  # Random demand for this round
+    is_completed = Column(Boolean, default=False)  # Whether the round is completed
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)  # When the round was completed
     
     game = relationship("Game", back_populates="rounds")
     player_rounds = relationship("PlayerRound", back_populates="game_round")
+    
+    async def all_players_submitted(self, db: AsyncSession):
+        """Check if all players have submitted their orders for this round."""
+        from sqlalchemy import func
+        
+        # Count distinct players who have submitted for this round
+        submitted_players_result = await db.execute(
+            select(func.count(PlayerRound.player_id.distinct())).where(
+                PlayerRound.round_id == self.id
+            )
+        )
+        submitted_players = submitted_players_result.scalar()
+        
+        # Count total players in the game
+        total_players_result = await db.execute(
+            select(func.count(Player.id)).where(
+                Player.game_id == self.game_id
+            )
+        )
+        total_players = total_players_result.scalar()
+        
+        return submitted_players >= total_players
 
 class PlayerRound(Base):
     __tablename__ = "player_rounds"

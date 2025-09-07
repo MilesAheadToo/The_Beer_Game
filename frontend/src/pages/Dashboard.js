@@ -15,17 +15,13 @@ import {
   Flex,
   Card,
   CardHeader,
-  CardBody,
-  CardFooter
+  CardBody
 } from '@chakra-ui/react';
 import { FiPlus } from 'react-icons/fi';
 import PageLayout from '../components/PageLayout';
-import { toast } from 'react-toastify';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import api from '../services/api';
-import FilterBar from '../components/FilterBar';
 import KPIStat from '../components/KPIStat';
-import ChartCard from '../components/ChartCard';
 import SkuTable from '../components/SkuTable';
 
 // Sample data for the template-like dashboard
@@ -73,43 +69,11 @@ const Dashboard = () => {
   const borderColor = useColorModeValue('gray.200', 'gray.700');
   
   // State
-  const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [gameResult, setGameResult] = useState(null);
-  const [loadingResult, setLoadingResult] = useState(false);
   const navigate = useNavigate();
   const query = useQuery();
   const gameId = query.get('gameId');
 
-  // Fetch game results when gameId changes
-  useEffect(() => {
-    let alive = true;
-    
-    const fetchGameResults = async () => {
-      if (!gameId) return;
-      
-      try {
-        setLoadingResult(true);
-        const data = await api.getGameResults(gameId);
-        if (alive) {
-          setGameResult(data);
-        }
-      } catch (error) {
-        console.error('Failed to load game results', error);
-        if (alive) {
-          toast.error('Failed to load game results');
-        }
-      } finally {
-        if (alive) setLoadingResult(false);
-      }
-    };
-    
-    fetchGameResults();
-    
-    return () => {
-      alive = false;
-    };
-  }, [gameId]);
 
   useEffect(() => {
     const checkAuthAndFetchGames = async () => {

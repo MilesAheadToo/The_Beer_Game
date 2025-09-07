@@ -33,6 +33,18 @@ cd ..
 echo "Starting production services..."
 docker-compose -f docker-compose.prod.yml up -d --build
 
+# Wait for database to be ready
+echo "Waiting for database to be ready..."
+docker-compose -f docker-compose.prod.yml exec -T db bash -c 'while ! mysqladmin ping -h localhost --silent; do sleep 2; done'
+
+# Run database migrations
+echo "Running database migrations..."
+docker-compose -f docker-compose.prod.yml exec -T backend alembic upgrade head
+
+# Restart backend to ensure all services are using the latest database schema
+echo "Restarting backend service..."
+docker-compose -f docker-compose.prod.yml restart backend
+
 echo ""
 echo "Production deployment complete!"
 echo "Application should be available at https://localhost (accept the self-signed certificate)"

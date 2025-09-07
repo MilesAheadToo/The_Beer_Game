@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { 
   Box, 
@@ -26,12 +26,15 @@ import {
   Text,
   HStack,
   VStack,
-  Divider,
   Tooltip,
   useColorModeValue,
   Flex,
   Spinner,
-  Heading
+  Heading,
+  Alert,
+  AlertIcon,
+  AlertTitle,
+  AlertDescription
 } from '@chakra-ui/react';
 import PageLayout from '../components/PageLayout';
 import { 
@@ -43,10 +46,10 @@ import {
   ArrowForwardIcon,
   TimeIcon,
   CheckIcon,
-  NotAllowedIcon,
   ViewIcon
 } from '@chakra-ui/icons';
 import api from '../services/api';
+import { getModelStatus } from '../services/modelService';
 
 const statusColors = {
   CREATED: 'blue',
@@ -59,6 +62,8 @@ const statusColors = {
 const MixedGamesList = () => {
   const [games, setGames] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isModelLoading, setIsModelLoading] = useState(true);
+  const [modelStatus, setModelStatus] = useState(null);
   const [selectedGame, setSelectedGame] = useState(null);
   const navigate = useNavigate();
   const toast = useToast();
@@ -71,7 +76,7 @@ const MixedGamesList = () => {
   
   const cancelRef = React.useRef();
 
-  const fetchGames = async () => {
+  const fetchGames = useCallback(async () => {
     try {
       setIsLoading(true);
       const data = await api.getGames();
@@ -88,11 +93,31 @@ const MixedGamesList = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [toast]);
+
+  const fetchModelStatus = useCallback(async () => {
+    try {
+      setIsModelLoading(true);
+      const status = await getModelStatus();
+      setModelStatus(status);
+    } catch (error) {
+      console.error('Error fetching model status:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to fetch GNN model status',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsModelLoading(false);
+    }
+  }, [toast]);
 
   useEffect(() => {
     fetchGames();
-  }, []);
+    fetchModelStatus();
+  }, [fetchGames, fetchModelStatus]);
 
   const handleStartGame = async (gameId) => {
     try {
@@ -270,6 +295,35 @@ const MixedGamesList = () => {
 
   return (
     <PageLayout title="Mixed Games">
+      {/* Model Status Alert */}
+      {!isModelLoading && modelStatus && (
+        <Alert 
+          status={modelStatus.is_trained ? 'success' : 'warning'} 
+          variant="left-accent"
+          mb={6}
+          borderRadius="md"
+        >
+          <AlertIcon />
+          <Box flex="1">
+            <AlertTitle>
+              {modelStatus.is_trained ? 'GNN Model Trained' : 'GNN Model Not Trained'}
+            </AlertTitle>
+            <AlertDescription fontSize="sm">
+              {modelStatus.is_trained 
+                ? `Model was last trained on ${new Date(modelStatus.last_modified).toLocaleString()}`
+                : 'The GNN model needs to be trained before AI agents can be used.'}
+              {modelStatus.is_trained && (
+                <Text fontSize="xs" mt={1}>
+                  File: {modelStatus.file_size_mb?.toFixed(2)}MB
+                  {modelStatus.epoch && ` | Epoch: ${modelStatus.epoch}`}
+                  {modelStatus.training_loss && ` | Loss: ${modelStatus.training_loss.toFixed(4)}`}
+                </Text>
+              )}
+            </AlertDescription>
+          </Box>
+        </Alert>
+      )}
+        
       <Flex justify="space-between" align="center" mb={6} mt={4}>
         <VStack align="flex-start" spacing={1} pt={2}>
           <Heading size="xl" fontWeight="600">Mixed Games</Heading>

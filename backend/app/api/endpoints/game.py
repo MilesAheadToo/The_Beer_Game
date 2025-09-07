@@ -360,8 +360,8 @@ def get_player(
     return PlayerResponse.from_orm(player)
 
 # Order endpoints
-@router.post("/{game_id}/players/{player_id}/orders", response_model=PlayerRoundResponse, status_code=status.HTTP_201_CREATED)
-def submit_order(
+@router.post("/games/{game_id}/players/{player_id}/orders", response_model=PlayerRoundResponse)
+async def submit_order(
     game_id: int,
     player_id: int,
     order_in: OrderCreate,
@@ -369,17 +369,17 @@ def submit_order(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    Submit an order for the current round.
+    Submit or update an order for the current round.
+    
+    Players can submit or update their order for the current round until the round ends.
+    If the round time expires, any unsubmitted orders will be set to zero.
     """
     game_service = GameService(db)
     try:
-        player_round = game_service.submit_order(game_id, player_id, order_in.quantity)
-        return PlayerRoundResponse.model_validate(player_round)
+        player_round = await game_service.submit_order(game_id, player_id, order_in.quantity)
+        return player_round
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=400, detail=str(e))
 
 # Round endpoints
 @router.get("/{game_id}/rounds", response_model=List[GameRoundResponse])
@@ -447,6 +447,56 @@ def get_current_round(
         )
     
     return GameRoundResponse.model_validate(game_round)
+
+@router.get("/games/{game_id}/rounds/current/status", response_model=Dict[str, Any])
+async def get_round_submission_status(
+    game_id: int,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Get the submission status of the current round.
+    
+    Returns:
+        A dictionary with submission status and details
+    """
+    game = db.query(GameModel).filter(GameModel.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+    
+    # Get current round
+    current_round = db.query(GameRound).filter(
+        GameRound.game_id == game_id,
+        GameRound.round_number == game.current_round
+    ).first()
+    
+    if not current_round:
+        raise HTTPException(status_code=404, detail="Current round not found")
+    
+    # Get all players in the game
+    players = db.query(Player).filter(Player.game_id == game_id).all()
+    total_players = len(players)
+    
+    # Get players who have submitted for the current round
+    submitted_players = db.query(PlayerRound).filter(
+        PlayerRound.round_id == current_round.id
+    ).all()
+    submitted_count = len(submitted_players)
+    
+    # Get list of players who haven't submitted yet
+    submitted_player_ids = [p.player_id for p in submitted_players]
+    pending_players = [p for p in players if p.id not in submitted_player_ids]
+    
+    return {
+        "game_id": game_id,
+        "round_number": current_round.round_number,
+        "is_completed": current_round.is_completed,
+        "total_players": total_players,
+        "submitted_count": submitted_count,
+        "pending_count": total_players - submitted_count,
+        "pending_players": [{"id": p.id, "name": p.name, "role": p.role} for p in pending_players],
+        "all_submitted": current_round.is_completed
+    }
 
 # Player Round endpoints
 @router.get("/{game_id}/players/{player_id}/current-round", response_model=PlayerRoundResponse)

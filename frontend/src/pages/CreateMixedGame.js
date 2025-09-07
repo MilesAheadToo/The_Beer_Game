@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 import { 
   Box, 
   Button, 
@@ -10,7 +11,6 @@ import {
   VStack, 
   HStack, 
   Text, 
-  Checkbox, 
   NumberInput, 
   NumberInputField, 
   NumberInputStepper, 
@@ -21,15 +21,19 @@ import {
   CardBody,
   CardHeader,
   Heading,
-  Divider,
   useColorModeValue,
   Switch,
   FormHelperText,
   Grid,
-  GridItem,
-  Badge
+  Badge,
+  Tabs,
+  TabList,
+  TabPanels,
+  Tab,
+  TabPanel
 } from '@chakra-ui/react';
-import PageLayout, { PageSection } from '../components/PageLayout';
+import PageLayout from '../components/PageLayout';
+import PricingConfigForm from '../components/PricingConfigForm';
 import api from '../services/api';
 
 const playerRoles = [
@@ -79,38 +83,83 @@ const CreateMixedGame = () => {
   const [maxRounds, setMaxRounds] = useState(20);
   const [description, setDescription] = useState('');
   const [isPublic, setIsPublic] = useState(true);
-  const [demandPattern, setDemandPattern] = useState(demandPatterns[0].value);
+  const [demandPattern] = useState(demandPatterns[0].value);
+  const [pricingConfig, setPricingConfig] = useState({
+    retailer: { selling_price: 100.0, standard_cost: 80.0 },
+    wholesaler: { selling_price: 75.0, standard_cost: 60.0 },
+    distributor: { selling_price: 60.0, standard_cost: 45.0 },
+    factory: { selling_price: 45.0, standard_cost: 30.0 }
+  });
   const cardBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.700');
+  const { user } = useAuth();
+  const [availableUsers, setAvailableUsers] = useState([]);
+  const [loadingUsers, setLoadingUsers] = useState(true);
+  
   const [players, setPlayers] = useState(
     playerRoles.map(role => ({
       role: role.value,
-      playerType: 'human',
+      playerType: 'ai', // Default to AI for all roles initially
       strategy: 'NAIVE',
       canSeeDemand: role.value === 'retailer',
-      userId: role.value === 'retailer' ? 'current-user-id' : ''
+      userId: role.value === 'retailer' && user ? user.id : null
     }))
   );
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
   const toast = useToast();
 
+  // Fetch available users
+  useEffect(() => {
+    const fetchUsers = async () => {
+      try {
+        const response = await api.get('/users/');
+        setAvailableUsers(response.data);
+      } catch (error) {
+        console.error('Error fetching users:', error);
+        toast({
+          title: 'Error',
+          description: 'Failed to load users',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        });
+      } finally {
+        setLoadingUsers(false);
+      }
+    };
+
+    fetchUsers();
+  }, [toast]);
+
   const handlePlayerTypeChange = (index, type) => {
-    setPlayers(players.map((player, i) => 
-      i === index 
-        ? { 
-            ...player, 
-            playerType: type,
-            // Reset strategy to default when changing to human
-            ...(type === 'human' && { strategy: agentStrategies[0].options[0].value })
-          } 
-        : player
-    ));
+    setPlayers(players.map((player, i) => {
+      if (i === index) {
+        const updatedPlayer = { 
+          ...player, 
+          playerType: type,
+          // Reset strategy when changing to human, set user ID if current user is available
+          ...(type === 'human' && { 
+            strategy: agentStrategies[0].options[0].value,
+            // Only set the current user if this is the retailer or no user is selected yet
+            ...(player.role === 'retailer' && !player.userId && user && { userId: user.id })
+          })
+        };
+        return updatedPlayer;
+      }
+      return player;
+    }));
   };
 
   const handleStrategyChange = (index, strategy) => {
     setPlayers(players.map((player, i) => 
       i === index ? { ...player, strategy } : player
+    ));
+  };
+
+  const handleUserChange = (index, userId) => {
+    setPlayers(players.map((player, i) => 
+      i === index ? { ...player, userId: userId || null } : player
     ));
   };
 
@@ -122,6 +171,40 @@ const CreateMixedGame = () => {
 
   const handleSubmit = async (e) => {
     if (e) e.preventDefault();
+    
+    // Validate that each human role has a user assigned
+    const invalidPlayers = players.filter(
+      p => p.playerType === 'human' && !p.userId
+    );
+    
+    if (invalidPlayers.length > 0) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please assign a user to all human roles',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+      return null;
+    }
+    
+    // Validate pricing configuration
+    const invalidPricing = Object.entries(pricingConfig).some(([role, prices]) => {
+      return !prices.selling_price || !prices.standard_cost || 
+             prices.selling_price <= prices.standard_cost;
+    });
+    
+    if (invalidPricing) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please ensure selling price is greater than standard cost for all roles',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+      return null;
+    }
+    
     setIsLoading(true);
     
     try {
@@ -134,12 +217,30 @@ const CreateMixedGame = () => {
           type: demandPattern,
           params: {}
         },
+        pricing_config: {
+          retailer: {
+            selling_price: parseFloat(pricingConfig.retailer.selling_price),
+            standard_cost: parseFloat(pricingConfig.retailer.standard_cost)
+          },
+          wholesaler: {
+            selling_price: parseFloat(pricingConfig.wholesaler.selling_price),
+            standard_cost: parseFloat(pricingConfig.wholesaler.standard_cost)
+          },
+          distributor: {
+            selling_price: parseFloat(pricingConfig.distributor.selling_price),
+            standard_cost: parseFloat(pricingConfig.distributor.standard_cost)
+          },
+          factory: {
+            selling_price: parseFloat(pricingConfig.factory.selling_price),
+            standard_cost: parseFloat(pricingConfig.factory.standard_cost)
+          }
+        },
         player_assignments: players.map(player => ({
           role: player.role.toUpperCase(),
           player_type: player.playerType,
           strategy: player.strategy,
           can_see_demand: player.canSeeDemand,
-          user_id: player.userId // In a real app, this would be set based on user selection
+          user_id: player.userId || null
         }))
       };
       
@@ -148,6 +249,13 @@ const CreateMixedGame = () => {
       
     } catch (error) {
       console.error('Error creating game:', error);
+      toast({
+        title: 'Error',
+        description: error.response?.data?.detail || 'Failed to create game',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
       throw error;
     } finally {
       setIsLoading(false);
@@ -194,88 +302,111 @@ const CreateMixedGame = () => {
   return (
     <PageLayout title="Create Mixed Game">
       <VStack as="form" onSubmit={handleCreateGame} spacing={6} align="stretch" maxW="4xl" mx="auto">
-        {/* Game Details Card */}
-        <Card variant="outline" bg={cardBg} borderColor={borderColor}>
-          <CardHeader pb={2}>
-            <Heading size="md">Game Settings</Heading>
-            <Text color="gray.500" fontSize="sm">Configure the basic settings for your game</Text>
-          </CardHeader>
-          <CardBody pt={0}>
-            <VStack spacing={5}>
-              <FormControl>
-                <FormLabel>Game Name</FormLabel>
-                <Input 
-                  value={gameName}
-                  onChange={(e) => setGameName(e.target.value)}
-                  placeholder="Enter game name"
-                  size="lg"
-                />
-              </FormControl>
+        <Tabs variant="enclosed" isFitted>
+          <TabList mb="1em">
+            <Tab>Game Settings</Tab>
+            <Tab>Pricing</Tab>
+            <Tab>Players</Tab>
+          </TabList>
+          
+          <TabPanels>
+            <TabPanel p={0}>
+              <VStack spacing={6}>
+                {/* Game Details Card */}
+                <Card variant="outline" bg={cardBg} borderColor={borderColor} w="100%">
+                  <CardHeader pb={2}>
+                    <Heading size="md">Game Settings</Heading>
+                    <Text color="gray.500" fontSize="sm">Configure the basic settings for your game</Text>
+                  </CardHeader>
+                  <CardBody pt={0}>
+                    <VStack spacing={5}>
+                      <FormControl>
+                        <FormLabel>Game Name</FormLabel>
+                        <Input 
+                          value={gameName}
+                          onChange={(e) => setGameName(e.target.value)}
+                          placeholder="Enter game name"
+                          size="lg"
+                          isRequired
+                        />
+                      </FormControl>
 
-              <Grid templateColumns={{ base: '1fr', md: '1fr 1fr' }} gap={6} w="full">
-                <FormControl>
-                  <FormLabel>Maximum Rounds</FormLabel>
-                  <NumberInput 
-                    min={1} 
-                    max={999}
-                    value={maxRounds}
-                    onChange={(value) => setMaxRounds(parseInt(value) || 0)}
-                  >
-                    <NumberInputField />
-                    <NumberInputStepper>
-                      <NumberIncrementStepper />
-                      <NumberDecrementStepper />
-                    </NumberInputStepper>
-                  </NumberInput>
-                  <FormHelperText>Maximum 999 rounds</FormHelperText>
-                </FormControl>
+                      <Grid templateColumns={{ base: '1fr', md: '1fr 1fr' }} gap={6} w="full">
+                        <FormControl>
+                          <FormLabel>Maximum Rounds</FormLabel>
+                          <NumberInput 
+                            min={1} 
+                            max={999}
+                            value={maxRounds}
+                            onChange={(value) => setMaxRounds(parseInt(value) || 0)}
+                            isRequired
+                          >
+                            <NumberInputField />
+                            <NumberInputStepper>
+                              <NumberIncrementStepper />
+                              <NumberDecrementStepper />
+                            </NumberInputStepper>
+                          </NumberInput>
+                          <FormHelperText>Maximum 999 rounds</FormHelperText>
+                        </FormControl>
 
-                <FormControl display="flex" flexDirection="column" justifyContent="flex-end">
-                  <FormLabel mb={0}>Game Visibility</FormLabel>
-                  <HStack spacing={4} align="center">
-                    <Text fontSize="sm" color={isPublic ? 'gray.500' : 'gray.800'} fontWeight={isPublic ? 'normal' : 'medium'}>Private</Text>
-                    <Switch 
-                      isChecked={isPublic}
-                      onChange={(e) => setIsPublic(e.target.checked)}
-                      colorScheme="blue"
-                      size="lg"
-                    />
-                    <Text fontSize="sm" color={isPublic ? 'blue.600' : 'gray.500'} fontWeight={isPublic ? 'medium' : 'normal'}>
-                      {isPublic ? 'Public' : 'Private'}
-                    </Text>
-                  </HStack>
-                  <FormHelperText>
-                    {isPublic 
-                      ? 'Anyone can join this game' 
-                      : 'Only players with the link can join'}
-                  </FormHelperText>
-                </FormControl>
-              </Grid>
+                        <FormControl display="flex" flexDirection="column" justifyContent="flex-end">
+                          <FormLabel mb={0}>Game Visibility</FormLabel>
+                          <HStack spacing={4} align="center">
+                            <Text fontSize="sm" color={isPublic ? 'gray.500' : 'gray.800'} fontWeight={isPublic ? 'normal' : 'medium'}>Private</Text>
+                            <Switch 
+                              isChecked={isPublic}
+                              onChange={(e) => setIsPublic(e.target.checked)}
+                              colorScheme="blue"
+                              size="lg"
+                            />
+                            <Text fontSize="sm" color={isPublic ? 'gray.800' : 'gray.500'} fontWeight={isPublic ? 'medium' : 'normal'}>Public</Text>
+                          </HStack>
+                          <FormHelperText>
+                            {isPublic 
+                              ? 'Anyone can join this game' 
+                              : 'Only invited players can join this game'}
+                          </FormHelperText>
+                        </FormControl>
+                      </Grid>
 
-              <FormControl>
-                <FormLabel>Description (Optional)</FormLabel>
-                <Input 
-                  as="textarea"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Enter a brief description of the game"
-                  rows={3}
-                  size="lg"
-                />
-              </FormControl>
-            </VStack>
-          </CardBody>
-        </Card>
+                      <FormControl>
+                        <FormLabel>Description (Optional)</FormLabel>
+                        <Input 
+                          as="textarea"
+                          value={description}
+                          onChange={(e) => setDescription(e.target.value)}
+                          placeholder="Enter a description for your game"
+                          size="lg"
+                          minH="100px"
+                          p={3}
+                        />
+                      </FormControl>
+                    </VStack>
+                  </CardBody>
+                </Card>
+              </VStack>
+            </TabPanel>
+            
+            <TabPanel p={0}>
+              <PricingConfigForm 
+                pricingConfig={pricingConfig}
+                onChange={setPricingConfig}
+              />
+            </TabPanel>
+            
+            <TabPanel p={0}>
 
-        {/* Player Configuration Card */}
-        <Card variant="outline" bg={cardBg} borderColor={borderColor} mt={6}>
-          <CardHeader pb={2}>
-            <Heading size="md">Player Configuration</Heading>
-            <Text color="gray.500" fontSize="sm">Configure human and AI players for each role</Text>
-          </CardHeader>
-          <Divider />
-          <CardBody>
-            <VStack spacing={6}>
+              {/* Player Configuration Card */}
+              <Card variant="outline" bg={cardBg} borderColor={borderColor}>
+                <CardHeader>
+                  <Heading size="md">Player Configuration</Heading>
+                  <Text color="gray.500" fontSize="sm">
+                    Configure players and AI agents for each role
+                  </Text>
+                </CardHeader>
+                <CardBody>
+                  <VStack spacing={6} align="stretch">
               {players.map((player, index) => (
                 <Box 
                   key={player.role} 
@@ -399,16 +530,15 @@ const CreateMixedGame = () => {
                           _focus: { borderColor: 'blue.500', boxShadow: '0 0 0 1px #3182ce' }
                         }}
                       >
-                        {agentStrategies.map((group, i) => [
-                          <option key={`group-${i}`} disabled style={{ fontWeight: 'bold', backgroundColor: '#f5f5f5' }}>
-                            {group.group}
-                          </option>,
-                          ...group.options.map(option => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))
-                        ])}
+                        {agentStrategies.map((group, groupIndex) => (
+                          <optgroup key={groupIndex} label={group.group}>
+                            {group.options.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
                       </Select>
                       <FormHelperText>
                         {player.strategy === 'NAIVE' && 'Simple strategy that matches orders to demand'}
@@ -425,6 +555,43 @@ const CreateMixedGame = () => {
                     </FormControl>
                   )}
 
+                  {player.playerType === 'human' && (
+                    <FormControl mt={4}>
+                      <FormLabel>Assign User</FormLabel>
+                      <Select
+                        placeholder="Select a user"
+                        value={player.userId || ''}
+                        onChange={(e) => handleUserChange(index, e.target.value || null)}
+                        isDisabled={loadingUsers}
+                        bg="white"
+                        _dark={{
+                          bg: 'gray.700',
+                          borderColor: 'gray.600',
+                          _hover: { borderColor: 'gray.500' },
+                          _focus: { borderColor: 'blue.500', boxShadow: '0 0 0 1px #3182ce' }
+                        }}
+                      >
+                        <option value="">-- Select User --</option>
+                        {availableUsers.map((user) => (
+                          <option 
+                            key={user.id} 
+                            value={user.id}
+                            disabled={players.some(p => p.userId === user.id && p.role !== player.role)}
+                          >
+                            {user.username} {user.is_admin ? '(Admin)' : ''}
+                            {players.some(p => p.userId === user.id && p.role !== player.role) ? ' (Assigned)' : ''}
+                          </option>
+                        ))}
+                      </Select>
+                      <FormHelperText>
+                        {loadingUsers 
+                          ? 'Loading users...' 
+                          : player.userId 
+                            ? `Assigned to: ${availableUsers.find(u => u.id === player.userId)?.username || 'Unknown'}`
+                            : 'Select a user to assign to this role'}
+                      </FormHelperText>
+                    </FormControl>
+                  )}
                   <FormControl display="flex" alignItems="center" mt={4}>
                     <Switch
                       id={`demand-${index}`}
@@ -441,24 +608,31 @@ const CreateMixedGame = () => {
                   </FormControl>
                 </Box>
               ))}
-            </VStack>
-          </CardBody>
-        </Card>
+                  </VStack>
+                </CardBody>
+              </Card>
+            </TabPanel>
+          </TabPanels>
+        </Tabs>
 
-        <Button 
-          type="submit"
-          isLoading={isLoading}
-          loadingText="Creating Game..."
-          colorScheme="blue"
-          size="lg"
-          mt={6}
-          width="100%"
-          textTransform="none"
-          fontWeight="500"
-          height="44px"
-        >
-          Create Game
-        </Button>
+        {/* Action Buttons */}
+        <HStack spacing={4} justify="flex-end" mt={4}>
+          <Button 
+            onClick={() => navigate('/games')}
+            variant="outline"
+            isDisabled={isLoading}
+          >
+            Cancel
+          </Button>
+          <Button 
+            type="submit" 
+            colorScheme="blue"
+            isLoading={isLoading}
+            loadingText="Creating..."
+          >
+            Create Game
+          </Button>
+        </HStack>
       </VStack>
     </PageLayout>
   );

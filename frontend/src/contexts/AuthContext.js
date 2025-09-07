@@ -28,7 +28,7 @@ export function AuthProvider({ children }) {
     
     // Fetch user profile
     fetchUserProfile();
-  }, []);
+  }, [fetchUserProfile, scheduleTokenRefresh]);
 
   const logout = useCallback(() => {
     clearTimeout(refreshTimeout.current);
@@ -77,7 +77,7 @@ export function AuthProvider({ children }) {
     }
   }, [login, logout]);
 
-  const scheduleTokenRefresh = (expiresAt) => {
+  const scheduleTokenRefresh = useCallback((expiresAt) => {
     const now = Date.now();
     const expiresIn = expiresAt - now;
     
@@ -92,7 +92,7 @@ export function AuthProvider({ children }) {
     // Schedule refresh 5 minutes before expiration
     const refreshIn = Math.max(expiresIn - REFRESH_THRESHOLD, 1000);
     refreshTimeout.current = setTimeout(refreshToken, refreshIn);
-  };
+  }, [logout, refreshToken]);
 
   // Check auth state on mount
   useEffect(() => {
@@ -128,7 +128,7 @@ export function AuthProvider({ children }) {
     
     // Cleanup on unmount
     return () => clearTimeout(refreshTimeout.current);
-  }, [refreshToken, logout]);
+  }, [refreshToken, logout, scheduleTokenRefresh, fetchUserProfile]);
 
   // Keep state in sync if another tab logs in/out
   useEffect(() => {

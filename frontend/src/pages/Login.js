@@ -4,12 +4,9 @@ import {
   FaEye, 
   FaEyeSlash, 
   FaSignInAlt, 
-  FaSpinner, 
   FaLock, 
-  FaEnvelope,
-  FaExclamationCircle 
+  FaEnvelope
 } from 'react-icons/fa';
-import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Button, 
   Box, 
@@ -22,13 +19,11 @@ import {
   FormLabel,
   useColorModeValue,
   Text,
-  IconButton,
-  Link as ChakraLink
+  IconButton
 } from '@chakra-ui/react';
 import PageLayout from '../components/PageLayout';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../services/api';
-import './Login.css';
 
 const daybreakLogo = '/daybreak_logo.png';
 
@@ -38,12 +33,8 @@ function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
-  const bgColor = useColorModeValue('white', 'gray.800');
   const cardBg = useColorModeValue('white', 'gray.700');
   const borderColor = useColorModeValue('gray.200', 'gray.600');
-  const inputBg = useColorModeValue('white', 'gray.700');
-  const buttonHoverBg = useColorModeValue('blue.600', 'blue.500');
-  const buttonActiveBg = useColorModeValue('blue.700', 'blue.600');
   const { isAuthenticated, login: setAuthed } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();

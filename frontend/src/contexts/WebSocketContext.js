@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { webSocketService } from '../services/websocket';
 import { useToast } from '@chakra-ui/react';
@@ -73,33 +73,46 @@ export const WebSocketProvider = ({ children }) => {
             isClosable: true,
           });
           break;
+          
+        default:
+          console.log('Unhandled WebSocket event:', event, data);
+          break;
       }
     };
 
-    try {
-      // Connect to WebSocket with the current access token
-      webSocketService.connect(gameId, accessToken);
-      const unsubscribe = webSocketService.subscribe(handleWebSocketMessage);
+    const connectWebSocket = async () => {
+      try {
+        // Connect to WebSocket with the current access token
+        webSocketService.connect(gameId, accessToken);
+        const unsubscribe = webSocketService.subscribe(handleWebSocketMessage);
 
-      // Cleanup on unmount
-      return () => {
-        unsubscribe();
-        webSocketService.disconnect();
-      };
-    } catch (error) {
-      console.error('Failed to connect to WebSocket:', error);
-      toast({
-        title: 'Connection Error',
-        description: 'Failed to connect to the game server. Please try again.',
-        status: 'error',
-        duration: 5000,
-        isClosable: true,
-      });
-    }
-  }, [params.gameId, accessToken, toast]);
+        // Cleanup on unmount
+        return () => {
+          unsubscribe();
+          webSocketService.disconnect();
+        };
+      } catch (error) {
+        console.error('Failed to connect to WebSocket:', error);
+        toast({
+          title: 'Connection Error',
+          description: 'Failed to connect to the game server. Please try again.',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        });
+      }
+    };
+
+    connectWebSocket();
+    
+    // Cleanup on unmount
+    return () => {
+      webSocketService.disconnect();
+    };
+  }, [params.gameId, accessToken, toast, handleIncomingMessage, send]);
 
   // Handle incoming WebSocket messages
-  const handleIncomingMessage = (message) => {
+  const handleIncomingMessage = useCallback((message) => {
     console.log('WebSocket message received:', message);
     
     // Update local state based on message type
@@ -170,7 +183,7 @@ export const WebSocketProvider = ({ children }) => {
           callback(message);
         }
     }
-  };
+  }, [toast]);
 
   // Expose the WebSocket API to child components
   const api = {

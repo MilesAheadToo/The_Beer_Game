@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict, Any, Union, Literal
 from enum import Enum
-from pydantic import BaseModel, Field, ConfigDict, validator
+from pydantic import BaseModel, Field, ConfigDict, validator, root_validator
 from datetime import datetime
 from .player import PlayerAssignment, PlayerResponse, PlayerUpdate, PlayerRole
 
@@ -41,11 +41,45 @@ class PlayerRole(str, Enum):
     DISTRIBUTOR = "distributor"
     FACTORY = "factory"
 
+class RolePricing(BaseModel):
+    selling_price: float = Field(..., gt=0, description="Selling price per unit")
+    standard_cost: float = Field(..., gt=0, description="Standard cost per unit")
+    
+    @root_validator(skip_on_failure=True)
+    def validate_margin(cls, values):
+        selling_price = values.get('selling_price')
+        standard_cost = values.get('standard_cost')
+        if selling_price is not None and standard_cost is not None and selling_price <= standard_cost:
+            raise ValueError('Selling price must be greater than standard cost')
+        return values
+
+class PricingConfig(BaseModel):
+    retailer: RolePricing = Field(
+        default_factory=lambda: RolePricing(selling_price=100.0, standard_cost=80.0),
+        description="Pricing configuration for the retailer role"
+    )
+    wholesaler: RolePricing = Field(
+        default_factory=lambda: RolePricing(selling_price=75.0, standard_cost=60.0),
+        description="Pricing configuration for the wholesaler role"
+    )
+    distributor: RolePricing = Field(
+        default_factory=lambda: RolePricing(selling_price=60.0, standard_cost=45.0),
+        description="Pricing configuration for the distributor role"
+    )
+    factory: RolePricing = Field(
+        default_factory=lambda: RolePricing(selling_price=45.0, standard_cost=30.0),
+        description="Pricing configuration for the factory role"
+    )
+
 class GameBase(BaseModel):
     name: str = Field(..., max_length=100)
     max_rounds: int = Field(default=52, ge=1, le=1000)
     description: Optional[str] = Field(None, max_length=500)
     is_public: bool = Field(default=True, description="Whether the game is visible to all users")
+    pricing_config: PricingConfig = Field(
+        default_factory=PricingConfig,
+        description="Pricing configuration for different roles in the supply chain"
+    )
 
 class GameCreate(GameBase):
     player_assignments: List[PlayerAssignment] = Field(
@@ -80,12 +114,16 @@ class GameInDBBase(GameBase):
     status: GameStatus
     current_round: int
     demand_pattern: DemandPattern = Field(
-            default_factory=lambda: DemandPattern(
-                type=DemandPatternType.CLASSIC,
-                params={"stable_period": 5, "step_increase": 4}
-            ),
-            description="Configuration for the demand pattern used in the game"
-        )
+        default_factory=lambda: DemandPattern(
+            type=DemandPatternType.CLASSIC,
+            params={"stable_period": 5, "step_increase": 4}
+        ),
+        description="Configuration for the demand pattern used in the game"
+    )
+    pricing_config: PricingConfig = Field(
+        default_factory=PricingConfig,
+        description="Pricing configuration for different roles in the supply chain"
+    )
     created_at: datetime
     updated_at: datetime
     started_at: Optional[datetime] = None
@@ -101,6 +139,11 @@ class GameInDBBase(GameBase):
 
 class Game(GameInDBBase):
     pass
+
+class GameInDB(GameInDBBase):
+    """Game model with database-specific fields."""
+    class Config:
+        orm_mode = True
 
 class PlayerBase(BaseModel):
     name: str = Field(..., max_length=100)
@@ -124,6 +167,59 @@ class PlayerInDBBase(PlayerBase):
 
 class Player(PlayerInDBBase):
     pass
+
+class PlayerRound(PlayerInDBBase):
+    pass
+
+class RoundBase(BaseModel):
+    """Base model for a game round."""
+    game_id: int
+    round_number: int
+    status: str = "pending"
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+
+class RoundCreate(RoundBase):
+    """Model for creating a new round."""
+    pass
+
+class RoundUpdate(BaseModel):
+    """Model for updating a round."""
+    status: Optional[str] = None
+    completed_at: Optional[datetime] = None
+
+class Round(RoundBase):
+    """Complete round model with database-specific fields."""
+    id: int
+
+    class Config:
+        orm_mode = True
+
+class PlayerActionBase(BaseModel):
+    """Base model for player actions."""
+    game_id: int
+    player_id: int
+    round_id: int
+    action_type: str
+    quantity: int
+    timestamp: datetime
+
+class PlayerActionCreate(PlayerActionBase):
+    """Model for creating a new player action."""
+    pass
+
+class PlayerActionUpdate(BaseModel):
+    """Model for updating a player action."""
+    action_type: Optional[str] = None
+    quantity: Optional[int] = None
+
+class PlayerAction(PlayerActionBase):
+    """Complete player action model with database-specific fields."""
+    id: int
+
+    class Config:
+        orm_mode = True
 
 class PlayerState(BaseModel):
     id: int

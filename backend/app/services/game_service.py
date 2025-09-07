@@ -1,13 +1,50 @@
 from typing import List, Dict, Optional, Any
 import random
-from datetime import datetime
+import asyncio
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
+from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import BackgroundTasks, Depends
+from app.db.session import get_db
 
-from app.models.supply_chain import (
-    Game, Player, PlayerInventory, Order, GameRound, PlayerRound, 
-    GameStatus, PlayerRole
-)
+class BackgroundTaskManager:
+    _instance = None
+    _tasks = {}
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(BackgroundTaskManager, cls).__new__(cls)
+        return cls._instance
+    
+    def add_task(self, game_id: int, task):
+        # Cancel any existing task for this game
+        self.cancel_task(game_id)
+        self._tasks[game_id] = task
+    
+    def cancel_task(self, game_id: int):
+        task = self._tasks.pop(game_id, None)
+        if task and not task.done():
+            task.cancel()
+    
+    async def schedule_round_end(self, game_id: int, delay_seconds: int):
+        """Schedule the end of the current round after delay_seconds."""
+        try:
+            await asyncio.sleep(delay_seconds)
+            db = SessionLocal()
+            try:
+                game_service = GameService(db)
+                await game_service.process_round_end(game_id)
+            finally:
+                db.close()
+        except asyncio.CancelledError:
+            # Task was cancelled, which is expected if round ends early
+            pass
+        except Exception as e:
+            # Log the error
+            print(f"Error in round end task for game {game_id}: {str(e)}")
+        finally:
+            self._tasks.pop(game_id, None)
 from app.schemas.game import GameCreate, PlayerCreate, GameState, PlayerState
 from app.core.demand_patterns import get_demand_pattern, DemandPatternType
 
@@ -30,9 +67,10 @@ class GameService:
         PlayerRole.FACTORY: 2
     }
     
-    def __init__(self, db: Session):
+    def __init__(self, db: AsyncSession):
         self.db = db
         self._demand_pattern = None  # Will be initialized per game
+        self.task_manager = BackgroundTaskManager()
     
     def create_game(self, game_data: GameCreate) -> Game:
         """Create a new game with the given parameters."""
@@ -94,10 +132,7 @@ class GameService:
     def start_game(self, game_id: int) -> Game:
         """Start the game and initialize the first round."""
         game = self.db.query(Game).filter(Game.id == game_id).first()
-        if not game:
-            raise ValueError("Game not found")
-            
-        if game.status != GameStatus.CREATED:
+        if not game or game.status != GameStatus.CREATED:
             raise ValueError("Game has already started or completed")
         
         # Pre-generate the entire demand pattern for the game
@@ -117,11 +152,13 @@ class GameService:
         game_round = GameRound(
             game_id=game_id,
             round_number=1,
-            customer_demand=self._generate_demand(1, game.max_rounds)
+            customer_demand=self._generate_demand(1, game.max_rounds),
+            is_completed=False
         )
         
         game.status = GameStatus.IN_PROGRESS
         game.current_round = 1
+        game.current_round_ends_at = datetime.utcnow() + timedelta(seconds=game.round_time_limit)
         
         self.db.add(game_round)
         self.db.commit()
@@ -129,10 +166,27 @@ class GameService:
         return game
     
     def submit_order(self, game_id: int, player_id: int, order_quantity: int) -> PlayerRound:
-        """Submit an order for the current round."""
+        """
+        Submit or update an order for the current round.
+        
+        Args:
+            game_id: ID of the game
+            player_id: ID of the player submitting the order
+            order_quantity: Quantity to order (can be revised until round ends)
+            
+        Returns:
+            The created or updated PlayerRound
+            
+        Raises:
+            ValueError: If game is not in progress or round has ended
+        """
         game = self.db.query(Game).filter(Game.id == game_id).first()
         if not game or game.status != GameStatus.IN_PROGRESS:
             raise ValueError("Game is not in progress")
+            
+        # Check if round time has expired
+        if game.current_round_ends_at and datetime.datetime.utcnow() > game.current_round_ends_at:
+            raise ValueError("Round has already ended")
             
         player = self.db.query(Player).filter(Player.id == player_id).first()
         if not player:
@@ -141,20 +195,26 @@ class GameService:
         # Get current round
         current_round = self.db.query(GameRound).filter(
             GameRound.game_id == game_id,
-            GameRound.round_number == game.current_round
+            GameRound.round_number == game.current_round,
+            GameRound.is_completed == False
         ).first()
         
         if not current_round:
-            raise ValueError("Current round not found")
+            raise ValueError("No active round found to submit orders to")
             
         # Check if player has already submitted an order for this round
-        existing_round = self.db.query(PlayerRound).filter(
+        player_round = self.db.query(PlayerRound).filter(
             PlayerRound.player_id == player_id,
             PlayerRound.round_id == current_round.id
         ).first()
         
-        if existing_round:
-            raise ValueError("Player has already submitted an order for this round")
+        # If player already submitted, update their order
+        if player_round:
+            player_round.order_placed = order_quantity
+            player_round.updated_at = datetime.datetime.utcnow()
+            self.db.commit()
+            self.db.refresh(player_round)
+            return player_round
             
         # Create player round
         player_round = PlayerRound(
@@ -176,7 +236,13 @@ class GameService:
         self.db.refresh(player_round)
         
         # Check if all players have submitted orders
-        if self._all_players_submitted(game_id, current_round.id):
+        if current_round.all_players_submitted(self.db):
+            # Mark the round as completed
+            current_round.is_completed = True
+            current_round.completed_at = datetime.datetime.utcnow()
+            self.db.commit()
+            
+            # Only advance the round if all players have submitted
             self.advance_round(game_id)
             
         return player_round
@@ -245,7 +311,59 @@ class GameService:
         
         return submitted_count >= player_count
     
-    def advance_round(self, game_id: int) -> Game:
+    async def process_round_end(self, game_id: int) -> None:
+        """
+        Process the end of the current round, including automatic submissions.
+        This is called automatically when the round time expires.
+        """
+        game = self.db.query(Game).filter(Game.id == game_id).first()
+        if not game or game.status != GameStatus.IN_PROGRESS:
+            return
+            
+        current_round = self.db.query(GameRound).filter(
+            GameRound.game_id == game_id,
+            GameRound.round_number == game.current_round,
+            GameRound.is_completed == False
+        ).first()
+        
+        if not current_round:
+            return
+            
+        # Get all players who haven't submitted yet
+        players = self.db.query(Player).filter(
+            Player.game_id == game_id,
+            ~Player.id.in_(
+                self.db.query(PlayerRound.player_id)
+                .filter(PlayerRound.round_id == current_round.id)
+            )
+        ).all()
+        
+        # Submit zero orders for players who didn't submit
+        for player in players:
+            player_round = PlayerRound(
+                player_id=player.id,
+                round_id=current_round.id,
+                order_placed=0,  # Default to zero if not submitted
+                order_received=0,
+                inventory_before=player.inventory.current_stock,
+                inventory_after=player.inventory.current_stock,
+                backorders_before=player.inventory.backorders,
+                backorders_after=player.inventory.backorders,
+                holding_cost=0.0,
+                backorder_cost=0.0,
+                total_cost=0.0
+            )
+            self.db.add(player_round)
+        
+        # Mark round as completed
+        current_round.is_completed = True
+        current_round.completed_at = datetime.utcnow()
+        
+        # Process the round
+        await self.advance_round(game_id)
+        self.db.commit()
+    
+    async def advance_round(self, game_id: int) -> Game:
         """
         Advance the game to the next round.
         
@@ -262,28 +380,33 @@ class GameService:
         if not game or game.status != GameStatus.IN_PROGRESS:
             raise ValueError("Game is not in progress")
         
-        # Process all players' turns for the current round
+        # Get the current round that's marked as completed
         current_round = self.db.query(GameRound).filter(
             GameRound.game_id == game_id,
-            GameRound.round_number == game.current_round
+            GameRound.round_number == game.current_round,
+            GameRound.is_completed == True
         ).first()
         
         if not current_round:
-            raise ValueError("Current round not found")
+            raise ValueError("Current round not found or not all players have submitted")
         
         # Process each player's turn
         players = self.db.query(Player).filter(Player.game_id == game_id).all()
         for player in players:
             self._process_player_turn(player, current_round)
         
+        # Mark the current round as fully processed
+        current_round.is_processed = True
+        
         # Check if game is over
         if game.current_round >= game.max_rounds:
             game.status = GameStatus.COMPLETED
+            game.finished_at = datetime.datetime.utcnow()
             self.db.commit()
             self.db.refresh(game)
             return game
             
-        # Create next round
+        # Create next round if not the last round
         game.current_round += 1
         
         try:
@@ -294,9 +417,19 @@ class GameService:
             next_round = GameRound(
                 game_id=game_id,
                 round_number=game.current_round,
-                customer_demand=next_demand
+                customer_demand=next_demand,
+                is_completed=False
             )
             self.db.add(next_round)
+            
+            # Schedule the end of the next round
+            if game.round_time_limit > 0:
+                game.current_round_ends_at = datetime.utcnow() + timedelta(seconds=game.round_time_limit)
+                # Schedule the background task
+                task = asyncio.create_task(
+                    self.task_manager.schedule_round_end(game_id, game.round_time_limit)
+                )
+                self.task_manager.add_task(game_id, task)
             
             # Update game status if this is the last round
             if game.current_round == game.max_rounds:

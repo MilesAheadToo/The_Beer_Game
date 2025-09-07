@@ -7,8 +7,10 @@ import MixedGamesList from './pages/MixedGamesList';
 import CreateMixedGame from './pages/CreateMixedGame';
 import GameBoard from './pages/GameBoard';
 import Login from './pages/Login';
+import Users from './pages/Users';
 import { WebSocketProvider } from './contexts/WebSocketContext';
 import { useAuth } from './contexts/AuthContext';
+import HumanDashboard from './pages/HumanDashboard';
 import './utils/fetchInterceptor';
 
 // Global error handler
@@ -22,8 +24,8 @@ window.onunhandledrejection = function(event) {
   console.error('Unhandled rejection (promise):', event.reason);
 };
 
-function RequireAuth() {
-  const { isAuthenticated, loading } = useAuth();
+function RequireAuth({ adminOnly = false }) {
+  const { isAuthenticated, loading, user } = useAuth();
   const location = useLocation();
   
   if (loading) {
@@ -37,6 +39,11 @@ function RequireAuth() {
   if (!isAuthenticated) {
     const back = encodeURIComponent(location.pathname + location.search);
     return <Navigate to={`/login?redirect=${back}`} replace />;
+  }
+  
+  // If route requires admin but user is not admin, redirect to human dashboard
+  if (adminOnly && !user?.is_admin) {
+    return <Navigate to="/dashboard" replace />;
   }
   
   return <Outlet />;
@@ -55,11 +62,19 @@ const AppContent = () => {
           <Route path="/login" element={<Login />} />
           
           {/* Private Routes */}
-          <Route element={<RequireAuth />}>
-            <Route path="/dashboard" element={
+          {/* Admin-only routes */}
+          <Route element={<RequireAuth adminOnly={true} />}>
+            <Route path="/admin" element={
               <>
                 <Navbar />
                 <Dashboard />
+              </>
+            } />
+            
+            <Route path="/users" element={
+              <>
+                <Navbar />
+                <Users />
               </>
             } />
             
@@ -74,6 +89,16 @@ const AppContent = () => {
               <>
                 <Navbar />
                 <CreateMixedGame />
+              </>
+            } />
+          </Route>
+
+          {/* Regular user routes */}
+          <Route element={<RequireAuth />}>
+            <Route path="/dashboard" element={
+              <>
+                <Navbar />
+                <HumanDashboard />
               </>
             } />
             
@@ -92,10 +117,10 @@ const AppContent = () => {
             } />
             
             {/* Default redirect */}
-            <Route path="/" element={<Navigate to="/games" replace />} />
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
             
-            {/* 404 - Redirect to games if route not found */}
-            <Route path="*" element={<Navigate to="/games" replace />} />
+            {/* 404 - Redirect to dashboard if route not found */}
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Route>
         </Routes>
       </Box>

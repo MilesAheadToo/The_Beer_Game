@@ -1,20 +1,20 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from datetime import datetime
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, select
 
 from app.models.supply_chain import (
     Game, Player, PlayerInventory, Order, GameRound, PlayerRound, 
     GameStatus, PlayerRole
 )
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, get_db
 from app.schemas.game import GameCreate, PlayerCreate, GameState, PlayerState, DemandPattern
 from app.services.agents import AgentManager, AgentType, AgentStrategy
 
 class AgentGameService:
     """Service for managing the Beer Game with AI agents."""
     
-    def __init__(self, db_session: Session):
+    def __init__(self, db_session: AsyncSession):
         self.db = db_session
         self.agent_manager = AgentManager(can_see_demand=False)
     

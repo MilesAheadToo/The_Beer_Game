@@ -1,14 +1,16 @@
 from fastapi import WebSocket, WebSocketDisconnect, Depends, HTTPException, status
 from fastapi.routing import APIRouter
-from typing import Optional
+from typing import Optional, Dict, Any
 import uuid
 import json
 import logging
 from datetime import datetime
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.security import get_current_user
 from ..models.user import User
 from ..schemas.websocket import WebSocketMessage
+from ..db.session import get_db
 from . import manager
 
 router = APIRouter()
@@ -19,6 +21,7 @@ async def websocket_endpoint(
     websocket: WebSocket,
     game_id: int,
     token: str = None,
+    db: AsyncSession = Depends(get_db)
 ):
     """WebSocket endpoint for real-time game updates"""
     client_id = str(uuid.uuid4())
@@ -49,7 +52,7 @@ async def websocket_endpoint(
                 # Handle different message types
                 if message["type"] == "order":
                     # Process order
-                    await handle_order_message(game_id, client_id, user, message)
+                    await handle_order_message(game_id, client_id, user, message, db)
                     
                 elif message["type"] == "chat":
                     # Broadcast chat message
@@ -97,53 +100,44 @@ async def websocket_endpoint(
             "timestamp": datetime.utcnow().isoformat()
         }, game_id, exclude_client_id=client_id)
 
-async def handle_order_message(game_id: int, client_id: str, user: Optional[User], message: dict):
+async def handle_order_message(game_id: int, client_id: str, user: Optional[User], message: dict, db: AsyncSession):
     """Handle order messages from clients"""
     from ..services.mixed_game_service import MixedGameService
-    from ..db.session import SessionLocal
+    from sqlalchemy import select
+    from ..models.supply_chain import Game, Player
     
-    db = SessionLocal()
     try:
         game_service = MixedGameService(db)
         
-        # Validate the order
-        required_fields = ["round_number", "quantity", "role"]
-        if not all(field in message for field in required_fields):
+        # Get game
+        result = await db.execute(select(Game).filter(Game.id == game_id))
+        game = result.scalars().first()
+        if not game:
+            logger.error(f"Game {game_id} not found")
+            return
+            
+        # Get player
+        result = await db.execute(
+            select(Player).filter(
+                Player.game_id == game_id,
+                Player.user_id == user.id
+            )
+        )
+        player = result.scalars().first()
+        
+        if not player:
+            logger.error(f"Player not found in game {game_id}")
+            return
+            
+        order_quantity = message.get("quantity")
+        if order_quantity is None:
+            logger.error("No quantity provided in order message")
             await manager.send_personal_message({
                 "type": "error",
-                "message": "Missing required fields in order",
+                "message": "No quantity provided in order message",
                 "timestamp": datetime.utcnow().isoformat()
             }, game_id, client_id)
             return
-            
-        # Process the order
-        order = {
-            "round_number": message["round_number"],
-            "quantity": message["quantity"],
-            "role": message["role"],
-            "user_id": user.id if user else None
-        }
-        
-        result = game_service.process_order(game_id, order)
-        
-        if result["success"]:
-            # Broadcast the updated game state to all clients
-            await manager.broadcast_game_state(game_id)
-            
-            # Send confirmation to the client
-            await manager.send_personal_message({
-                "type": "order_confirmation",
-                "order_id": result["order_id"],
-                "message": "Order processed successfully",
-                "timestamp": datetime.utcnow().isoformat()
-            }, game_id, client_id)
-        else:
-            # Send error to the client
-            await manager.send_personal_message({
-                "type": "error",
-                "message": result.get("message", "Failed to process order"),
-                "timestamp": datetime.utcnow().isoformat()
-            }, game_id, client_id)
             
     except Exception as e:
         logger.error(f"Error processing order: {e}", exc_info=True)

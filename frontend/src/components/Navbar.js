@@ -1,9 +1,25 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { AppBar, Toolbar, IconButton, Typography, Box, Avatar, Menu, MenuItem, Divider, ListItemIcon } from '@mui/material';
+import { useNavigate, useLocation } from 'react-router-dom';
+import { 
+  AppBar, 
+  Toolbar, 
+  IconButton, 
+  Typography, 
+  Box, 
+  Avatar, 
+  Menu, 
+  MenuItem, 
+  Divider, 
+  ListItemIcon, 
+  Button,
+  Tooltip
+} from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import SettingsIcon from '@mui/icons-material/Settings';
+import DashboardIcon from '@mui/icons-material/Dashboard';
+import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
+import GroupIcon from '@mui/icons-material/Group';
 import Logout from '@mui/icons-material/Logout';
 import { styled } from '@mui/material/styles';
 import { useAuth } from '../contexts/AuthContext';
@@ -17,10 +33,16 @@ const StyledAppBar = styled(AppBar)(({ theme }) => ({
 }));
 
 const Navbar = ({ handleDrawerToggle }) => {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const [anchorEl, setAnchorEl] = useState(null);
   const navigate = useNavigate();
+  const location = useLocation();
   const open = Boolean(anchorEl);
+  
+  const isActive = (path) => {
+    return location.pathname === path || 
+           (path !== '/' && location.pathname.startsWith(path));
+  };
 
   const handleClick = (event) => {
     setAnchorEl(event.currentTarget);
@@ -58,14 +80,81 @@ const Navbar = ({ handleDrawerToggle }) => {
             The Beer Game
           </Typography>
         </Box>
-        <Box sx={{ flexGrow: 1 }} />
+        <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, ml: 4 }}>
+          {user?.is_admin ? (
+            <>
+              <Button 
+                color="inherit" 
+                startIcon={<DashboardIcon />}
+                onClick={() => navigate('/admin')}
+                sx={{ 
+                  mx: 1,
+                  bgcolor: isActive('/admin') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  '&:hover': {
+                    bgcolor: 'rgba(255, 255, 255, 0.15)'
+                  }
+                }}
+              >
+                Admin Dashboard
+              </Button>
+              <Button 
+                color="inherit" 
+                startIcon={<SportsEsportsIcon />}
+                onClick={() => navigate('/games')}
+                sx={{ 
+                  mx: 1,
+                  bgcolor: isActive('/games') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  '&:hover': {
+                    bgcolor: 'rgba(255, 255, 255, 0.15)'
+                  }
+                }}
+              >
+                Manage Games
+              </Button>
+              <Button 
+                color="inherit" 
+                startIcon={<GroupIcon />}
+                onClick={() => navigate('/users')}
+                sx={{ 
+                  mx: 1,
+                  bgcolor: isActive('/users') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  '&:hover': {
+                    bgcolor: 'rgba(255, 255, 255, 0.15)'
+                  }
+                }}
+              >
+                Manage Users
+              </Button>
+            </>
+          ) : (
+            <Button 
+              color="inherit" 
+              startIcon={<DashboardIcon />}
+              onClick={() => navigate('/dashboard')}
+              sx={{ 
+                mx: 1,
+                bgcolor: isActive('/dashboard') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                '&:hover': {
+                  bgcolor: 'rgba(255, 255, 255, 0.15)'
+                }
+              }}
+            >
+              My Dashboard
+            </Button>
+          )}
+        </Box>
+        
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <IconButton color="inherit">
-            <NotificationsIcon />
-          </IconButton>
-          <IconButton color="inherit">
-            <SettingsIcon />
-          </IconButton>
+          <Tooltip title="Notifications">
+            <IconButton color="inherit">
+              <NotificationsIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Settings">
+            <IconButton color="inherit" onClick={() => navigate('/settings')}>
+              <SettingsIcon />
+            </IconButton>
+          </Tooltip>
           <IconButton
             onClick={handleClick}
             size="small"
@@ -74,7 +163,16 @@ const Navbar = ({ handleDrawerToggle }) => {
             aria-haspopup="true"
             aria-expanded={open ? 'true' : undefined}
           >
-            <Avatar sx={{ width: 32, height: 32 }}>U</Avatar>
+            <Avatar 
+              sx={{ 
+                width: 32, 
+                height: 32,
+                bgcolor: 'primary.light',
+                color: 'primary.contrastText'
+              }}
+            >
+              {user?.username?.charAt(0).toUpperCase() || 'U'}
+            </Avatar>
           </IconButton>
         </Box>
       </Toolbar>
@@ -117,12 +215,24 @@ const Navbar = ({ handleDrawerToggle }) => {
           <Avatar /> Profile
         </MenuItem>
         <Divider />
+        <MenuItem onClick={() => navigate('/profile')}>
+          <ListItemIcon>
+            <Avatar sx={{ width: 24, height: 24, fontSize: '0.8rem' }} />
+          </ListItemIcon>
+          Profile
+        </MenuItem>
         <MenuItem onClick={handleLogout}>
           <ListItemIcon>
             <Logout fontSize="small" />
           </ListItemIcon>
           Logout
         </MenuItem>
+        {user?.is_admin && (
+          <Box sx={{ p: 2, pt: 1, fontSize: '0.75rem', color: 'text.secondary' }}>
+            <Box>Admin User</Box>
+            <Box>{user.email}</Box>
+          </Box>
+        )}
       </Menu>
     </StyledAppBar>
   );

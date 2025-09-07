@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  db:
+    image: mariadb:10.11.14
+    container_name: beer_game_db
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: Daybreak@2025
+      MYSQL_DATABASE: beer_game
+      MYSQL_USER: beer_user
+      MYSQL_PASSWORD: Daybreak@2025
+    ports:
+      - "3306:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./config/mysql/conf.d:/etc/mysql/conf.d
+    command: [
+        '--character-set-server=utf8mb4',
+        '--collation-server=utf8mb4_unicode_ci',
+        '--innodb-buffer-pool-size=2G',
+        '--innodb-log-file-size=256M',
+        '--innodb-flush-log-at-trx-commit=1',
+        '--innodb-flush-method=O_DIRECT',
+        '--skip-name-resolve'
+    ]
+    networks:
+      - beer-game-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u$${MYSQL_USER}", "-p$${MYSQL_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  beer-game-network:
+    driver: bridge
+
+volumes:
+  db_data:
