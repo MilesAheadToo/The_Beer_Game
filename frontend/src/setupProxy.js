@@ -4,23 +4,12 @@ module.exports = function(app) {
   app.use(
     '/api',
     createProxyMiddleware({
-      target: 'http://backend:8000', // Using service name for Docker networking
+      target: 'http://localhost:8000',
       changeOrigin: true,
       secure: false,
-      onProxyReq: (proxyReq, req, res) => {
-        // Add CORS headers
-        proxyReq.setHeader('Access-Control-Allow-Origin', 'http://localhost:3000');
-        proxyReq.setHeader('Access-Control-Allow-Credentials', 'true');
+      pathRewrite: {
+        '^/api': '/api/v1', // Rewrite path to match your backend API
       },
-      onProxyRes: function(proxyRes, req, res) {
-        proxyRes.headers['Access-Control-Allow-Origin'] = 'http://localhost:3000';
-        proxyRes.headers['Access-Control-Allow-Credentials'] = 'true';
-      },
-      logLevel: 'debug',
-      // Add websocket support
-      ws: true,
-      // Don't verify SSL certificates
-      rejectUnauthorized: false
     })
   );
 };

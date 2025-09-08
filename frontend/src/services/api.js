@@ -1,61 +1,37 @@
+// /frontend/src/services/api.js
 import axios from "axios";
-import { toast } from "react-toastify";
+import { API_BASE_URL } from "../config/api";
 
-// Resolve API base URL. Supports Vite (VITE_API_BASE_URL) and CRA (REACT_APP_API_BASE_URL).
-export const API_BASE_URL =
-  (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE_URL) ||
-  process.env.REACT_APP_API_BASE_URL ||
-  "http://localhost:8000/api/v1";
-
-// Create axios instance with default config
+// Create a single axios instance for the app
 const http = axios.create({
   baseURL: API_BASE_URL,
   withCredentials: true, // Required for cookies
+  timeout: 20000,
   headers: {
-    "Content-Type": "application/json",
-    Accept: "application/json",
+    'Accept': 'application/json',
+    'Content-Type': 'application/json',
   },
-  timeout: 30000, // 30 seconds
 });
 
-/**
- * Get CSRF token from cookies
- */
-function getCSRFToken() {
-  // Try to get from meta tag first (Django's default)
-  const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-  if (csrfToken) return csrfToken;
+// Request interceptor: handle CSRF token and auth headers
+http.interceptors.request.use(async (config) => {
+  // Skip for token refresh and CSRF endpoints to avoid infinite loops
+  const isAuthRequest = ['/auth/login', '/auth/refresh', '/auth/csrf-token'].some(path => 
+    config.url?.includes(path)
+  );
   
-  // Fallback to cookie
-  const value = `; ${document.cookie}`;
-  const parts = value.split('; csrftoken=');
-  if (parts.length === 2) return parts.pop().split(';').shift();
-  
-  return null;
-}
-
-// Request interceptor for CSRF and auth headers
-http.interceptors.request.use(
-  (config) => {
-    // Skip for external URLs
-    if (!config.url.startsWith(API_BASE_URL)) return config;
-
-    // Add CSRF token for state-changing requests
-    if (['post', 'put', 'patch', 'delete'].includes(config.method?.toLowerCase())) {
-      const csrfToken = getCSRFToken();
-      if (csrfToken) {
-        config.headers['X-CSRFToken'] = csrfToken;
-      }
+  if (!isAuthRequest) {
+    // Get CSRF token from cookie or fetch a new one
+    const csrfToken = getCookie('csrftoken') || await fetchCsrfToken();
+    if (csrfToken) {
+      config.headers['X-CSRF-Token'] = csrfToken;
     }
-
-    return config;
-  },
-  (error) => {
-    return Promise.reject(error);
   }
-);
+  
+  return config;
+});
 
-// Response interceptor for error handling
+// Response interceptor: handle token refresh and auth errors
 http.interceptors.response.use(
   (response) => response,
   async (error) => {
@@ -63,194 +39,180 @@ http.interceptors.response.use(
     
     // Handle 401 Unauthorized
     if (error.response?.status === 401 && !originalRequest._retry) {
-      // If we already tried to refresh, redirect to login
-      if (originalRequest.url.includes('/auth/refresh')) {
-        // Clear auth state
-        document.cookie = 'access_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
-        localStorage.removeItem('access_token');
-        
-        // Redirect to login if not already there
-        if (!window.location.pathname.startsWith('/login')) {
-          window.location.href = '/login';
-        }
-        return Promise.reject(error);
-      }
+      originalRequest._retry = true;
       
-      // Try to refresh the token
       try {
-        originalRequest._retry = true;
+        // Try to refresh the token
         await http.post('/auth/refresh');
-        // Retry the original request
+        // Retry the original request with new token
         return http(originalRequest);
       } catch (refreshError) {
-        // Refresh failed, clear auth and redirect
-        document.cookie = 'access_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
-        localStorage.removeItem('access_token');
-        
-        if (!window.location.pathname.startsWith('/login')) {
-          window.location.href = '/login';
+        // If refresh fails, clear auth state and redirect to login
+        if (window.location.pathname !== '/login') {
+          const returnTo = encodeURIComponent(window.location.pathname + window.location.search);
+          window.location.href = `/login?redirect=${returnTo}`;
         }
         return Promise.reject(refreshError);
       }
     }
     
     // Handle CSRF token errors
-    if (error.response?.status === 403 && 
-        (error.response.data?.detail === 'CSRF token validation failed' || 
-         error.response.data?.detail?.includes('CSRF'))) {
-      // Try to get a new CSRF token
-      try {
-        await http.get('/auth/csrf-token');
-        // Retry the original request
-        return http(originalRequest);
-      } catch (csrfError) {
-        console.error('CSRF token refresh failed:', csrfError);
-        return Promise.reject(csrfError);
-      }
-    }
-    
-    // Show error toast for server errors
-    if (error.response?.status >= 500) {
-      toast.error('A server error occurred. Please try again later.');
-    } else if (error.response?.data?.detail) {
-      // Show validation or other API errors
-      toast.error(error.response.data.detail);
+    if (error.response?.status === 403 && error.response.data?.code === 'csrf_token_mismatch') {
+      // Clear the invalid CSRF token
+      document.cookie = 'csrftoken=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+      // Retry the request with a new CSRF token
+      return http(originalRequest);
     }
     
     return Promise.reject(error);
   }
 );
 
-/**
- * Auth API service
- */
-export const authApi = {
-  /**
-   * Login with username/email and password
-   * @param {Object} credentials - Login credentials
-   * @param {string} credentials.username - Username or email
-   * @param {string} credentials.password - Password
-   * @param {boolean} [rememberMe=false] - Whether to remember the user
-   * @returns {Promise<Object>} User data
-   */
-  login: async ({ username, password, rememberMe = false }) => {
-    const response = await http.post('/auth/login', {
-      username,
-      password,
-      remember_me: rememberMe,
+// Helper function to get cookie by name
+function getCookie(name) {
+  const value = `; ${document.cookie}`;
+  const parts = value.split(`; ${name}=`);
+  if (parts.length === 2) return parts.pop().split(';').shift();
+  return null;
+}
+
+// Fetch a new CSRF token
+async function fetchCsrfToken() {
+  try {
+    const response = await http.get('/auth/csrf-token');
+    return response.data.csrf_token;
+  } catch (error) {
+    console.error('Failed to fetch CSRF token:', error);
+    return null;
+  }
+}
+
+// ----- High-level API wrappers -----
+export const mixedGameApi = {
+  async health() {
+    const { data } = await http.get("/health");
+    return data;
+  },
+
+  // Authentication endpoints
+  async login(credentials) {
+    const form = new URLSearchParams();
+    form.set('username', credentials.username);
+    form.set('password', credentials.password);
+    form.set('grant_type', 'password');
+
+    const { data } = await http.post('/auth/login', form, {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     });
-    return response.data;
+
+    // Handle successful login
+    if (data?.access_token) {
+      // Store tokens in httpOnly cookies (handled by the browser)
+      // The backend should set the appropriate cookies
+      return { success: true, user: data.user };
+    }
+    
+    return { success: false, error: data?.detail || 'Login failed' };
   },
 
-  /**
-   * Get current user data
-   * @returns {Promise<Object>} User data
-   */
-  me: async () => {
-    const response = await http.get('/auth/me');
-    return response.data;
-  },
-
-  /**
-   * Logout the current user
-   * @returns {Promise<void>}
-   */
-  logout: async () => {
+  async logout() {
     try {
       await http.post('/auth/logout');
+      return { success: true };
     } catch (error) {
       console.error('Logout error:', error);
-    } finally {
-      // Clear all auth tokens
-      document.cookie = 'access_token=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
-      document.cookie = 'token_type=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('token_type');
+      return { success: false, error: 'Failed to log out' };
     }
   },
 
-  /**
-   * Request a password reset email
-   * @param {string} email - User's email address
-   * @returns {Promise<void>}
-   */
-  requestPasswordReset: async (email) => {
-    await http.post('/auth/forgot-password', { email });
+  async getCurrentUser() {
+    try {
+      const { data } = await http.get('/auth/me');
+      return data;
+    } catch (error) {
+      console.error('Failed to fetch current user:', error);
+      throw error;
+    }
   },
 
-  /**
-   * Reset password with a token
-   * @param {string} token - Password reset token
-   * @param {string} newPassword - New password
-   * @returns {Promise<void>}
-   */
-  resetPassword: async (token, newPassword) => {
-    await http.post('/auth/reset-password', {
-      token,
-      new_password: newPassword,
-    });
+  async refreshToken() {
+    try {
+      const { data } = await http.post('/auth/refresh');
+      return data;
+    } catch (error) {
+      console.error('Failed to refresh token:', error);
+      throw error;
+    }
   },
 
-  /**
-   * Refresh the access token
-   * @returns {Promise<void>}
-   */
-  refreshToken: async () => {
-    const response = await http.post('/auth/refresh');
-    return response.data;
+  async requestPasswordReset(email) {
+    try {
+      const { data } = await http.post('/auth/forgot-password', { email });
+      return { success: true, data };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to request password reset',
+      };
+    }
   },
+
+  async resetPassword(token, newPassword) {
+    try {
+      const { data } = await http.post('/auth/reset-password', {
+        token,
+        new_password: newPassword,
+      });
+      return { success: true, data };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to reset password',
+      };
+    }
+  },
+
+  async changePassword(currentPassword, newPassword) {
+    try {
+      const { data } = await http.post('/auth/change-password', {
+        current_password: currentPassword,
+        new_password: newPassword,
+      });
+      return { success: true, data };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to change password',
+      };
+    }
+  },
+
+  // User management endpoints
+  async register(userData) {
+    try {
+      const { data } = await http.post('/auth/register', userData);
+      return { success: true, data };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Registration failed',
+      };
+    }
+  },
+
+  async updateProfile(userData) {
+    try {
+      const { data } = await http.patch('/auth/me', userData);
+      return { success: true, data };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Failed to update profile',
+      };
+    }
+  },
+
+  // ...add other application-specific endpoints below
 };
 
-/**
- * Game API service
- */
-export const gameApi = {
-  // Game management
-  createGame: (payload) => http.post("/games", payload),
-  listGames: (params) => http.get("/games", { params }),
-  getGame: (id) => http.get(`/games/${id}`),
-  updateGame: (id, data) => http.patch(`/games/${id}`, data),
-  deleteGame: (id) => http.delete(`/games/${id}`),
-
-  // Game actions
-  startGame: (id) => http.post(`/games/${id}/start`),
-  joinGame: (id, role) => http.post(`/games/${id}/join`, { role }),
-  leaveGame: (id) => http.post(`/games/${id}/leave`),
-
-  // Gameplay actions
-  submitOrder: (gameId, order) => http.post(`/games/${gameId}/orders`, order),
-  getOrders: (gameId) => http.get(`/games/${gameId}/orders`),
-  getHistory: (gameId) => http.get(`/games/${gameId}/history`),
-
-  // Chat
-  getChatMessages: (gameId) => http.get(`/games/${gameId}/chat`),
-  sendChatMessage: (gameId, message) =>
-    http.post(`/games/${gameId}/chat`, { message }),
-};
-
-/**
- * User API service
- */
-export const userApi = {
-  getProfile: () => http.get("/users/me"),
-  updateProfile: (data) => http.patch("/users/me", data),
-  changePassword: (currentPassword, newPassword) =>
-    http.post("/users/me/change-password", { currentPassword, newPassword }),
-
-  // MFA setup
-  setupMFA: () => http.post("/users/me/mfa/setup"),
-  verifyMFA: (code) => http.post("/users/me/mfa/verify", { code }),
-  disableMFA: () => http.post("/users/me/mfa/disable"),
-  getRecoveryCodes: () => http.get("/users/me/mfa/recovery-codes"),
-  generateRecoveryCodes: () => http.post("/users/me/mfa/recovery-codes"),
-};
-
-// For backward compatibility
-export const mixedGameApi = gameApi;
-
-export default {
-  auth: authApi,
-  game: gameApi,
-  user: userApi,
-  http, // Export the axios instance for direct use if needed
-};
+export default mixedGameApi;

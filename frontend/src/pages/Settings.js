@@ -299,7 +299,7 @@ const Settings = () => {
               <HStack spacing={4}>
                 <Avatar size="xl" src={profileForm.avatar} />
                 <VStack align="start">
-                  <Button leftIcon={<FiUpload} size="sm">Change Photo</Button>
+                  <Button leftIcon={<FiUpload />} size="sm">Change Photo</Button>
                   <Text fontSize="sm" color="gray.500">JPG, GIF or PNG. Max size 2MB</Text>
                 </VStack>
               </HStack>

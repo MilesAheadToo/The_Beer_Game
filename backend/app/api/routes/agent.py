@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from app.rl.config import NODES, NODE_INDEX, NODE_FEATURES, BeerGameParams
 from app.rl.policy import SimpleTemporalHead, select_action, indices_to_units
 from app.svc.model_registry import load_temporal_gnn
-from app.deps import get_current_user
+from app.core.deps import get_current_user
 from app.models.user import User
 
 router = APIRouter(prefix="/agent", tags=["agent"])

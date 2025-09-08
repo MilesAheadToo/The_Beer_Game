@@ -6,11 +6,18 @@ WORKDIR /app
 # Install system dependencies for native modules
 RUN apk add --no-cache python3 make g++
 
-# Copy package files
+# Copy package files and install TypeScript
 COPY package*.json ./
+RUN npm install -g typescript
 
 # Install all dependencies including peer dependencies
 RUN npm install --legacy-peer-deps
+
+# Copy TypeScript config
+COPY tsconfig.json ./
+
+# Copy environment configuration
+COPY .env* ./
 
 # Copy the rest of the application
 COPY . .
@@ -19,7 +26,8 @@ COPY . .
 ENV NODE_ENV=production
 
 # Build the application
-RUN npm run build
+RUN echo "Building with API_BASE_URL: ${REACT_APP_API_BASE_URL:-http://localhost:8000/api/v1}" && \
+    npm run build
 
 # Remove development dependencies after build
 RUN npm prune --production

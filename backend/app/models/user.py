@@ -49,6 +49,11 @@ class UserUpdate(UserBase):
     email: Optional[EmailStr] = None
     password: Optional[str] = None
 
+class UserPasswordChange(BaseModel):
+    """Model for changing a user's password."""
+    current_password: str
+    new_password: str = Field(..., min_length=8)
+
 class UserInDB(UserBase):
     """Model for user data in the database."""
     id: int

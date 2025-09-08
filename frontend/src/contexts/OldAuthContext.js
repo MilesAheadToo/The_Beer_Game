@@ -197,6 +197,11 @@ export const AuthProvider = ({ children }) => {
         } else if (data?.error_description) {
           errorMessage = data.error_description;
         }
+      }
+      
+      throw new Error(errorMessage);
+    }
+  };
 
   return (
     <AuthContext.Provider value={{ isAuthenticated, loading, login, logout }}>

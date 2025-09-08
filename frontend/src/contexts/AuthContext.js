@@ -1,111 +1,208 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+// /frontend/src/contexts/AuthContext.js
+import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react';
+import { mixedGameApi } from '../services/api';
 import { toast } from 'react-toastify';
-import authService from '../services/authService';
+
+// Session timeout in milliseconds (30 minutes)
+const SESSION_TIMEOUT = 30 * 60 * 1000;
+// Warning time before logout (5 minutes before timeout)
+const WARNING_TIME = 5 * 60 * 1000;
 
 const AuthContext = createContext(null);
-export const useAuth = () => useContext(AuthContext);
 
 export function AuthProvider({ children }) {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const navigate = useNavigate();
+  const [showTimeoutWarning, setShowTimeoutWarning] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(0);
+  
+  const logoutTimer = useRef(null);
+  const warningTimer = useRef(null);
+  const activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart'];
 
-  const isAuthenticated = !!user;
+  // Handle user activity - reset timers
+  const resetTimers = useCallback(() => {
+    if (logoutTimer.current) clearTimeout(logoutTimer.current);
+    if (warningTimer.current) clearTimeout(warningTimer.current);
+    setShowTimeoutWarning(false);
 
-  const login = async (credentials) => {
-    try {
-      setLoading(true);
-      setError(null);
+    if (isAuthenticated) {
+      // Set warning timer (5 minutes before logout)
+      warningTimer.current = setTimeout(() => {
+        setShowTimeoutWarning(true);
+        const warningDuration = WARNING_TIME / 1000 / 60; // Convert to minutes
+        toast.warning(`Your session will expire in ${warningDuration} minutes due to inactivity.`, {
+          autoClose: 10000,
+          closeOnClick: false,
+          pauseOnHover: true,
+          draggable: true,
+        });
+      }, SESSION_TIMEOUT - WARNING_TIME);
+
+      // Set logout timer
+      logoutTimer.current = setTimeout(() => {
+        logout();
+        toast.info('Your session has expired. Please log in again.');
+      }, SESSION_TIMEOUT);
+
+      // Update time left counter
+      const updateTimeLeft = () => {
+        if (logoutTimer.current) {
+          const timeLeft = Math.ceil((logoutTimer.current._idleStart + SESSION_TIMEOUT - Date.now()) / 1000 / 60);
+          setTimeLeft(timeLeft > 0 ? timeLeft : 0);
+        }
+      };
       
-      // Attempt login - authService will handle the cookie
-      const userData = await authService.login(credentials);
-      setUser(userData);
+      const interval = setInterval(updateTimeLeft, 60000); // Update every minute
+      updateTimeLeft(); // Initial update
       
-      toast.success('Successfully logged in');
-      return userData;
-    } catch (err) {
-      console.error('Login error:', err);
-      const errorMessage = err.response?.data?.detail || 'Login failed. Please check your credentials.';
-      setError(errorMessage);
-      toast.error(errorMessage);
-      throw err;
-    } finally {
-      setLoading(false);
+      return () => clearInterval(interval);
     }
-  };
+  }, [isAuthenticated]);
 
-  const logout = async (options = {}) => {
-    const { redirect = true, silent = false } = options;
-    
-    try {
-      await authService.logout();
-      if (!silent) {
-        toast.success('You have been logged out successfully');
-      }
-    } catch (err) {
-      console.error('Logout error:', err);
-    } finally {
-      // Clear user data
-      setUser(null);
-      setLoading(false);
-      if (redirect && !window.location.pathname.startsWith('/login')) {
-        navigate('/login', { replace: true });
-      }
-    }
-  };
-
-  // Check auth status on mount
+  // Set up activity listeners
   useEffect(() => {
-    let isMounted = true;
+    if (isAuthenticated) {
+      // Add event listeners for user activity
+      const handleActivity = () => {
+        resetTimers();
+      };
+      
+      activityEvents.forEach(event => {
+        window.addEventListener(event, handleActivity);
+      });
+      
+      // Initialize timers
+      resetTimers();
+      
+      // Clean up
+      return () => {
+        activityEvents.forEach(event => {
+          window.removeEventListener(event, handleActivity);
+        });
+        if (logoutTimer.current) clearTimeout(logoutTimer.current);
+        if (warningTimer.current) clearTimeout(warningTimer.current);
+      };
+    }
+  }, [isAuthenticated, resetTimers]);
 
+  // Check if user is authenticated on initial load and handle token refresh
+  useEffect(() => {
     const checkAuth = async () => {
       try {
-        const userData = await authService.getCurrentUser();
-        if (isMounted) {
-          setUser(userData);
-          setError(null);
-        }
+        setLoading(true);
+        const userData = await mixedGameApi.getCurrentUser();
+        setUser(userData);
+        setIsAuthenticated(true);
+        
+        // Refresh token periodically (every 15 minutes)
+        const refreshInterval = setInterval(async () => {
+          try {
+            await mixedGameApi.refreshToken();
+          } catch (error) {
+            console.error('Token refresh failed:', error);
+            // If refresh fails, log the user out
+            logout();
+          }
+        }, 15 * 60 * 1000); // 15 minutes
+        
+        return () => clearInterval(refreshInterval);
       } catch (err) {
-        if (isMounted) {
-          console.error('Auth check failed:', err);
-          await logout({ silent: true });
-        }
+        setIsAuthenticated(false);
+        setUser(null);
       } finally {
-        if (isMounted) {
-          setLoading(false);
-        }
+        setLoading(false);
       }
     };
 
     checkAuth();
-
-    return () => {
-      isMounted = false;
-    };
   }, []);
 
-  const value = useMemo(
-    () => ({
-      user,
-      isAuthenticated,
-      loading,
-      error,
-      login,
-      logout,
-      refreshUser: () => authService.getCurrentUser().then(setUser),
-    }),
-    [user, isAuthenticated, loading, error]
-  );
+  const login = useCallback(async (credentials) => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // This will automatically handle CSRF token and cookies
+      const userData = await mixedGameApi.login(credentials);
+      
+      setUser(userData);
+      setIsAuthenticated(true);
+      
+      // Reset timers after successful login
+      resetTimers();
+      
+      return { success: true };
+    } catch (error) {
+      const message = error.response?.data?.detail || 'Login failed. Please check your credentials.';
+      setError(message);
+      return { success: false, error: message };
+    } finally {
+      setLoading(false);
+    }
+  }, [resetTimers]);
+
+  const logout = useCallback(async () => {
+    try {
+      setLoading(true);
+      await mixedGameApi.logout();
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      // Clear timers
+      if (logoutTimer.current) clearTimeout(logoutTimer.current);
+      if (warningTimer.current) clearTimeout(warningTimer.current);
+      
+      setUser(null);
+      setIsAuthenticated(false);
+      setShowTimeoutWarning(false);
+      setLoading(false);
+      
+      // Clear any sensitive data from localStorage
+      localStorage.removeItem('authState');
+    }
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const userData = await mixedGameApi.getCurrentUser();
+      setUser(userData);
+      return userData;
+    } catch (error) {
+      setIsAuthenticated(false);
+      setUser(null);
+      throw error;
+    }
+  }, []);
+
+  const value = useMemo(() => ({
+    isAuthenticated,
+    user,
+    loading,
+    error,
+    login,
+    logout,
+    refreshUser,
+    showTimeoutWarning,
+    timeLeft,
+    resetTimers, // Export resetTimers to allow manual reset from components
+  }), [isAuthenticated, user, loading, error, login, logout, refreshUser, showTimeoutWarning, timeLeft, resetTimers]);
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading ? children : (
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-        </div>
-      )}
+      {!loading && children}
     </AuthContext.Provider>
   );
 }
+
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (context === undefined) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};
+
+export default AuthContext;

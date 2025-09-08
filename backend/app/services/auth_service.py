@@ -626,11 +626,21 @@ class AuthService:
             
         return False
 
+# Dependency to get an AuthService instance
+def get_auth_service(db: Session = Depends(get_db)) -> AuthService:
+    """Dependency that returns an instance of AuthService with a database session.
+    
+    Args:
+        db: The database session
+        
+    Returns:
+        An instance of AuthService
+    """
+    return AuthService(db)
+
 # Dependency to get the current active user
 def get_current_active_user(
     token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
-) -> User:
-    """Dependency to get the current active user from the JWT token."""
-    auth_service = AuthService(db)
+    auth_service: AuthService = Depends(get_auth_service)
+):
     return auth_service.get_current_user(token)
