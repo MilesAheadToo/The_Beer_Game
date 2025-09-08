@@ -11,6 +11,10 @@ import Login from "./pages/Login";
 import { WebSocketProvider } from "./contexts/WebSocketContext";
 import { useAuth } from "./contexts/AuthContext";       // <— unified
 import "./utils/fetchInterceptor";
+import ProtectedRoute from "./components/ProtectedRoute";
+import AdminDashboard from "./pages/admin/Dashboard.jsx";
+import Users from "./pages/Users";
+import Unauthorized from "./pages/Unauthorized";
 
 window.onerror = function (message, source, lineno, colno, error) {
   console.error("Global error:", { message, source, lineno, colno, error });
@@ -49,6 +53,7 @@ const AppContent = () => {
       <Box component="main" sx={{ flexGrow: 1, p: 3, width: "100%" }}>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/unauthorized" element={<Unauthorized />} />
 
           <Route element={<RequireAuth />}>
             <Route
@@ -95,6 +100,30 @@ const AppContent = () => {
                     <GameBoard />
                   </>
                 )
+              }
+            />
+
+            {/* Admin routes */}
+            <Route
+              path="/admin"
+              element={
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <>
+                    <Navbar />
+                    <AdminDashboard />
+                  </>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/users"
+              element={
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <>
+                    <Navbar />
+                    <Users />
+                  </>
+                </ProtectedRoute>
               }
             />
 

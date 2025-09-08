@@ -18,6 +18,18 @@ const gameApi = {
     const response = await api.post('/games/', gameData);
     return response.data;
   },
+
+  // Update an existing game
+  async updateGame(gameId, gameData) {
+    const response = await api.put(`/games/${gameId}`, gameData);
+    return response.data;
+  },
+
+  // Delete a game
+  async deleteGame(gameId) {
+    const response = await api.delete(`/games/${gameId}`);
+    return response.data;
+  },
   
   // Join an existing game
   async joinGame(gameId) {

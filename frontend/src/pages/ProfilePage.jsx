@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { gameApi } from '../services/api';
 import { 
   UserCircleIcon, 
   TrophyIcon, 

@@ -1,31 +1,32 @@
+import React from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Box, CircularProgress } from '@mui/material';
 
-function ProtectedRoute() {
-  const { isAuthenticated, loading } = useAuth();
+// Unified ProtectedRoute with optional role checks and children support
+function ProtectedRoute({ children, allowedRoles = [] }) {
+  const { isAuthenticated, loading, hasAnyRole } = useAuth();
   const location = useLocation();
 
   if (loading) {
     return (
-      <Box 
-        display="flex" 
-        justifyContent="center" 
-        alignItems="center" 
-        minHeight="100vh"
-      >
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="100vh">
         <CircularProgress />
       </Box>
     );
   }
 
   if (!isAuthenticated) {
-    // Redirect to login page, but save the current location they were trying to go to
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    const back = encodeURIComponent(location.pathname + location.search);
+    return <Navigate to={`/login?redirect=${back}`} replace />;
   }
 
-  // If authenticated, render the child routes
-  return <Outlet />;
+  if (allowedRoles.length > 0 && !hasAnyRole(allowedRoles)) {
+    return <Navigate to="/unauthorized" state={{ from: location }} replace />;
+  }
+
+  // If children are provided, render them; otherwise render nested routes
+  return children ? children : <Outlet />;
 }
 
 export default ProtectedRoute;

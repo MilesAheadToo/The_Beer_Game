@@ -1,0 +1,5 @@
+setup.py
+beer_game_backend.egg-info/PKG-INFO
+beer_game_backend.egg-info/SOURCES.txt
+beer_game_backend.egg-info/dependency_links.txt
+beer_game_backend.egg-info/top_level.txt

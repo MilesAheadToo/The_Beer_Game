@@ -14,7 +14,7 @@ import {
   Badge
 } from '@chakra-ui/react';
 import { CheckCircleIcon, TimeIcon, WarningIcon } from '@chakra-ui/icons';
-import api from '../services/api';
+import mixedGameApi from '../services/api';
 
 const RoundTimer = ({ gameId, playerId, roundNumber, onOrderSubmit, isPlayerTurn }) => {
   const [timeLeft, setTimeLeft] = useState(60);
@@ -57,7 +57,7 @@ const RoundTimer = ({ gameId, playerId, roundNumber, onOrderSubmit, isPlayerTurn
   useEffect(() => {
     const fetchRoundStatus = async () => {
       try {
-        const status = await api.getRoundStatus(gameId);
+        const status = await mixedGameApi.getRoundStatus(gameId);
         setRoundEndsAt(new Date(status.ends_at));
         
         // Check if player has already submitted

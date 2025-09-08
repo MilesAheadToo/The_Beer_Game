@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { PlusIcon, ArrowPathIcon, UserGroupIcon, ClockIcon } from '@heroicons/react/24/outline';
-import { gameApi } from '../services/api';
+import gameApi from '../services/gameApi';
 import { toast } from 'react-toastify';
 
 const GameLobby = () => {

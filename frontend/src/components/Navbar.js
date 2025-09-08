@@ -33,7 +33,7 @@ const StyledAppBar = styled(AppBar)(({ theme }) => ({
 }));
 
 const Navbar = ({ handleDrawerToggle }) => {
-  const { logout, user } = useAuth();
+  const { logout, user, isAdmin } = useAuth();
   const [anchorEl, setAnchorEl] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
@@ -81,7 +81,7 @@ const Navbar = ({ handleDrawerToggle }) => {
           </Typography>
         </Box>
         <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, ml: 4 }}>
-          {user?.is_admin ? (
+          {isAdmin ? (
             <>
               <Button 
                 color="inherit" 
@@ -227,7 +227,7 @@ const Navbar = ({ handleDrawerToggle }) => {
           </ListItemIcon>
           Logout
         </MenuItem>
-        {user?.is_admin && (
+        {isAdmin && (
           <Box sx={{ p: 2, pt: 1, fontSize: '0.75rem', color: 'text.secondary' }}>
             <Box>Admin User</Box>
             <Box>{user.email}</Box>

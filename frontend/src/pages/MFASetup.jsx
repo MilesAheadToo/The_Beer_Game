@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { userApi } from '../services/api';
+import { mixedGameApi } from '../services/api';
 import { toast } from 'react-toastify';
 
 const MFASetup = () => {
@@ -19,7 +19,7 @@ const MFASetup = () => {
     const setupMFA = async () => {
       try {
         setIsLoading(true);
-        const data = await userApi.setupMFA();
+        const data = await mixedGameApi.setupMFA();
         setQrCodeUrl(data.qr_code_url);
         setSecret(data.secret);
         setError('');
@@ -45,7 +45,7 @@ const MFASetup = () => {
     
     try {
       setIsSubmitting(true);
-      const result = await userApi.verifyMFA({
+      const result = await mixedGameApi.verifyMFA({
         code: verificationCode,
         secret: secret
       });

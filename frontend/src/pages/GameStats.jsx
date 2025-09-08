@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import { gameApi } from '../services/api';
+import gameApi from '../services/gameApi';
 import { 
   Chart as ChartJS, 
   CategoryScale, 

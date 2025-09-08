@@ -390,11 +390,8 @@ const Register = () => {
                 ) : 'Create Account'}
               </button>
             </div>
-        </form>
-        
-          </div>
-        </form>
-      </div>
+          </form>
+        </div>
       
       <div className="mt-6">
         <div className="relative">
@@ -444,6 +441,8 @@ const Register = () => {
           </div>
         </div>
       </div>
+    </div>
+  </div>
   );
 };
 

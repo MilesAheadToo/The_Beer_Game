@@ -28,7 +28,8 @@ import {
   Tooltip
 } from '@chakra-ui/react';
 import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons';
-import api from '../services/api';
+import { api } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 
 const Users = () => {
   const bgColor = useColorModeValue('white', 'gray.800');
@@ -48,9 +49,11 @@ const Users = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const cancelRef = React.useRef();
 
+  const { isAdmin } = useAuth();
+
   const fetchUsers = async () => {
     try {
-      const response = await api.get('/users/');
+      const response = await api.get('/auth/users/');
       setUsers(response.data);
       setLoading(false);
     } catch (error) {
@@ -81,27 +84,14 @@ const Users = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      if (editingUser) {
-        await api.put(`/users/${editingUser.id}`, formData);
-        toast({
-          title: 'Success',
-          description: 'User updated successfully',
-          status: 'success',
-          duration: 3000,
-          isClosable: true,
-        });
-      } else {
-        await api.post('/users/', formData);
-        toast({
-          title: 'Success',
-          description: 'User created successfully',
-          status: 'success',
-          duration: 3000,
-          isClosable: true,
-        });
-      }
-      fetchUsers();
-      handleClose();
+      // Disable create/update in this build; backend endpoints not exposed
+      toast({
+        title: 'Not available',
+        description: 'User create/update is disabled in this build.',
+        status: 'info',
+        duration: 4000,
+        isClosable: true,
+      });
     } catch (error) {
       console.error('Error saving user:', error);
       toast({
@@ -120,22 +110,21 @@ const Users = () => {
       username: user.username,
       email: user.email,
       password: '',
-      is_admin: user.is_admin
+      is_admin: user.is_superuser || (Array.isArray(user.roles) && user.roles.includes('admin'))
     });
     onOpen();
   };
 
   const handleDelete = async (userId) => {
     try {
-      await api.delete(`/users/${userId}`);
+      // Disable delete in this build; backend endpoint not exposed
       toast({
-        title: 'Success',
-        description: 'User deleted successfully',
-        status: 'success',
-        duration: 3000,
+        title: 'Not available',
+        description: 'User deletion is disabled in this build.',
+        status: 'info',
+        duration: 4000,
         isClosable: true,
       });
-      fetchUsers();
     } catch (error) {
       console.error('Error deleting user:', error);
       toast({
@@ -199,8 +188,8 @@ const Users = () => {
                   <Td>{user.username}</Td>
                   <Td>{user.email}</Td>
                   <Td>
-                    <Badge colorScheme={user.is_admin ? 'purple' : 'green'}>
-                      {user.is_admin ? 'Admin' : 'User'}
+                    <Badge colorScheme={(user.is_superuser || (Array.isArray(user.roles) && user.roles.includes('admin'))) ? 'purple' : 'green'}>
+                      {(user.is_superuser || (Array.isArray(user.roles) && user.roles.includes('admin'))) ? 'Admin' : 'User'}
                     </Badge>
                   </Td>
                   <Td>

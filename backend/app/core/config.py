@@ -30,9 +30,9 @@ class Settings(BaseSettings):
     CORS_ALLOW_HEADERS: List[str] = ["*"]
     
     # Cookie settings
-    COOKIE_SECURE: bool = False  # Set to False for development without HTTPS
+    COOKIE_SECURE: bool = False  # False for local development
     COOKIE_HTTP_ONLY: bool = True
-    COOKIE_SAME_SITE: str = "lax"  # or 'strict', 'none'
+    COOKIE_SAME_SITE: str = "none"  # 'none' to allow localhost:3000 -> 8000
     COOKIE_DOMAIN: Optional[str] = None
     COOKIE_ACCESS_TOKEN_NAME: str = "access_token"
     COOKIE_TOKEN_TYPE_NAME: str = "token_type"
@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     CSRF_COOKIE_NAME: str = "csrf_token"
     CSRF_HEADER_NAME: str = "X-CSRF-Token"
     CSRF_TOKEN_LENGTH: int = 32
-    CSRF_COOKIE_SECURE: bool = True
+    CSRF_COOKIE_SECURE: bool = False  # False in dev to allow http
     CSRF_COOKIE_HTTP_ONLY: bool = False  # Must be accessible from JS
     CSRF_COOKIE_SAME_SITE: str = "lax"
     CSRF_COOKIE_PATH: str = "/"
@@ -95,8 +95,8 @@ class Settings(BaseSettings):
     REFRESH_COOKIE_NAME: str = "refresh_token"
     REFRESH_COOKIE_PATH: str = "/api/v1/auth"
     REFRESH_COOKIE_DOMAIN: Optional[str] = None  # Set to your domain in production
-    REFRESH_COOKIE_SAMESITE: str = "lax"  # 'lax' for production, 'none' for cross-origin
-    REFRESH_COOKIE_SECURE: bool = False  # Set to True in production (HTTPS)
+    REFRESH_COOKIE_SAMESITE: str = "none"  # 'none' for cross-origin (localhost:3000 -> 8000)
+    REFRESH_COOKIE_SECURE: bool = False  # True only in production over HTTPS
     REFRESH_COOKIE_HTTPONLY: bool = True
     
     # Database configuration

@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FaTrash, FaPlus, FaUserShield, FaUser } from 'react-icons/fa';
 import { toast } from 'react-toastify';
+import { useAuth } from '../../contexts/AuthContext';
+import { mixedGameApi } from '../../services/api';
 
 function UserManagement() {
   const [users, setUsers] = useState([]);
@@ -14,29 +16,25 @@ function UserManagement() {
     isAdmin: false
   });
   const navigate = useNavigate();
-  const currentUser = JSON.parse(localStorage.getItem('user') || '{}');
+  const { isAdmin } = useAuth();
 
   // Check if current user is admin
   useEffect(() => {
-    if (currentUser?.email !== 'admin@daybreak.ai') {
-      navigate('/dashboard');
-    } else {
-      fetchUsers();
+    if (!isAdmin) {
+      navigate('/unauthorized');
+      return;
     }
-  }, [navigate, currentUser]);
+    fetchUsers();
+  }, [navigate, isAdmin]);
 
   const fetchUsers = async () => {
     try {
-      const response = await fetch('/api/users', {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (!response.ok) throw new Error('Failed to fetch users');
-      
-      const data = await response.json();
-      setUsers(data);
+      // Admin list endpoint (cookie auth)
+      const { data } = await mixedGameApi.health(); // quick health check to ensure API reachable
+      const res = await fetch('/api/v1/auth/users/', { credentials: 'include' });
+      if (!res.ok) throw new Error('Failed to fetch users');
+      const list = await res.json();
+      setUsers(list);
     } catch (error) {
       toast.error('Error loading users');
       console.error('Error:', error);
@@ -49,17 +47,8 @@ function UserManagement() {
     if (!window.confirm('Are you sure you want to delete this user?')) return;
     
     try {
-      const response = await fetch(`/api/users/${userId}`, {
-        method: 'DELETE',
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
-      });
-      
-      if (!response.ok) throw new Error('Failed to delete user');
-      
-      toast.success('User deleted successfully');
-      fetchUsers();
+      // Delete endpoint may not be available on backend; show info
+      toast.info('User deletion is not enabled in this build.');
     } catch (error) {
       toast.error('Error deleting user');
       console.error('Error:', error);
@@ -70,24 +59,8 @@ function UserManagement() {
     e.preventDefault();
     
     try {
-      const response = await fetch('/api/users', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        },
-        body: JSON.stringify(newUser)
-      });
-      
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || 'Failed to add user');
-      }
-      
-      toast.success('User added successfully');
-      setShowAddUser(false);
-      setNewUser({ username: '', email: '', password: '', isAdmin: false });
-      fetchUsers();
+      // Create endpoint may not be available on backend; show info
+      toast.info('User creation is not enabled in this build.');
     } catch (error) {
       toast.error(error.message || 'Error adding user');
       console.error('Error:', error);

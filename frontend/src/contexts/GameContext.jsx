@@ -83,7 +83,7 @@ export const GameProvider = ({ children }) => {
 
   // Connect to WebSocket when component mounts or game changes
   useEffect(() => {
-    if (gameId && user?.access_token) {
+    if (gameId) {
       // Connect to WebSocket for this game
       sendMessage('connect', { gameId });
       
@@ -98,7 +98,7 @@ export const GameProvider = ({ children }) => {
         // Don't disconnect WebSocket here as it might be used by other components
       };
     }
-  }, [gameId, user?.access_token, fetchGame, sendMessage]);
+  }, [gameId, fetchGame, sendMessage]);
 
   // Handle WebSocket messages
   useEffect(() => {

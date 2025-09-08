@@ -77,35 +77,14 @@ const Dashboard = () => {
 
 
   useEffect(() => {
-    const checkAuthAndFetchGames = async () => {
-      try {
-        setLoading(true);
-        // First check if we're actually authenticated
-        const token = localStorage.getItem('access_token');
-        if (!token) {
-          console.log('No access token found, redirecting to login');
-          navigate('/login');
-          return;
-        }
-        
-        // Simulate loading data
-        const timer = setTimeout(() => {
-          setLoading(false);
-          setGameResult({
-            roundsCompleted: 5,
-            status: 'In Progress',
-          });
-        }, 1000);
-        
-        return () => clearTimeout(timer);
-      } catch (error) {
-        console.error('Error in checkAuthAndFetchGames:', error);
-        setLoading(false);
-      }
-    };
-    
-    checkAuthAndFetchGames();
-  }, [navigate]);
+    // Simulate initial dashboard data load; route is already protected
+    setLoading(true);
+    const timer = setTimeout(() => {
+      setLoading(false);
+      setGameResult({ roundsCompleted: 5, status: 'In Progress' });
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, []);
 
   if (loading) {
     return (

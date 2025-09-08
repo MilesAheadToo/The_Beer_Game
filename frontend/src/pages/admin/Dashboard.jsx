@@ -39,7 +39,7 @@ ChartJS.register(
 );
 
 const AdminDashboard = () => {
-  const { user, hasRole } = useAuth();
+  const { isAdmin } = useAuth();
   const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [recentUsers, setRecentUsers] = useState([]);
@@ -50,10 +50,10 @@ const AdminDashboard = () => {
 
   // Check if user is admin
   useEffect(() => {
-    if (!hasRole('admin')) {
+    if (!isAdmin) {
       navigate('/unauthorized');
     }
-  }, [hasRole, navigate]);
+  }, [isAdmin, navigate]);
 
   // Fetch admin data
   useEffect(() => {

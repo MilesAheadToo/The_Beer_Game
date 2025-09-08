@@ -34,7 +34,7 @@ import {
 } from '@chakra-ui/react';
 import PageLayout from '../components/PageLayout';
 import PricingConfigForm from '../components/PricingConfigForm';
-import api from '../services/api';
+import { api, mixedGameApi } from '../services/api';
 
 const playerRoles = [
   { value: 'retailer', label: 'Retailer' },
@@ -113,7 +113,7 @@ const CreateMixedGame = () => {
   useEffect(() => {
     const fetchUsers = async () => {
       try {
-        const response = await api.get('/users/');
+        const response = await api.get('/auth/users/');
         setAvailableUsers(response.data);
       } catch (error) {
         console.error('Error fetching users:', error);
@@ -244,7 +244,7 @@ const CreateMixedGame = () => {
         }))
       };
       
-      const newGame = await api.createGame(gameData);
+      const newGame = await mixedGameApi.createGame(gameData);
       return newGame;
       
     } catch (error) {
@@ -578,7 +578,7 @@ const CreateMixedGame = () => {
                             value={user.id}
                             disabled={players.some(p => p.userId === user.id && p.role !== player.role)}
                           >
-                            {user.username} {user.is_admin ? '(Admin)' : ''}
+                            {user.username} {(user.is_superuser || (Array.isArray(user.roles) && user.roles.includes('admin'))) ? '(Admin)' : ''}
                             {players.some(p => p.userId === user.id && p.role !== player.role) ? ' (Assigned)' : ''}
                           </option>
                         ))}

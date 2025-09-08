@@ -177,6 +177,29 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  // ----- Role helpers -----
+  const hasRole = useCallback((role) => {
+    if (!user) return false;
+    const roles = Array.isArray(user.roles) ? user.roles : [];
+    return Boolean(user.is_superuser) || roles.includes(role);
+  }, [user]);
+
+  const hasAnyRole = useCallback((roles = []) => {
+    if (!roles || roles.length === 0) return true;
+    return roles.some((r) => hasRole(r));
+  }, [hasRole]);
+
+  const hasAllRoles = useCallback((roles = []) => {
+    if (!roles || roles.length === 0) return true;
+    return roles.every((r) => hasRole(r));
+  }, [hasRole]);
+
+  const isAdmin = useMemo(() => {
+    if (!user) return false;
+    const roles = Array.isArray(user.roles) ? user.roles : [];
+    return Boolean(user.is_superuser) || roles.includes('admin');
+  }, [user]);
+
   const value = useMemo(() => ({
     isAuthenticated,
     user,
@@ -185,10 +208,15 @@ export function AuthProvider({ children }) {
     login,
     logout,
     refreshUser,
+    // role helpers
+    hasRole,
+    hasAnyRole,
+    hasAllRoles,
+    isAdmin,
     showTimeoutWarning,
     timeLeft,
     resetTimers, // Export resetTimers to allow manual reset from components
-  }), [isAuthenticated, user, loading, error, login, logout, refreshUser, showTimeoutWarning, timeLeft, resetTimers]);
+  }), [isAuthenticated, user, loading, error, login, logout, refreshUser, hasRole, hasAnyRole, hasAllRoles, isAdmin, showTimeoutWarning, timeLeft, resetTimers]);
 
   return (
     <AuthContext.Provider value={value}>

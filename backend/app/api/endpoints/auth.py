@@ -74,7 +74,7 @@ async def login(
     # Generate tokens
     tokens = await auth_service.create_tokens(user)
     
-    # Set HTTP-only cookies
+    # Set cookies: refresh (httpOnly) and access token (for header-less auth)
     response.set_cookie(
         key="refresh_token",
         value=tokens.refresh_token,
@@ -83,6 +83,8 @@ async def login(
         samesite="lax",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
     )
+    # Also set access token cookie so subsequent requests authenticate without JS-managed headers
+    set_auth_cookies(response, tokens.access_token, token_type="bearer")
     
     # Return access token and user info
     return TokenResponse(
@@ -293,7 +295,8 @@ async def refresh_token(
         samesite="lax",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
     )
-    
+    # Update access token cookie too
+    set_auth_cookies(response, tokens.access_token, token_type="bearer")
     return {"access_token": tokens.access_token, "token_type": "bearer"}
 
 # Admin-only endpoints

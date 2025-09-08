@@ -33,7 +33,8 @@ import {
   useDisclosure
 } from '@chakra-ui/react';
 import { useWebSocket } from '../contexts/WebSocketContext';
-import api from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
+import mixedGameApi from '../services/api';
 
 const GameBoard = () => {
   // Theme values
@@ -43,6 +44,7 @@ const GameBoard = () => {
   const { gameId } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
+  const { user } = useAuth();
   const [gameState, setGameState] = useState(null);
   const [gameDetails, setGameDetails] = useState(null);
   const [playerRole, setPlayerRole] = useState('');
@@ -64,7 +66,7 @@ const GameBoard = () => {
     const fetchGameState = async () => {
       if (gameId) {
         try {
-          const state = await api.getGameState(gameId);
+          const state = await mixedGameApi.getGameState(gameId);
           setGameState(state);
           
           // Update derived state
@@ -94,12 +96,12 @@ const GameBoard = () => {
     const fetchGameDetails = async () => {
       try {
         setIsLoading(true);
-        const game = await api.getGame(gameId);
+        const game = await mixedGameApi.getGame(gameId);
         setGameDetails(game);
         
-        // Get current user ID and player info
-        const currentUserId = localStorage.getItem('user_id');
-        const player = game.players.find(p => p.user_id === parseInt(currentUserId));
+        // Get current user ID and player info from auth context
+        const currentUserId = user?.id;
+        const player = game.players.find(p => p.user_id === currentUserId);
         if (player) {
           setPlayerRole(player.role);
           setPlayerId(player.id);
@@ -125,7 +127,7 @@ const GameBoard = () => {
     };
     
     fetchGameDetails();
-  }, [gameId, navigate, toast]);
+  }, [gameId, navigate, toast, user?.id]);
   
   // Check if it's the player's turn
   useEffect(() => {
@@ -148,7 +150,7 @@ const GameBoard = () => {
   // Handle order submission
   const handleOrderSubmit = async (quantity) => {
     try {
-      await api.submitOrder(gameId, playerId, quantity);
+      await mixedGameApi.submitOrder(gameId, playerId, quantity);
       toast({
         title: 'Order submitted!',
         description: `Order of ${quantity} units has been placed.`,

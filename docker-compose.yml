@@ -1,4 +1,18 @@
 services:
+  proxy:
+    image: nginx:alpine
+    container_name: beer-game-proxy
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./config/dev-proxy/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_healthy
+    networks:
+      - beer-game-network
   frontend:
     build:
       context: ./frontend
@@ -8,8 +22,8 @@ services:
       - "3000:80"
     environment:
       - NODE_ENV=production
-      - REACT_APP_API_BASE_URL=http://localhost:8000/api/v1
-      - VITE_API_BASE_URL=http://localhost:8000/api/v1
+      - REACT_APP_API_BASE_URL=${REACT_APP_API_BASE_URL:-/api/v1}
+      - VITE_API_BASE_URL=${VITE_API_BASE_URL:-/api/v1}
     networks:
       - beer-game-network
     depends_on:
@@ -23,13 +37,13 @@ services:
     container_name: the_beer_game_backend
     restart: unless-stopped
     environment:
-      - MYSQL_SERVER=db
-      - MYSQL_PORT=3306
-      - MYSQL_USER=beer_user
-      - MYSQL_PASSWORD=Daybreak@2025
-      - MYSQL_DB=beer_game
-      - MYSQL_ROOT_PASSWORD=Daybreak@2025
-      - SECRET_KEY=your-secret-key-here
+      - MYSQL_SERVER=${MYSQL_SERVER:-db}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_USER=${MYSQL_USER:-beer_user}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-beer_password}
+      - MYSQL_DB=${MYSQL_DB:-beer_game}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-root_password}
+      - SECRET_KEY=${SECRET_KEY:-dev-secret}
       - ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=30
       - PYTHONUNBUFFERED=1
@@ -39,7 +53,7 @@ services:
       - DB_WAIT_TIMEOUT=30
       - DB_CONNECTION_TIMEOUT=30
       - PYTHONPATH=/app
-      - DATABASE_URL=mysql+aiomysql://beer_user:Daybreak%402025@db:3307/beer_game
+      - DATABASE_URL=mysql+aiomysql://${MYSQL_USER:-beer_user}:${MYSQL_PASSWORD:-beer_password}@${MYSQL_SERVER:-db}:3307/${MYSQL_DB:-beer_game}
       - DB_HOST=db
       - DB_USER=beer_user
       - DB_PASSWORD=Daybreak@2025
@@ -76,11 +90,11 @@ services:
     container_name: the_beer_game_db
     restart: unless-stopped
     environment:
-      MARIADB_ROOT_PASSWORD: Daybreak@2025
-      MYSQL_DATABASE: beer_game
-      MYSQL_USER: beer_user
-      MYSQL_PASSWORD: Daybreak@2025
-      MYSQL_ROOT_PASSWORD: Daybreak@2025
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-beer_game}
+      MYSQL_USER: ${MYSQL_USER:-beer_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-beer_password}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
     ports:
       - "3306:3306"
     volumes:
@@ -89,7 +103,7 @@ services:
       - ./mariadb.cnf:/etc/mysql/conf.d/custom.cnf
       - ./scripts/init_database.sh:/docker-entrypoint-initdb.d/init_database.sh
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pDaybreak@2025"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -108,7 +122,7 @@ services:
     restart: always
     environment:
       PMA_HOST: db
-      MYSQL_ROOT_PASSWORD: Daybreak2025
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password}
     ports:
       - "8080:80"
     depends_on:

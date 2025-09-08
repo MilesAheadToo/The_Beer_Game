@@ -9,7 +9,8 @@ import {
   ChartBarIcon,
   InformationCircleIcon
 } from '@heroicons/react/24/outline';
-import { gameApi } from '../services/api';
+import gameApi from '../services/gameApi';
+import { mixedGameApi } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'react-toastify';
 
@@ -51,14 +52,17 @@ const GameRoom = () => {
       
       ws.current = new WebSocket(wsUrl);
       
-      ws.current.onopen = () => {
+      ws.current.onopen = async () => {
         console.log('WebSocket connected');
-        // Send authentication message with token
-        const token = localStorage.getItem('access_token');
-        ws.current.send(JSON.stringify({
-          type: 'authenticate',
-          token: token
-        }));
+        // Obtain a fresh access token via cookie-based refresh and authenticate WS
+        try {
+          const { access_token } = await mixedGameApi.refreshToken();
+          if (access_token) {
+            ws.current.send(JSON.stringify({ type: 'authenticate', token: access_token }));
+          }
+        } catch (e) {
+          console.warn('WS auth token refresh failed:', e?.message || e);
+        }
       };
       
       ws.current.onmessage = (e) => {

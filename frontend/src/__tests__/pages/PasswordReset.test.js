@@ -13,15 +13,13 @@ jest.mock('../../services/api', () => ({
   },
 }));
 
-// Mock react-toastify
-const mockToast = {
-  success: jest.fn(),
-  error: jest.fn(),
-  info: jest.fn(),
-};
-
+// Mock react-toastify (avoid hoisting issue by creating fns inside factory)
 jest.mock('react-toastify', () => ({
-  toast: mockToast,
+  toast: {
+    success: jest.fn(),
+    error: jest.fn(),
+    info: jest.fn(),
+  },
 }));
 
 // Mock React Router v6
@@ -108,7 +106,8 @@ describe('PasswordReset', () => {
       expect(requestPasswordReset).toHaveBeenCalledWith('test@example.com');
       
       // Check for success message
-      expect(mockToast.success).toHaveBeenCalledWith(
+      const { toast } = require('react-toastify');
+      expect(toast.success).toHaveBeenCalledWith(
         'Password reset link sent to your email',
         expect.any(Object)
       );
@@ -197,7 +196,8 @@ describe('PasswordReset', () => {
       );
       
       // Check for success message
-      expect(mockToast.success).toHaveBeenCalledWith(
+      const { toast } = require('react-toastify');
+      expect(toast.success).toHaveBeenCalledWith(
         'Your password has been reset successfully',
         expect.any(Object)
       );

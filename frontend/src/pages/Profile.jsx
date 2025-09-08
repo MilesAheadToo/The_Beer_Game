@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { toast } from 'react-toastify';
+import { mixedGameApi } from '../services/api';
 
 const Profile = () => {
   const { user, updateProfile, changePassword } = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('profile');
   const [isLoading, setIsLoading] = useState(false);
   const [mfaStatus, setMfaStatus] = useState({
@@ -176,7 +179,7 @@ const Profile = () => {
     try {
       if (mfaStatus.enabled) {
         // Disable MFA
-        await userApi.disableMFA();
+        await mixedGameApi.disableMFA();
         setMfaStatus({ enabled: false, loading: false });
         toast.success('Two-factor authentication has been disabled');
       } else {

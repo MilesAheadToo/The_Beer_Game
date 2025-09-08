@@ -27,7 +27,7 @@ import {
   Alert,
 } from '@mui/material';
 import { PlayArrow, Edit, Delete, Add } from '@mui/icons-material';
-import { gameApi } from '../services/api';
+import gameApi from '../services/gameApi';
 
 const GamesList = () => {
   const [games, setGames] = useState([]);
@@ -175,14 +175,8 @@ const GamesList = () => {
   // Handle game deletion
   const handleDeleteGame = async (gameId) => {
     if (window.confirm('Are you sure you want to delete this game?')) {
-      try {
-        await gameApi.deleteGame(gameId);
-        showSnackbar('Game deleted successfully', 'success');
-        fetchGames();
-      } catch (error) {
-        console.error('Error deleting game:', error);
-        showSnackbar('Failed to delete game', 'error');
-      }
+      // Delete endpoint is not available in the backend yet
+      showSnackbar('Game deletion is disabled in this build.', 'info');
     }
   };
 

@@ -48,7 +48,7 @@ import {
   CheckIcon,
   ViewIcon
 } from '@chakra-ui/icons';
-import api from '../services/api';
+import mixedGameApi from '../services/api';
 import { getModelStatus } from '../services/modelService';
 
 const statusColors = {
@@ -79,7 +79,7 @@ const MixedGamesList = () => {
   const fetchGames = useCallback(async () => {
     try {
       setIsLoading(true);
-      const data = await api.getGames();
+      const data = await mixedGameApi.getGames();
       setGames(data);
     } catch (error) {
       console.error('Error fetching games:', error);
@@ -121,7 +121,7 @@ const MixedGamesList = () => {
 
   const handleStartGame = async (gameId) => {
     try {
-      await api.startGame(gameId);
+      await mixedGameApi.startGame(gameId);
       toast({
         title: 'Game started',
         description: 'The game has been started successfully.',
@@ -144,7 +144,7 @@ const MixedGamesList = () => {
 
   const handleStopGame = async (gameId) => {
     try {
-      await api.stopGame(gameId);
+      await mixedGameApi.stopGame(gameId);
       toast({
         title: 'Game stopped',
         description: 'The game has been stopped.',
@@ -167,7 +167,7 @@ const MixedGamesList = () => {
 
   const handleNextRound = async (gameId) => {
     try {
-      await api.nextRound(gameId);
+      await mixedGameApi.nextRound(gameId);
       toast({
         title: 'Round advanced',
         description: 'The game has advanced to the next round.',

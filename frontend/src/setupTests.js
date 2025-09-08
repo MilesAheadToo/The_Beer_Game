@@ -30,3 +30,18 @@ jest.mock('react-router-dom', () => ({
     key: 'test',
   }),
 }));
+// Mock axios to avoid ESM transform issues in CRA test runner and provide a stable instance
+jest.mock('axios', () => {
+  const mockInstance = {
+    get: jest.fn(),
+    post: jest.fn(),
+    patch: jest.fn(),
+    put: jest.fn(),
+    delete: jest.fn(),
+    interceptors: { request: { use: jest.fn() }, response: { use: jest.fn() } },
+    defaults: { headers: {} },
+  };
+  const create = jest.fn(() => mockInstance);
+  return { __esModule: true, default: { create }, create };
+});
+import '@testing-library/jest-dom';

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { authApi } from '../services/api';
+import { mixedGameApi } from '../services/api';
 
 const ResetPassword = () => {
   const [searchParams] = useSearchParams();
@@ -76,7 +76,7 @@ const ResetPassword = () => {
     setIsSubmitting(true);
     
     try {
-      await authApi.resetPassword(token, formData.password);
+      await mixedGameApi.resetPassword(token, formData.password);
       toast.success('Your password has been reset successfully');
       navigate('/login');
     } catch (error) {

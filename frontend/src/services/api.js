@@ -13,10 +13,13 @@ const http = axios.create({
   },
 });
 
+// Backward-compatible axios export for modules that import `{ api }`
+export const api = http;
+
 // Request interceptor: handle CSRF token and auth headers
 http.interceptors.request.use(async (config) => {
   // Skip for token refresh and CSRF endpoints to avoid infinite loops
-  const isAuthRequest = ['/auth/login', '/auth/refresh', '/auth/csrf-token'].some(path => 
+  const isAuthRequest = ['/auth/login', '/auth/refresh-token', '/auth/csrf-token'].some(path => 
     config.url?.includes(path)
   );
   
@@ -43,7 +46,7 @@ http.interceptors.response.use(
       
       try {
         // Try to refresh the token
-        await http.post('/auth/refresh');
+        await http.post('/auth/refresh-token');
         // Retry the original request with new token
         return http(originalRequest);
       } catch (refreshError) {
@@ -94,6 +97,52 @@ export const mixedGameApi = {
     return data;
   },
 
+  // Mixed Games management
+  async createGame(gameData) {
+    const { data } = await http.post('/mixed-games/', gameData);
+    return data;
+  },
+  async getGames() {
+    const { data } = await http.get('/mixed-games/');
+    return data;
+  },
+
+  async startGame(gameId) {
+    const { data } = await http.post(`/mixed-games/${gameId}/start`);
+    return data;
+  },
+
+  async stopGame(gameId) {
+    const { data } = await http.post(`/mixed-games/${gameId}/stop`);
+    return data;
+  },
+
+  async nextRound(gameId) {
+    const { data } = await http.post(`/mixed-games/${gameId}/next-round`);
+    return data;
+  },
+
+  async getGameState(gameId) {
+    const { data } = await http.get(`/mixed-games/${gameId}/state`);
+    return data;
+  },
+
+  // Classic game endpoints (state, details, orders)
+  async getGame(gameId) {
+    const { data } = await http.get(`/games/${gameId}`);
+    return data;
+  },
+
+  async submitOrder(gameId, playerId, quantity) {
+    const { data } = await http.post(`/games/${gameId}/players/${playerId}/orders`, { quantity });
+    return data;
+  },
+
+  async getRoundStatus(gameId) {
+    const { data } = await http.get(`/games/${gameId}/rounds/current/status`);
+    return data;
+  },
+
   // Authentication endpoints
   async login(credentials) {
     const form = new URLSearchParams();
@@ -137,7 +186,7 @@ export const mixedGameApi = {
 
   async refreshToken() {
     try {
-      const { data } = await http.post('/auth/refresh');
+      const { data } = await http.post('/auth/refresh-token');
       return data;
     } catch (error) {
       console.error('Failed to refresh token:', error);
@@ -185,6 +234,22 @@ export const mixedGameApi = {
         error: error.response?.data?.detail || 'Failed to change password',
       };
     }
+  },
+
+  // MFA endpoints
+  async setupMFA() {
+    const { data } = await http.post('/auth/mfa/setup');
+    return data;
+  },
+
+  async verifyMFA({ code, secret }) {
+    const { data } = await http.post('/auth/mfa/verify', { code, secret });
+    return data;
+  },
+
+  async disableMFA() {
+    const { data } = await http.post('/auth/mfa/disable');
+    return data;
   },
 
   // User management endpoints

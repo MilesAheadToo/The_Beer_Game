@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { toast } from 'react-toastify';
-import { authApi } from '../services/api';
+import { mixedGameApi } from '../services/api';
 
 const ForgotPassword = () => {
   const [email, setEmail] = useState('');
@@ -20,7 +20,7 @@ const ForgotPassword = () => {
     setIsSubmitting(true);
     
     try {
-      await authApi.requestPasswordReset(email);
+      await mixedGameApi.requestPasswordReset(email);
       setEmailSent(true);
       toast.success('Password reset instructions have been sent to your email');
     } catch (error) {
