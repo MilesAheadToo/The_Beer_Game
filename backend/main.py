@@ -40,12 +40,15 @@ COOKIE_COMMON_KWARGS = dict(httponly=True, samesite="lax", secure=False, path="/
 # ------------------------------------------------------------------------------
 # This mirrors your default frontend creds to make dev easy.
 _FAKE_USERS = {
+    # Keyed by email for canonical lookup
     "admin@daybreak.ai": {
         "id": 1,
         "email": "admin@daybreak.ai",
         "name": "Admin",
         "role": "admin",
-        "password": "Daybreak@2025",  # DO NOT use plaintext in production.
+        # Dev-only password to simplify getting started
+        "passwords": {"Daybreak@2025", "Daybreak@2025!"},
+        "aliases": {"admin"},
     }
 }
 
@@ -87,10 +90,19 @@ def decode_token(token: str) -> Dict[str, Any]:
 # Auth helpers
 # ------------------------------------------------------------------------------
 def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
+    """Accept email or simple alias (e.g., 'admin')."""
+    # Try direct email key first
     user = _FAKE_USERS.get(username)
     if not user:
+        # Try lookup by alias
+        for u in _FAKE_USERS.values():
+            if username.lower() in {a.lower() for a in u.get("aliases", set())}:
+                user = u
+                break
+    if not user:
         return None
-    if user["password"] != password:
+    # Accept any of the allowed dev passwords for convenience
+    if password not in user.get("passwords", set()):
         return None
     return user
 
@@ -262,12 +274,145 @@ async def refresh(
     )
     return TokenResponse(access_token=new_access, token_type="bearer")
 
+# Alias to match frontend expectation '/auth/refresh-token'
+@api.post("/auth/refresh-token", response_model=TokenResponse, tags=["auth"])
+async def refresh_alias(response: Response, refresh_cookie: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE_NAME)):
+    return await refresh(response=response, refresh_cookie=refresh_cookie)
+
+# CSRF token endpoint to satisfy frontend interceptor
+@api.get("/auth/csrf-token", tags=["auth"])
+async def csrf_token(response: Response):
+    import secrets
+    token = secrets.token_urlsafe(32)
+    # Set a non-HttpOnly cookie accessible to JS for header echo
+    response.set_cookie(
+        key="csrf_token",
+        value=token,
+        max_age=7 * 24 * 60 * 60,
+        httponly=False,
+        samesite="lax",
+        secure=False,
+        path="/",
+    )
+    return {"csrf_token": token}
+
 # ------------------------------------------------------------------------------
 # Example protected route (replace with your real routers)
 # ------------------------------------------------------------------------------
 @api.get("/secure/ping")
 async def secure_ping(user: Dict[str, Any] = Depends(get_current_user)):
     return {"message": f"pong, {user['email']}", "role": user["role"]}
+
+# ------------------------------------------------------------------------------
+# Minimal in-memory Mixed Games API to support the UI
+# ------------------------------------------------------------------------------
+from enum import Enum
+from threading import Lock
+
+
+class GameStatus(str, Enum):
+    CREATED = "CREATED"
+    IN_PROGRESS = "IN_PROGRESS"
+    PAUSED = "PAUSED"
+    COMPLETED = "COMPLETED"
+
+
+_GAMES_LOCK = Lock()
+_GAMES: Dict[int, Dict[str, Any]] = {}
+_NEXT_ID = 1
+
+
+def _seed_games() -> None:
+    global _NEXT_ID
+    with _GAMES_LOCK:
+        if _GAMES:
+            return
+        now = datetime.utcnow().isoformat() + "Z"
+        for name in [
+            "Supply Chain Masters",
+            "Beer Game Pro",
+            "Logistics Challenge",
+        ]:
+            gid = _NEXT_ID
+            _NEXT_ID += 1
+            _GAMES[gid] = {
+                "id": gid,
+                "name": name,
+                "status": GameStatus.CREATED,
+                "current_round": 0,
+                "max_rounds": 20,
+                "created_at": now,
+                "updated_at": now,
+                "description": "Demo game",
+                "players": [],
+            }
+
+
+@api.get("/mixed-games/")
+async def list_mixed_games(user: Dict[str, Any] = Depends(get_current_user)):
+    """Return a minimal list of games for the MixedGamesList UI."""
+    _seed_games()
+    with _GAMES_LOCK:
+        return list(_GAMES.values())
+
+
+def _touch(g: Dict[str, Any]):
+    g["updated_at"] = datetime.utcnow().isoformat() + "Z"
+
+
+@api.post("/mixed-games/{game_id}/start")
+async def start_game(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
+    with _GAMES_LOCK:
+        g = _GAMES.get(game_id)
+        if not g:
+            raise HTTPException(status_code=404, detail="Game not found")
+        g["status"] = GameStatus.IN_PROGRESS
+        if g["current_round"] == 0:
+            g["current_round"] = 1
+        _touch(g)
+        return g
+
+
+@api.post("/mixed-games/{game_id}/stop")
+async def stop_game(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
+    with _GAMES_LOCK:
+        g = _GAMES.get(game_id)
+        if not g:
+            raise HTTPException(status_code=404, detail="Game not found")
+        g["status"] = GameStatus.PAUSED
+        _touch(g)
+        return g
+
+
+@api.post("/mixed-games/{game_id}/next-round")
+async def next_round(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
+    with _GAMES_LOCK:
+        g = _GAMES.get(game_id)
+        if not g:
+            raise HTTPException(status_code=404, detail="Game not found")
+        if g["status"] != GameStatus.IN_PROGRESS:
+            g["status"] = GameStatus.IN_PROGRESS
+        if g["current_round"] < g["max_rounds"]:
+            g["current_round"] += 1
+        if g["current_round"] >= g["max_rounds"]:
+            g["status"] = GameStatus.COMPLETED
+        _touch(g)
+        return g
+
+
+# Simple model status for UI banner
+_MODEL_STATUS = {
+    "is_trained": True,
+    "last_modified": datetime.utcnow().isoformat() + "Z",
+    "file_size_mb": 12.3,
+    "epoch": 10,
+    "training_loss": 0.1234,
+}
+
+
+@api.get("/model/status")
+async def model_status():
+    return _MODEL_STATUS
 
 # ------------------------------------------------------------------------------
 # Mount router

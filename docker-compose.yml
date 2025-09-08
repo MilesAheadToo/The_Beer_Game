@@ -2,6 +2,7 @@ services:
   proxy:
     image: nginx:alpine
     container_name: beer-game-proxy
+    restart: unless-stopped
     ports:
       - "8088:8088"
     volumes:
@@ -13,13 +14,18 @@ services:
         condition: service_healthy
     networks:
       - beer-game-network
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8088" ]
+      interval: 15s
+      timeout: 5s
+      retries: 4
+      start_period: 10s
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: beer-game-frontend
-    ports:
-      - "3000:80"
+    # No host port binding; access via proxy on 8088 (or TLS 8443)
     environment:
       - NODE_ENV=production
       - REACT_APP_API_BASE_URL=${REACT_APP_API_BASE_URL:-/api/v1}

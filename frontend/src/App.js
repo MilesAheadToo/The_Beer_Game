@@ -61,6 +61,7 @@ const AppContent = () => {
               element={
                 <>
                   <Navbar />
+                  <Box sx={{ height: 64 }} />
                   <Dashboard />
                 </>
               }
@@ -71,6 +72,7 @@ const AppContent = () => {
               element={
                 <>
                   <Navbar />
+                  <Box sx={{ height: 64 }} />
                   <MixedGamesList />
                 </>
               }
@@ -81,6 +83,7 @@ const AppContent = () => {
               element={
                 <>
                   <Navbar />
+                  <Box sx={{ height: 64 }} />
                   <CreateMixedGame />
                 </>
               }
@@ -92,11 +95,13 @@ const AppContent = () => {
                 isGamePage ? (
                   <WebSocketProvider>
                     <Navbar />
+                    <Box sx={{ height: 64 }} />
                     <GameBoard />
                   </WebSocketProvider>
                 ) : (
                   <>
                     <Navbar />
+                    <Box sx={{ height: 64 }} />
                     <GameBoard />
                   </>
                 )
@@ -110,6 +115,7 @@ const AppContent = () => {
                 <ProtectedRoute allowedRoles={["admin"]}>
                   <>
                     <Navbar />
+                    <Box sx={{ height: 64 }} />
                     <AdminDashboard />
                   </>
                 </ProtectedRoute>
@@ -121,6 +127,7 @@ const AppContent = () => {
                 <ProtectedRoute allowedRoles={["admin"]}>
                   <>
                     <Navbar />
+                    <Box sx={{ height: 64 }} />
                     <Users />
                   </>
                 </ProtectedRoute>

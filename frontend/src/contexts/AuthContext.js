@@ -92,11 +92,17 @@ export function AuthProvider({ children }) {
   useEffect(() => {
     const checkAuth = async () => {
       try {
+        // Avoid running auth check on the login route to prevent noisy 401/refresh loops
+        if (typeof window !== 'undefined' && window.location.pathname.startsWith('/login')) {
+          setLoading(false);
+          return;
+        }
+
         setLoading(true);
         const userData = await mixedGameApi.getCurrentUser();
         setUser(userData);
         setIsAuthenticated(true);
-        
+
         // Refresh token periodically (every 15 minutes)
         const refreshInterval = setInterval(async () => {
           try {
@@ -107,7 +113,7 @@ export function AuthProvider({ children }) {
             logout();
           }
         }, 15 * 60 * 1000); // 15 minutes
-        
+
         return () => clearInterval(refreshInterval);
       } catch (err) {
         setIsAuthenticated(false);

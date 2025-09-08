@@ -38,35 +38,34 @@ http.interceptors.request.use(async (config) => {
 http.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const originalRequest = error.config;
-    
-    // Handle 401 Unauthorized
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    const originalRequest = error.config || {};
+    const url = originalRequest.url || '';
+
+    // Do not try to refresh for auth endpoints themselves to avoid loops
+    const isAuthEndpoint = ['/auth/login', '/auth/refresh-token', '/auth/csrf-token'].some((p) => url.includes(p));
+
+    // Handle 401 Unauthorized once per request (except auth endpoints)
+    if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
       originalRequest._retry = true;
-      
       try {
-        // Try to refresh the token
         await http.post('/auth/refresh-token');
-        // Retry the original request with new token
         return http(originalRequest);
       } catch (refreshError) {
-        // If refresh fails, clear auth state and redirect to login
+        // If refresh fails, go to login only once
         if (window.location.pathname !== '/login') {
           const returnTo = encodeURIComponent(window.location.pathname + window.location.search);
-          window.location.href = `/login?redirect=${returnTo}`;
+          window.location.replace(`/login?redirect=${returnTo}`);
         }
         return Promise.reject(refreshError);
       }
     }
-    
+
     // Handle CSRF token errors
     if (error.response?.status === 403 && error.response.data?.code === 'csrf_token_mismatch') {
-      // Clear the invalid CSRF token
       document.cookie = 'csrftoken=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
-      // Retry the request with a new CSRF token
       return http(originalRequest);
     }
-    
+
     return Promise.reject(error);
   }
 );

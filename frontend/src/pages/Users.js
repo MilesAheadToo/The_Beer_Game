@@ -173,7 +173,8 @@ const Users = () => {
           boxShadow="sm"
           bg={bgColor}
         >
-          <Table variant="simple">
+          <Box fontSize="sm">
+          <Table variant="simple" size="sm">
             <Thead bg={tableHeaderBg}>
               <Tr>
                 <Th>Username</Th>
@@ -217,6 +218,7 @@ const Users = () => {
               ))}
             </Tbody>
           </Table>
+          </Box>
         </Box>
       </VStack>
 

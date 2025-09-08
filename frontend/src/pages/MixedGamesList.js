@@ -360,18 +360,20 @@ const MixedGamesList = () => {
         overflow="hidden"
         boxShadow="sm"
       >
-        <Table variant="simple">
-          <Thead>
-            <Tr>
-              <Th>Name</Th>
-              <Th>Status</Th>
-              <Th>Round</Th>
-              <Th>Players</Th>
-              <Th>Created</Th>
-              <Th>Actions</Th>
-            </Tr>
-          </Thead>
-          <Tbody>
+        {/* Slightly lighter, compact table font */}
+        <Box fontSize="sm">
+          <Table variant="simple" size="sm">
+            <Thead>
+              <Tr>
+                <Th>Name</Th>
+                <Th>Status</Th>
+                <Th>Round</Th>
+                <Th>Players</Th>
+                <Th>Created</Th>
+                <Th>Actions</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
             {isLoading ? (
               <Tr>
                 <Td colSpan={6} textAlign="center" py={8}>
@@ -400,18 +402,14 @@ const MixedGamesList = () => {
               games.map((game) => (
                 <Tr key={game.id} _hover={{ bg: 'gray.50' }}>
                   <Td>
-                    <VStack align="flex-start" spacing={0}>
-                      <Text fontWeight="medium">
-                        <Link to={`/games/${game.id}`} style={{ textDecoration: 'underline' }}>
-                          {game.name}
-                        </Link>
-                      </Text>
+                    <Text fontSize="sm" fontWeight="semibold">
+                      <Link to={`/games/${game.id}`} style={{ textDecoration: 'underline' }}>
+                        {game.name}
+                      </Link>
                       {game.description && (
-                        <Text fontSize="sm" color="gray.500" noOfLines={1}>
-                          {game.description}
-                        </Text>
+                        <Text as="span" ml={2} color="gray.500">({game.description})</Text>
                       )}
-                    </VStack>
+                    </Text>
                   </Td>
                   <Td>{getStatusBadge(game.status)}</Td>
                   <Td>
@@ -439,14 +437,9 @@ const MixedGamesList = () => {
                     </HStack>
                   </Td>
                   <Td>
-                    <VStack align="flex-start" spacing={0}>
-                      <Text fontSize="sm">
-                        {new Date(game.created_at).toLocaleDateString()}
-                      </Text>
-                      <Text fontSize="xs" color="gray.500">
-                        {new Date(game.created_at).toLocaleTimeString()}
-                      </Text>
-                    </VStack>
+                    <Text fontSize="sm">
+                      {new Date(game.created_at).toLocaleString()}
+                    </Text>
                   </Td>
                   <Td>
                     <HStack spacing={2}>
@@ -496,7 +489,8 @@ const MixedGamesList = () => {
               ))
             )}
           </Tbody>
-        </Table>
+          </Table>
+        </Box>
       </Box>
 
       {/* Delete Confirmation Dialog */}

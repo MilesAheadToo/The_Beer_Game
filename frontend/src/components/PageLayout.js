@@ -7,14 +7,6 @@ const PageLayout = ({ title, children, maxW = 'container.lg', ...rest }) => {
     <>
       <Helmet>
         <title>{title ? `${title} | Beer Game` : 'Beer Game'}</title>
-        <style>
-          {`
-            @import url('https://fonts.googleapis.com/css2?family=Trebuchet+MS:wght@400;600;700&display=swap');
-            body {
-              font-family: 'Trebuchet MS', sans-serif;
-            }
-          `}
-        </style>
       </Helmet>
       <Box 
         as="main" 
@@ -22,7 +14,7 @@ const PageLayout = ({ title, children, maxW = 'container.lg', ...rest }) => {
         mx="auto" 
         px={4} 
         py={8}
-        fontFamily="'Trebuchet MS', sans-serif"
+        /* rely on global font stack from index.css */
         {...rest}
       >
         {title && (
