@@ -12,6 +12,7 @@ import {
   Divider, 
   Grid, 
   GridItem, 
+  SimpleGrid,
   Avatar, 
   IconButton, 
   List, 
@@ -63,6 +64,7 @@ import {
   FiEye,
   FiEyeOff,
   FiUpload,
+  FiCopy,
   FiCheckCircle,
   FiAlertCircle,
   FiDownload,
@@ -84,6 +86,7 @@ const Settings = () => {
     new: false,
     confirm: false
   });
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form states
   const [notificationSettings, setNotificationSettings] = useState({
@@ -249,6 +252,7 @@ const Settings = () => {
     }
     
     try {
+      setIsSubmitting(true);
       // Simulate API call
       await new Promise(resolve => setTimeout(resolve, 1000));
       
@@ -273,6 +277,8 @@ const Settings = () => {
         duration: 5000,
         isClosable: true,
       });
+    } finally {
+      setIsSubmitting(false);
     }
   };
 

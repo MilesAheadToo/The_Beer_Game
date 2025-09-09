@@ -17,9 +17,18 @@ const theme = createTheme({
   },
   typography: {
     fontFamily: `Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Helvetica Neue", "Apple Color Emoji","Segoe UI Emoji"`,
-    h1: { fontWeight: 700, fontSize: "2.25rem", letterSpacing: "-0.01em" },
-    h2: { fontWeight: 700, fontSize: "1.875rem" },
-    h3: { fontWeight: 600, fontSize: "1.5rem" },
+    // Figma-like type ramp (approximate)
+    h1: { fontWeight: 700, fontSize: "2.5rem", letterSpacing: "-0.01em", lineHeight: 1.2 }, // 40px
+    h2: { fontWeight: 700, fontSize: "2rem", lineHeight: 1.25 }, // 32px
+    h3: { fontWeight: 600, fontSize: "1.5rem", lineHeight: 1.3 }, // 24px
+    h4: { fontWeight: 600, fontSize: "1.25rem", lineHeight: 1.35 }, // 20px
+    h5: { fontWeight: 600, fontSize: "1.125rem" }, // 18px
+    h6: { fontWeight: 600, fontSize: "1rem" }, // 16px
+    body1: { fontSize: "1rem", lineHeight: 1.6 },   // 16px
+    body2: { fontSize: "0.875rem", lineHeight: 1.5 },// 14px
+    subtitle1: { fontSize: "0.95rem", color: "#475569" },
+    subtitle2: { fontSize: "0.8rem", color: "#64748B" },
+    overline: { fontSize: "0.75rem", letterSpacing: ".06em", textTransform: "uppercase" },
     button: { fontWeight: 600, textTransform: "none", letterSpacing: 0 },
   },
   shape: { borderRadius: 16 },

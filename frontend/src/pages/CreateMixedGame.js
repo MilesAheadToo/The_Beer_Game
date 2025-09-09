@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Box, 
@@ -30,11 +30,17 @@ import {
   TabList,
   TabPanels,
   Tab,
-  TabPanel
+  TabPanel,
+  Alert,
+  AlertIcon,
+  AlertTitle,
+  AlertDescription
 } from '@chakra-ui/react';
 import PageLayout from '../components/PageLayout';
 import PricingConfigForm from '../components/PricingConfigForm';
 import { api, mixedGameApi } from '../services/api';
+import { getModelStatus } from '../services/modelService';
+import { useSystemConfig } from '../contexts/SystemConfigContext.jsx';
 
 const playerRoles = [
   { value: 'retailer', label: 'Retailer' },
@@ -45,28 +51,27 @@ const playerRoles = [
 
 const agentStrategies = [
   {
-    group: 'Basic Strategies',
+    group: 'Basic',
     options: [
-      { value: 'NAIVE', label: 'Naive' },
-      { value: 'BULLWHIP', label: 'Bullwhip' },
-      { value: 'CONSERVATIVE', label: 'Conservative' },
-      { value: 'RANDOM', label: 'Random' },
+      { value: 'NAIVE', label: 'Naive (heuristic)' },
+      { value: 'BULLWHIP', label: 'Bullwhip (heuristic)' },
+      { value: 'CONSERVATIVE', label: 'Conservative (heuristic)' },
+      { value: 'RANDOM', label: 'Random (heuristic)' },
     ]
   },
   {
-    group: 'Advanced Strategies',
-    options: [
-      { value: 'DEMAND_DRIVEN', label: 'Demand Driven' },
-      { value: 'COST_OPTIMIZATION', label: 'Cost Optimization' },
-    ]
-  },
-  {
-    group: 'AI-Powered (LLM)',
+    group: 'LLM',
     options: [
       { value: 'LLM_CONSERVATIVE', label: 'LLM - Conservative' },
       { value: 'LLM_BALANCED', label: 'LLM - Balanced' },
       { value: 'LLM_AGGRESSIVE', label: 'LLM - Aggressive' },
       { value: 'LLM_ADAPTIVE', label: 'LLM - Adaptive' },
+    ]
+  },
+  {
+    group: 'Daybreak',
+    options: [
+      { value: 'DAYBREAK', label: 'Daybreak Agent (GNN)' },
     ]
   }
 ];
@@ -78,10 +83,125 @@ const demandPatterns = [
   { value: 'constant', label: 'Constant' },
 ];
 
+// Controlled per-node policy editor
+const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
+  const [selected, setSelected] = useState('retailer');
+  const policies = value;
+  const current = policies[selected] || {};
+  const update = (field, val) => {
+    const next = { ...policies, [selected]: { ...policies[selected], [field]: val } };
+    onChange(next);
+  };
+
+  const margin = (current.price || 0) - (current.standard_cost || 0) - (current.variable_cost || 0);
+
+  return (
+    <Box>
+      <HStack spacing={4} mb={4}>
+        <FormControl maxW="xs">
+          <FormLabel>Node Type</FormLabel>
+          <Select value={selected} onChange={(e) => setSelected(e.target.value)}>
+            <option value="retailer">Retailer</option>
+            <option value="distributor">Distributor</option>
+            <option value="manufacturer">Manufacturer</option>
+            <option value="supplier">Supplier</option>
+          </Select>
+        </FormControl>
+        <Text color="gray.500" fontSize="sm">Configure policy values for the selected node.</Text>
+      </HStack>
+
+      <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={6}>
+        <FormControl>
+          <FormLabel>Order Leadtime (weeks)</FormLabel>
+          <NumberInput min={ranges.info_delay?.min ?? 0} max={ranges.info_delay?.max ?? 8} value={current.info_delay}
+            onChange={(v) => update('info_delay', parseInt(v) || 0)}>
+            <NumberInputField />
+            <NumberInputStepper>
+              <NumberIncrementStepper />
+              <NumberDecrementStepper />
+            </NumberInputStepper>
+          </NumberInput>
+        </FormControl>
+        <FormControl>
+          <FormLabel>Supply Leadtime (weeks)</FormLabel>
+          <NumberInput min={ranges.ship_delay?.min ?? 0} max={ranges.ship_delay?.max ?? 8} value={current.ship_delay}
+            onChange={(v) => update('ship_delay', parseInt(v) || 0)}>
+            <NumberInputField />
+            <NumberInputStepper>
+              <NumberIncrementStepper />
+              <NumberDecrementStepper />
+            </NumberInputStepper>
+          </NumberInput>
+        </FormControl>
+        <FormControl>
+          <FormLabel>Initial Inventory (units)</FormLabel>
+          <NumberInput min={ranges.init_inventory?.min ?? 0} max={ranges.init_inventory?.max ?? 1000} value={current.init_inventory}
+            onChange={(v) => update('init_inventory', parseInt(v) || 0)}>
+            <NumberInputField />
+            <NumberInputStepper>
+              <NumberIncrementStepper />
+              <NumberDecrementStepper />
+            </NumberInputStepper>
+          </NumberInput>
+        </FormControl>
+        <FormControl>
+          <FormLabel>Minimum Order Quantity</FormLabel>
+          <NumberInput min={ranges.min_order_qty?.min ?? 0} max={ranges.min_order_qty?.max ?? 1000} value={current.min_order_qty || 0}
+            onChange={(v) => update('min_order_qty', parseInt(v) || 0)}>
+            <NumberInputField />
+            <NumberInputStepper>
+              <NumberIncrementStepper />
+              <NumberDecrementStepper />
+            </NumberInputStepper>
+          </NumberInput>
+        </FormControl>
+        <FormControl>
+          <FormLabel>Price</FormLabel>
+          <NumberInput min={ranges.price?.min ?? 0} max={ranges.price?.max ?? 10000} step={0.01} precision={2} value={current.price}
+            onChange={(v) => update('price', parseFloat(v) || 0)}>
+            <NumberInputField />
+            <NumberInputStepper>
+              <NumberIncrementStepper />
+              <NumberDecrementStepper />
+            </NumberInputStepper>
+          </NumberInput>
+        </FormControl>
+        <FormControl>
+          <FormLabel>Standard Cost</FormLabel>
+          <NumberInput min={ranges.standard_cost?.min ?? 0} max={ranges.standard_cost?.max ?? 10000} step={0.01} precision={2} value={current.standard_cost}
+            onChange={(v) => update('standard_cost', parseFloat(v) || 0)}>
+            <NumberInputField />
+            <NumberInputStepper>
+              <NumberIncrementStepper />
+              <NumberDecrementStepper />
+            </NumberInputStepper>
+          </NumberInput>
+        </FormControl>
+        <FormControl>
+          <FormLabel>Variable Cost</FormLabel>
+          <NumberInput min={ranges.variable_cost?.min ?? 0} max={ranges.variable_cost?.max ?? 10000} step={0.01} precision={2} value={current.variable_cost}
+            onChange={(v) => update('variable_cost', parseFloat(v) || 0)}>
+            <NumberInputField />
+            <NumberInputStepper>
+              <NumberIncrementStepper />
+              <NumberDecrementStepper />
+            </NumberInputStepper>
+          </NumberInput>
+          <FormHelperText>Margin = price - std cost - variable cost</FormHelperText>
+        </FormControl>
+      </Grid>
+      <Text mt={2} fontSize="sm" color={margin >= 0 ? 'green.600' : 'red.600'}>
+        Margin: {margin.toFixed(2)}
+      </Text>
+    </Box>
+  );
+};
+
 const CreateMixedGame = () => {
-  const [gameName, setGameName] = useState('');
+  const [searchParams] = useSearchParams();
+  const [gameName, setGameName] = useState(searchParams.get('name') || '');
   const [maxRounds, setMaxRounds] = useState(20);
-  const [description, setDescription] = useState('');
+  const [description, setDescription] = useState(searchParams.get('description') || '');
   const [isPublic, setIsPublic] = useState(true);
   const [demandPattern] = useState(demandPatterns[0].value);
   const [pricingConfig, setPricingConfig] = useState({
@@ -90,9 +210,21 @@ const CreateMixedGame = () => {
     distributor: { selling_price: 60.0, standard_cost: 45.0 },
     factory: { selling_price: 45.0, standard_cost: 30.0 }
   });
+  // Policy/Simulation settings (bounded)
+  const [policy, setPolicy] = useState({
+    info_delay: 2,         // order delay (weeks)
+    ship_delay: 2,         // delivery delay (weeks)
+    init_inventory: 12,    // starting inventory per role
+    holding_cost: 0.5,     // per unit per week
+    backlog_cost: 1.0,     // per unit per week
+    max_inbound_per_link: 100, // shipment capacity
+    max_order: 100,
+  });
   const cardBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.700');
   const { user } = useAuth();
+  const [modelStatus, setModelStatus] = useState(null);
+  const { ranges: systemRanges } = useSystemConfig();
   const [availableUsers, setAvailableUsers] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
   
@@ -131,6 +263,68 @@ const CreateMixedGame = () => {
 
     fetchUsers();
   }, [toast]);
+
+  // Load Daybreak GNN model status
+  useEffect(() => {
+    (async () => {
+      try {
+        const status = await getModelStatus();
+        setModelStatus(status);
+      } catch (e) {
+        console.error('Failed to get model status', e);
+      }
+    })();
+  }, []);
+
+  // Optional prefill via query params for node policies (JSON-encoded)
+  useEffect(() => {
+    const np = searchParams.get('node_policies');
+    if (np) {
+      try {
+        const parsed = JSON.parse(np);
+        if (parsed && typeof parsed === 'object') setNodePolicies(parsed);
+      } catch {}
+    }
+    const sc = searchParams.get('system_config');
+    if (sc) {
+      try {
+        const parsed = JSON.parse(sc);
+        if (parsed && typeof parsed === 'object') setSystemConfig(parsed);
+      } catch {}
+    }
+    const pc = searchParams.get('pricing_config');
+    if (pc) {
+      try {
+        const parsed = JSON.parse(pc);
+        if (parsed && typeof parsed === 'object') setPricingConfig(parsed);
+      } catch {}
+    }
+    // Load system ranges from backend, then merge local defaults and localStorage
+    (async () => {
+      try {
+        const serverCfg = await mixedGameApi.getSystemConfig();
+        if (serverCfg && typeof serverCfg === 'object') setSystemConfig((prev)=> ({...prev, ...serverCfg}));
+      } catch {}
+    })();
+    // Load system ranges from localStorage if present
+    const stored = localStorage.getItem('systemConfigRanges');
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object') setSystemConfig((prev)=> ({...prev, ...parsed}));
+      } catch {}
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // If context ranges become available later, merge them
+  useEffect(() => {
+    if (systemRanges && Object.keys(systemRanges).length) {
+      setSystemConfig(prev => ({ ...prev, ...systemRanges }));
+    }
+  }, [systemRanges]);
+
+  const showSystemCfgHint = !systemConfig || Object.keys(systemConfig || {}).length === 0;
 
   const handlePlayerTypeChange = (index, type) => {
     setPlayers(players.map((player, i) => {
@@ -217,6 +411,9 @@ const CreateMixedGame = () => {
           type: demandPattern,
           params: {}
         },
+        node_policies: nodePolicies,
+        system_config: systemConfig,
+        global_policy: policy,
         pricing_config: {
           retailer: {
             selling_price: parseFloat(pricingConfig.retailer.selling_price),
@@ -240,7 +437,8 @@ const CreateMixedGame = () => {
           player_type: player.playerType,
           strategy: player.strategy,
           can_see_demand: player.canSeeDemand,
-          user_id: player.userId || null
+          user_id: player.userId || null,
+          llm_model: player.llmModel || null
         }))
       };
       
@@ -279,7 +477,7 @@ const CreateMixedGame = () => {
       // Navigate to the game board after a short delay
       setTimeout(() => {
         if (response && response.id) {
-          navigate(`/games/mixed/${response.id}`);
+          navigate(`/games/${response.id}`);
         } else {
           navigate('/games');
         }
@@ -300,7 +498,30 @@ const CreateMixedGame = () => {
   };
 
   return (
-    <PageLayout title="Create Mixed Game">
+    <PageLayout title="Mixed Game Definition">
+      {modelStatus && !modelStatus.is_trained && (
+        <Alert status="warning" variant="left-accent" mb={6} borderRadius="md">
+          <AlertIcon />
+          <Box>
+            <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
+            <AlertDescription fontSize="sm">
+              The Daybreak agent has not yet been trained, so it cannot be used until training completes. You may still select Basic (heuristics) or LLM agents.
+            </AlertDescription>
+          </Box>
+        </Alert>
+      )}
+      {(!systemConfig || Object.keys(systemConfig||{}).length === 0) && (
+        <Alert status="info" variant="left-accent" mb={4} borderRadius="md">
+          <AlertIcon />
+          <Box>
+            <AlertTitle>Using default ranges</AlertTitle>
+            <AlertDescription fontSize="sm">
+              You can define system-wide ranges for configuration variables in the System Configuration page.
+              <Button ml={3} size="sm" colorScheme="blue" variant="ghost" onClick={() => navigate('/system-config')}>Open System Config</Button>
+            </AlertDescription>
+          </Box>
+        </Alert>
+      )}
       <VStack as="form" onSubmit={handleCreateGame} spacing={6} align="stretch" maxW="4xl" mx="auto">
         <Tabs variant="enclosed" isFitted>
           <TabList mb="1em">
@@ -313,7 +534,7 @@ const CreateMixedGame = () => {
             <TabPanel p={0}>
               <VStack spacing={6}>
                 {/* Game Details Card */}
-                <Card variant="outline" bg={cardBg} borderColor={borderColor} w="100%">
+                <Card variant="outline" bg={cardBg} borderColor={borderColor} w="100%" className="card-surface pad-6">
                   <CardHeader pb={2}>
                     <Heading size="md">Game Settings</Heading>
                     <Text color="gray.500" fontSize="sm">Configure the basic settings for your game</Text>
@@ -385,20 +606,194 @@ const CreateMixedGame = () => {
                     </VStack>
                   </CardBody>
                 </Card>
+
+                {/* Policy Settings (bounded) */}
+                <Card variant="outline" bg={cardBg} borderColor={borderColor} w="100%" className="card-surface pad-6">
+                  <CardHeader pb={2}>
+                    <Heading size="md">Policy Settings</Heading>
+                    <Text color="gray.500" fontSize="sm">Lead times, inventory and cost parameters</Text>
+                  </CardHeader>
+                  <CardBody pt={0}>
+                    <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={6}>
+                      <FormControl>
+                        <FormLabel>Order Leadtime (weeks)</FormLabel>
+                        <NumberInput min={systemConfig.info_delay?.min ?? 0} max={systemConfig.info_delay?.max ?? 8} value={policy.info_delay}
+                          onChange={(v) => setPolicy((p) => ({ ...p, info_delay: parseInt(v) || 0 }))}>
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                      </FormControl>
+
+                      <FormControl>
+                        <FormLabel>Supply Leadtime (weeks)</FormLabel>
+                        <NumberInput min={systemConfig.ship_delay?.min ?? 0} max={systemConfig.ship_delay?.max ?? 8} value={policy.ship_delay}
+                          onChange={(v) => setPolicy((p) => ({ ...p, ship_delay: parseInt(v) || 0 }))}>
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                      </FormControl>
+
+                      <FormControl>
+                        <FormLabel>Initial Inventory (units)</FormLabel>
+                        <NumberInput min={systemConfig.init_inventory?.min ?? 0} max={systemConfig.init_inventory?.max ?? 1000} value={policy.init_inventory}
+                          onChange={(v) => setPolicy((p) => ({ ...p, init_inventory: parseInt(v) || 0 }))}>
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                      </FormControl>
+
+                      <FormControl>
+                        <FormLabel>Holding Cost (per unit/week)</FormLabel>
+                        <NumberInput min={systemConfig.holding_cost?.min ?? 0} max={systemConfig.holding_cost?.max ?? 100} step={0.1} precision={2} value={policy.holding_cost}
+                          onChange={(v) => setPolicy((p) => ({ ...p, holding_cost: parseFloat(v) || 0 }))}>
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                      </FormControl>
+
+                      <FormControl>
+                        <FormLabel>Backlog Cost (per unit/week)</FormLabel>
+                        <NumberInput min={systemConfig.backlog_cost?.min ?? 0} max={systemConfig.backlog_cost?.max ?? 200} step={0.1} precision={2} value={policy.backlog_cost}
+                          onChange={(v) => setPolicy((p) => ({ ...p, backlog_cost: parseFloat(v) || 0 }))}>
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                      </FormControl>
+
+                      <FormControl>
+                        <FormLabel>Shipment Capacity (per link)</FormLabel>
+                        <NumberInput min={systemConfig.max_inbound_per_link?.min ?? 10} max={systemConfig.max_inbound_per_link?.max ?? 2000} value={policy.max_inbound_per_link}
+                          onChange={(v) => setPolicy((p) => ({ ...p, max_inbound_per_link: parseInt(v) || 0 }))}>
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                      </FormControl>
+
+                      <FormControl>
+                        <FormLabel>Max Order (units)</FormLabel>
+                        <NumberInput min={systemConfig.max_order?.min ?? 10} max={systemConfig.max_order?.max ?? 2000} value={policy.max_order}
+                          onChange={(v) => setPolicy((p) => ({ ...p, max_order: parseInt(v) || 0 }))}>
+                          <NumberInputField />
+                          <NumberInputStepper>
+                            <NumberIncrementStepper />
+                            <NumberDecrementStepper />
+                          </NumberInputStepper>
+                        </NumberInput>
+                      </FormControl>
+                    </Grid>
+                    <Text color="gray.500" fontSize="xs" mt={2}>
+                      Bounds chosen to reflect common Beer Game settings; adjust as needed.
+                    </Text>
+
+                    <Box mt={6}>
+                      <Heading size="sm" mb={2}>Per-Node Policies</Heading>
+                      <Text color="gray.500" fontSize="sm" mb={4}>
+                        Select a node type and edit its leadtimes and costs. Daybreak agent availability depends on training status.
+                      </Text>
+                      <HStack justify="flex-end" mb={2}>
+                        <Button size="sm" variant="outline" onClick={() => {
+                          const mid = (k, fb=0) => { const r = systemConfig[k] || {}; const min = Number(r.min ?? fb); const max = Number(r.max ?? fb); return Math.round((min + (max - min)/2)); };
+                          const priceMid = () => { const r = systemConfig.price || {}; const min = Number(r.min ?? 0); const max = Number(r.max ?? 0); return (min + (max - min)/2); };
+                          const p = Math.round(priceMid() * 100)/100;
+                          const stdMin = Number(systemConfig.standard_cost?.min ?? 0);
+                          const vcMin = Number(systemConfig.variable_cost?.min ?? 0);
+                          const defaults = (price) => ({ info_delay: mid('info_delay', 0), ship_delay: mid('ship_delay', 0), init_inventory: mid('init_inventory', 12), min_order_qty: mid('min_order_qty', 0), price, standard_cost: Math.max(stdMin, Math.round(price * 0.8 * 100)/100), variable_cost: Math.max(vcMin, Math.round(price * 0.1 * 100)/100) });
+                          setNodePolicies({
+                            retailer: defaults(p),
+                            distributor: defaults(p),
+                            manufacturer: defaults(p),
+                            supplier: defaults(p),
+                          });
+                        }}>
+                          Reset Node Policies to Server Defaults
+                        </Button>
+                      </HStack>
+                      <PerNodePolicyEditor value={nodePolicies} onChange={setNodePolicies} ranges={systemConfig} />
+                    </Box>
+                  </CardBody>
+                </Card>
+
+                {/* System Configuration Ranges */}
+                <Card variant="outline" bg={cardBg} borderColor={borderColor} w="100%" className="card-surface pad-6">
+                  <CardHeader pb={2}>
+                    <Heading size="md">System Configuration</Heading>
+                    <Text color="gray.500" fontSize="sm">Define permissible ranges for configuration variables</Text>
+                    <HStack mt={2}>
+                      <Button size="sm" variant="outline" onClick={() => setSystemConfig(prev => ({ ...prev, ...systemRanges }))}>
+                        Use System Ranges
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => navigate('/system-config')}>
+                        Edit in System Config
+                      </Button>
+                    </HStack>
+                  </CardHeader>
+                  <CardBody pt={0}>
+                    <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={6}>
+                      {Object.entries(systemConfig).map(([key, rng]) => (
+                        <HStack key={key} spacing={3} align="flex-end">
+                          <FormControl>
+                            <FormLabel textTransform="capitalize">{key.replaceAll('_',' ') } Min</FormLabel>
+                            <NumberInput value={rng.min} onChange={(v)=> setSystemConfig(s=> ({...s, [key]: { ...s[key], min: parseFloat(v)||0 }}))}>
+                              <NumberInputField />
+                            </NumberInput>
+                          </FormControl>
+                          <FormControl>
+                            <FormLabel textTransform="capitalize">{key.replaceAll('_',' ') } Max</FormLabel>
+                            <NumberInput value={rng.max} onChange={(v)=> setSystemConfig(s=> ({...s, [key]: { ...s[key], max: parseFloat(v)||0 }}))}>
+                              <NumberInputField />
+                            </NumberInput>
+                          </FormControl>
+                        </HStack>
+                      ))}
+                    </Grid>
+                  </CardBody>
+                </Card>
               </VStack>
             </TabPanel>
             
             <TabPanel p={0}>
-              <PricingConfigForm 
-                pricingConfig={pricingConfig}
-                onChange={setPricingConfig}
-              />
+              <HStack justify="space-between" mb={3}>
+                <Box />
+                <Button size="sm" variant="outline" onClick={() => {
+                  const priceMid = (k) => { const r = systemConfig[k] || {}; const min = Number(r.min ?? 0); const max = Number(r.max ?? 0) || min; return min + (max - min)/2; };
+                  const p = Math.round(priceMid('price') * 100) / 100;
+                  const stdMin = Number(systemConfig.standard_cost?.min ?? 0);
+                  const std = Math.max(stdMin, Math.round(p * 0.8 * 100)/100);
+                  setPricingConfig({
+                    retailer: { selling_price: p, standard_cost: std },
+                    wholesaler: { selling_price: p, standard_cost: std },
+                    distributor: { selling_price: p, standard_cost: std },
+                    factory: { selling_price: p, standard_cost: std },
+                  });
+                }}>
+                  Reset Pricing to Server Defaults
+                </Button>
+              </HStack>
+              <PricingConfigForm pricingConfig={pricingConfig} onChange={setPricingConfig} />
             </TabPanel>
             
             <TabPanel p={0}>
 
               {/* Player Configuration Card */}
-              <Card variant="outline" bg={cardBg} borderColor={borderColor}>
+              <Card variant="outline" bg={cardBg} borderColor={borderColor} className="card-surface pad-6">
                 <CardHeader>
                   <Heading size="md">Player Configuration</Heading>
                   <Text color="gray.500" fontSize="sm">
@@ -517,7 +912,7 @@ const CreateMixedGame = () => {
 
                   {player.playerType === 'ai' && (
                     <FormControl mt={4}>
-                      <FormLabel>AI Strategy</FormLabel>
+                      <FormLabel>Agent Strategy</FormLabel>
                       <Select 
                         value={player.strategy}
                         onChange={(e) => handleStrategyChange(index, e.target.value)}
@@ -533,24 +928,42 @@ const CreateMixedGame = () => {
                         {agentStrategies.map((group, groupIndex) => (
                           <optgroup key={groupIndex} label={group.group}>
                             {group.options.map((option) => (
-                              <option key={option.value} value={option.value}>
+                              <option key={option.value} value={option.value} disabled={option.value === 'DAYBREAK' && !(modelStatus && modelStatus.is_trained)}>
                                 {option.label}
                               </option>
                             ))}
                           </optgroup>
                         ))}
                       </Select>
+                      {/* LLM Picker */}
+                      {String(player.strategy).startsWith('LLM_') && (
+                        <Box mt={3}>
+                          <FormLabel>Choose LLM</FormLabel>
+                          <Select
+                            placeholder="Select LLM"
+                            value={player.llmModel || ''}
+                            onChange={(e) => setPlayers(players.map((p,i)=> i===index? { ...p, llmModel: e.target.value }: p))}
+                          >
+                            <option value="gpt-4o">GPT-4o</option>
+                            <option value="gpt-4o-mini">GPT-4o Mini</option>
+                            <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
+                            <option value="claude-3-5-haiku">Claude 3.5 Haiku</option>
+                          </Select>
+                          <FormHelperText>Pick the LLM backend for this agent.</FormHelperText>
+                        </Box>
+                      )}
                       <FormHelperText>
-                        {player.strategy === 'NAIVE' && 'Simple strategy that matches orders to demand'}
+                        {player.strategy === 'NAIVE' && 'Basic heuristic that matches orders to demand'}
                         {player.strategy === 'BULLWHIP' && 'Tends to overreact to demand changes'}
                         {player.strategy === 'CONSERVATIVE' && 'Maintains stable inventory levels'}
                         {player.strategy === 'RANDOM' && 'Makes random order decisions'}
-                        {player.strategy === 'DEMAND_DRIVEN' && 'Advanced strategy that analyzes demand patterns'}
-                        {player.strategy === 'COST_OPTIMIZATION' && 'Optimizes for lowest possible costs'}
+                        {player.strategy === 'DEMAND_DRIVEN' && 'LLM: demand-driven analysis'}
+                        {player.strategy === 'COST_OPTIMIZATION' && 'LLM: optimizes for lower cost'}
                         {player.strategy === 'LLM_CONSERVATIVE' && 'AI-powered strategy using language models'}
                         {player.strategy === 'LLM_BALANCED' && 'Advanced AI with learning capabilities'}
                         {player.strategy === 'LLM_AGGRESSIVE' && 'Aggressive AI strategy'}
                         {player.strategy === 'LLM_ADAPTIVE' && 'Adaptive AI strategy'}
+                        {player.strategy === 'DAYBREAK' && !(modelStatus && modelStatus.is_trained) && 'Daybreak (GNN) is not trained yet and cannot be used'}
                       </FormHelperText>
                     </FormControl>
                   )}

@@ -44,6 +44,7 @@ const PricingConfigForm = ({ pricingConfig, onChange }) => {
             <FormLabel>Selling Price</FormLabel>
             <NumberInput 
               min={0.01} 
+              max={10000}
               step={0.01}
               precision={2}
               value={pricingConfig[role]?.selling_price || ''}
@@ -61,6 +62,7 @@ const PricingConfigForm = ({ pricingConfig, onChange }) => {
             <FormLabel>Standard Cost</FormLabel>
             <NumberInput 
               min={0.01} 
+              max={10000}
               step={0.01}
               precision={2}
               value={pricingConfig[role]?.standard_cost || ''}
@@ -90,7 +92,7 @@ const PricingConfigForm = ({ pricingConfig, onChange }) => {
   );
 
   return (
-    <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6}>
+    <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6} className="card-surface pad-6">
       <CardHeader>
         <Heading size="md">Pricing Configuration</Heading>
         <Text color="gray.500" fontSize="sm">
@@ -99,10 +101,10 @@ const PricingConfigForm = ({ pricingConfig, onChange }) => {
       </CardHeader>
       <CardBody pt={0}>
         <VStack spacing={4} align="stretch">
-          {renderRolePricing('retailer', 'Retailer')}
-          {renderRolePricing('wholesaler', 'Wholesaler')}
-          {renderRolePricing('distributor', 'Distributor')}
-          {renderRolePricing('factory', 'Factory')}
+          <Box className="card-surface pad-6">{renderRolePricing('retailer', 'Retailer')}</Box>
+          <Box className="card-surface pad-6">{renderRolePricing('wholesaler', 'Wholesaler')}</Box>
+          <Box className="card-surface pad-6">{renderRolePricing('distributor', 'Distributor')}</Box>
+          <Box className="card-surface pad-6">{renderRolePricing('factory', 'Factory')}</Box>
         </VStack>
       </CardBody>
     </Card>

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { 
@@ -40,10 +41,22 @@ ChartJS.register(
 
 const AdminDashboard = () => {
   const { isAdmin } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [recentUsers, setRecentUsers] = useState([]);
   const [recentGames, setRecentGames] = useState([]);
+  const [gameConfigs, setGameConfigs] = useState({});
+  const [showConfigFor, setShowConfigFor] = useState(null);
+  const [editing, setEditing] = useState(false);
+  const [editingPolicies, setEditingPolicies] = useState({});
+  const [editingRanges, setEditingRanges] = useState(false);
+  const [rangeEdits, setRangeEdits] = useState({});
+  const [showRangesModal, setShowRangesModal] = useState(false);
+  const [editingPricing, setEditingPricing] = useState(false);
+  const [pricingEdits, setPricingEdits] = useState({});
+  const [editingGlobal, setEditingGlobal] = useState(false);
+  const [globalEdits, setGlobalEdits] = useState({});
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
   const [error, setError] = useState(null);
@@ -105,7 +118,17 @@ const AdminDashboard = () => {
 
         setStats(mockStats);
         setRecentUsers(mockRecentUsers);
-        setRecentGames(mockRecentGames);
+        try {
+          const games = await mixedGameApi.getGames();
+          setRecentGames(games || []);
+          const map = {};
+          (games || []).forEach(g => {
+            map[g.id] = { node_policies: g.node_policies || {}, system_config: g.system_config || {} };
+          });
+          setGameConfigs(map);
+        } catch (e) {
+          setRecentGames([]);
+        }
         setError(null);
       } catch (err) {
         console.error('Failed to fetch admin data:', err);
@@ -118,11 +141,27 @@ const AdminDashboard = () => {
     fetchAdminData();
   }, []);
 
+  // If navigated with ?openSystemRanges=1, open ranges modal with server config
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    if (params.get('openSystemRanges') === '1') {
+      (async () => {
+        try {
+          const cfg = await mixedGameApi.getSystemConfig();
+          setRangeEdits(cfg || {});
+        } catch {
+          setRangeEdits({});
+        } finally {
+          setShowRangesModal(true);
+        }
+      })();
+    }
+  }, [location.search]);
+
   // Stats card component
   const StatCard = ({ title, value, icon: Icon, change, changeType = 'neutral', loading = false }) => (
-    <div className="bg-white overflow-hidden shadow rounded-lg">
-      <div className="p-5
-      ">
+    <div className="card-surface overflow-hidden rounded-lg">
+      <div className="pad-6">
         <div className="flex items-center">
           <div className="flex-shrink-0 bg-indigo-500 rounded-md p-3">
             <Icon className="h-6 w-6 text-white" aria-hidden="true" />
@@ -282,15 +321,15 @@ const AdminDashboard = () => {
           <div className="h-8 bg-gray-200 rounded w-1/4"></div>
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="bg-white p-6 rounded-lg shadow h-32">
+              <div key={i} className="card-surface pad-6 rounded-lg h-32">
                 <div className="h-4 bg-gray-200 rounded w-3/4 mb-4"></div>
                 <div className="h-8 bg-gray-200 rounded w-1/2"></div>
               </div>
             ))}
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <div className="bg-white p-6 rounded-lg shadow h-80"></div>
-            <div className="bg-white p-6 rounded-lg shadow h-80"></div>
+            <div className="card-surface pad-6 rounded-lg h-80"></div>
+            <div className="card-surface pad-6 rounded-lg h-80"></div>
           </div>
         </div>
       </div>
@@ -320,17 +359,33 @@ const AdminDashboard = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white shadow">
+      <div className="card-surface">
         <div className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center">
             <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
             <div className="flex space-x-3">
               <button
                 type="button"
+                onClick={() => navigate('/users')}
                 className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
               >
+                <UsersIcon className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
+                Users
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowRangesModal(true)}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+              >
                 <CogIcon className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
-                Settings
+                Edit Ranges
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate('/admin/training')}
+                className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+              >
+                Training
               </button>
             </div>
           </div>
@@ -402,20 +457,20 @@ const AdminDashboard = () => {
 
             {/* Charts Row 1 */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <div className="bg-white p-6 rounded-lg shadow">
+              <div className="card-surface pad-6 rounded-lg">
                 <h3 className="text-lg font-medium text-gray-900 mb-4">User Activity (Last 7 Days)</h3>
                 <div className="h-80">
                   <Line data={userActivityData} options={chartOptions} />
                 </div>
               </div>
               <div className="grid grid-rows-2 gap-6">
-                <div className="bg-white p-6 rounded-lg shadow">
+                <div className="card-surface pad-6 rounded-lg">
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Game Status</h3>
                   <div className="h-64">
                     <Pie data={gameStatusData} options={chartOptions} />
                   </div>
                 </div>
-                <div className="bg-white p-6 rounded-lg shadow">
+                <div className="card-surface pad-6 rounded-lg">
                   <h3 className="text-lg font-medium text-gray-900 mb-4">User Distribution</h3>
                   <div className="h-64">
                     <Pie data={userDistributionData} options={chartOptions} />
@@ -425,15 +480,15 @@ const AdminDashboard = () => {
             </div>
 
             {/* Recent Activity */}
-            <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-              <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
+            <div className="card-surface overflow-hidden sm:rounded-lg">
+              <div className="pad-6 border-b border-gray-200">
                 <h3 className="text-lg leading-6 font-medium text-gray-900">Recent Activity</h3>
                 <p className="mt-1 max-w-2xl text-sm text-gray-500">Latest actions and events in the system</p>
               </div>
-              <div className="bg-white overflow-hidden">
+              <div className="overflow-hidden">
                 <ul className="divide-y divide-gray-200">
                   {[1, 2, 3, 4, 5].map((i) => (
-                    <li key={i} className="px-4 py-4 sm:px-6">
+                    <li key={i} className="pad-6">
                       <div className="flex items-center justify-between">
                         <p className="text-sm font-medium text-indigo-600 truncate">
                           New user registered: user{Math.floor(Math.random() * 1000)}
@@ -454,8 +509,8 @@ const AdminDashboard = () => {
 
         {/* Users Tab */}
         {activeTab === 'users' && (
-          <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-            <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
+          <div className="card-surface overflow-hidden sm:rounded-lg">
+            <div className="pad-6 border-b border-gray-200">
               <div className="flex justify-between items-center">
                 <div>
                   <h3 className="text-lg leading-6 font-medium text-gray-900">User Management</h3>
@@ -571,8 +626,8 @@ const AdminDashboard = () => {
 
         {/* Games Tab */}
         {activeTab === 'games' && (
-          <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-            <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
+          <div className="table-surface overflow-hidden sm:rounded-lg">
+            <div className="pad-6 border-b border-gray-200">
               <h3 className="text-lg leading-6 font-medium text-gray-900">Game Management</h3>
               <p className="mt-1 max-w-2xl text-sm text-gray-500">View and manage active and completed games</p>
             </div>
@@ -604,8 +659,9 @@ const AdminDashboard = () => {
                   {recentGames.map((game) => (
                     <tr key={game.id}>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">{game.name}</div>
-                        <div className="text-sm text-gray-500">ID: {game.id}</div>
+                        <div className="text-sm font-medium text-gray-900 truncate max-w-xs">
+                          {game.name} <span className="text-gray-500">(ID: {game.id})</span>
+                        </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <GameStatusBadge status={game.status} />
@@ -614,15 +670,25 @@ const AdminDashboard = () => {
                         <div className="text-sm text-gray-900">{game.players}</div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm text-gray-900">
-                          {new Date(game.started).toLocaleDateString()}
-                        </div>
-                        <div className="text-sm text-gray-500">
-                          {new Date(game.started).toLocaleTimeString()}
+                        <div className="text-sm text-gray-900 truncate max-w-[12rem]">
+                          {new Date(game.started).toLocaleDateString()} {new Date(game.started).toLocaleTimeString()}
                         </div>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {game.duration}
+                        {game.duration || '-'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-indigo-600">
+                        <button onClick={() => {
+                          const next = showConfigFor === game.id ? null : game.id;
+                          setShowConfigFor(next);
+                          setEditing(false);
+                          if (next) setEditingPolicies(JSON.parse(JSON.stringify((gameConfigs[game.id]||{}).node_policies||{})));
+                          if (next) setRangeEdits(JSON.parse(JSON.stringify((gameConfigs[game.id]||{}).system_config||{})));
+                          if (next) setPricingEdits(JSON.parse(JSON.stringify((gameConfigs[game.id]||{}).pricing_config||{})));
+                          if (next) setGlobalEdits(JSON.parse(JSON.stringify((gameConfigs[game.id]||{}).global_policy||{})));
+                        }} className="underline">
+                          View Config
+                        </button>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <button className="text-indigo-600 hover:text-indigo-900 mr-4">View</button>
@@ -633,6 +699,256 @@ const AdminDashboard = () => {
                 </tbody>
               </table>
             </div>
+            {showConfigFor && (
+              <div className="pad-6 border-t border-gray-200">
+                <h4 className="text-sm font-medium text-gray-900 mb-4">Configuration for Game #{showConfigFor}</h4>
+                <div className="flex justify-end mb-4">
+                  {!editing ? (
+                    <button className="text-indigo-600 hover:text-indigo-800 text-sm" onClick={() => setEditing(true)}>Edit Policies</button>
+                  ) : (
+                    <div className="space-x-3">
+                      <button className="text-gray-600 hover:text-gray-800 text-sm" onClick={() => { setEditingPolicies(JSON.parse(JSON.stringify((gameConfigs[showConfigFor]||{}).node_policies||{}))); }}>Revert</button>
+                      <button className="text-gray-600 hover:text-gray-800 text-sm" onClick={() => { setEditing(false); setEditingPolicies(JSON.parse(JSON.stringify((gameConfigs[showConfigFor]||{}).node_policies||{}))); }}>Cancel</button>
+                      <button className="text-white bg-indigo-600 px-3 py-1 rounded text-sm" onClick={async () => {
+                        await mixedGameApi.updateMixedGame(showConfigFor, { node_policies: editingPolicies });
+                        const games = await mixedGameApi.getGames();
+                        const map = {};
+                        (games || []).forEach(g => { map[g.id] = { node_policies: g.node_policies || {}, system_config: g.system_config || {}, pricing_config: g.pricing_config || {}, global_policy: g.global_policy || {} }; });
+                        setGameConfigs(map);
+                        setEditing(false);
+                      }}>Save</button>
+                    </div>
+                  )}
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                  {/* Node Policies */}
+                  <div className="card-surface pad-6">
+                    <h5 className="text-sm font-semibold text-gray-900 mb-2">Per-Node Policies</h5>
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Node</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Order LT</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Supply LT</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Init Inv</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Min Ord</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Std Cost</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Var Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {Object.entries(editing ? editingPolicies : (gameConfigs[showConfigFor] || {}).node_policies || {}).map(([node, pol]) => (
+                          <tr key={node}>
+                            <td className="px-3 py-2 text-sm">{node}</td>
+                            {['info_delay','ship_delay','init_inventory','min_order_qty','price','standard_cost','variable_cost'].map((k) => (
+                              <td key={k} className="px-3 py-2 text-sm">
+                                {!editing ? (
+                                  <span>{pol[k]}</span>
+                                ) : (
+                                  <input type="number" value={editingPolicies[node]?.[k] ?? ''} onChange={(e) => setEditingPolicies(prev => ({...prev, [node]: { ...(prev[node]||{}), [k]: e.target.valueAsNumber }}))} className="w-24 border border-gray-300 rounded px-2 py-1 text-sm" />
+                                )}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* System Ranges */}
+                  <div className="card-surface pad-6">
+                    <div className="flex justify-between items-center mb-2">
+                      <h5 className="text-sm font-semibold text-gray-900">System Ranges</h5>
+                      {!editingRanges ? (
+                        <div className="space-x-3">
+                          <button className="text-indigo-600 hover:text-indigo-800 text-sm" onClick={() => setEditingRanges(true)}>Quick Edit</button>
+                          <button className="text-indigo-600 hover:text-indigo-800 text-sm" onClick={() => setShowRangesModal(true)}>Open Editor</button>
+                        </div>
+                      ) : (
+                        <div className="space-x-3">
+                          <button className="text-gray-600 hover:text-gray-800 text-sm" onClick={() => { setRangeEdits(JSON.parse(JSON.stringify((gameConfigs[showConfigFor]||{}).system_config||{}))); }}>Revert</button>
+                          <button className="text-gray-600 hover:text-gray-800 text-sm" onClick={() => { setEditingRanges(false); setRangeEdits(JSON.parse(JSON.stringify((gameConfigs[showConfigFor]||{}).system_config||{}))); }}>Cancel</button>
+                          <button className="text-white bg-indigo-600 px-3 py-1 rounded text-sm" onClick={async () => {
+                            await mixedGameApi.saveSystemConfig(rangeEdits);
+                            const games = await mixedGameApi.getGames();
+                            const map = {};
+                            (games || []).forEach(g => { map[g.id] = { node_policies: g.node_policies || {}, system_config: g.system_config || {}, pricing_config: g.pricing_config || {}, global_policy: g.global_policy || {} }; });
+                            setGameConfigs(map);
+                            setEditingRanges(false);
+                          }}>Save</button>
+                        </div>
+                      )}
+                    </div>
+                    {!editingRanges ? (
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        {Object.entries((gameConfigs[showConfigFor] || {}).system_config || {}).map(([k, rng]) => (
+                          <div key={k} className="flex items-center justify-between bg-gray-50 rounded px-3 py-2">
+                            <span className="text-gray-600 truncate mr-2">{k.replaceAll('_',' ')}</span>
+                            <span className="font-medium">{rng.min} – {rng.max}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        {Object.entries(rangeEdits || {}).map(([k, rng]) => (
+                          <div key={k} className="bg-gray-50 rounded px-3 py-2 flex items-center justify-between">
+                            <span className="text-gray-600 truncate mr-2">{k.replaceAll('_',' ')}</span>
+                            <span className="space-x-2">
+                              <input type="number" className="w-20 border border-gray-300 rounded px-2 py-1 text-sm" value={rng.min} onChange={e => setRangeEdits(prev => ({...prev, [k]: { ...prev[k], min: e.target.valueAsNumber }}))} />
+                              <input type="number" className="w-20 border border-gray-300 rounded px-2 py-1 text-sm" value={rng.max} onChange={e => setRangeEdits(prev => ({...prev, [k]: { ...prev[k], max: e.target.valueAsNumber }}))} />
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Pricing Config + Global Policy */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+                  <div className="card-surface pad-6">
+                    <div className="flex justify-between items-center mb-2">
+                      <h5 className="text-sm font-semibold text-gray-900">Pricing Config</h5>
+                      {!editingPricing ? (
+                        <button className="text-indigo-600 hover:text-indigo-800 text-sm" onClick={() => setEditingPricing(true)}>Edit Pricing</button>
+                      ) : (
+                        <div className="space-x-3">
+                          <button className="text-gray-600 hover:text-gray-800 text-sm" onClick={() => { setPricingEdits(JSON.parse(JSON.stringify((gameConfigs[showConfigFor]||{}).pricing_config||{}))); }}>Revert</button>
+                          <button className="text-gray-600 hover:text-gray-800 text-sm" onClick={() => { setEditingPricing(false); setPricingEdits(JSON.parse(JSON.stringify((gameConfigs[showConfigFor]||{}).pricing_config||{}))); }}>Cancel</button>
+                          <button className="text-white bg-indigo-600 px-3 py-1 rounded text-sm" onClick={async () => {
+                            await mixedGameApi.updateMixedGame(showConfigFor, { pricing_config: pricingEdits });
+                            const games = await mixedGameApi.getGames();
+                            const map = {};
+                            (games || []).forEach(g => { map[g.id] = { node_policies: g.node_policies || {}, system_config: g.system_config || {}, pricing_config: g.pricing_config || {}, global_policy: g.global_policy || {} }; });
+                            setGameConfigs(map);
+                            setEditingPricing(false);
+                          }}>Save</button>
+                        </div>
+                      )}
+                    </div>
+                    <table className="min-w-full divide-y divide-gray-200">
+                      <thead className="bg-gray-50">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
+                          <th className="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Std Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-200">
+                        {Object.entries(editingPricing ? pricingEdits : (gameConfigs[showConfigFor] || {}).pricing_config || {}).map(([role, cfg]) => (
+                          <tr key={role}>
+                            <td className="px-3 py-2 text-sm capitalize">{role}</td>
+                            <td className="px-3 py-2 text-sm">
+                              {!editingPricing ? (
+                                <span>{cfg.selling_price}</span>
+                              ) : (
+                                <input type="number" className="w-24 border border-gray-300 rounded px-2 py-1 text-sm" value={pricingEdits[role]?.selling_price ?? ''} onChange={e => setPricingEdits(prev => ({...prev, [role]: { ...(prev[role]||{}), selling_price: e.target.valueAsNumber }}))} />
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-sm">
+                              {!editingPricing ? (
+                                <span>{cfg.standard_cost}</span>
+                              ) : (
+                                <input type="number" className="w-24 border border-gray-300 rounded px-2 py-1 text-sm" value={pricingEdits[role]?.standard_cost ?? ''} onChange={e => setPricingEdits(prev => ({...prev, [role]: { ...(prev[role]||{}), standard_cost: e.target.valueAsNumber }}))} />
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="card-surface pad-6">
+                    <div className="flex justify-between items-center mb-2">
+                      <h5 className="text-sm font-semibold text-gray-900">Global Policy</h5>
+                      {!editingGlobal ? (
+                        <button className="text-indigo-600 hover:text-indigo-800 text-sm" onClick={() => setEditingGlobal(true)}>Edit Global</button>
+                      ) : (
+                        <div className="space-x-3">
+                          <button className="text-gray-600 hover:text-gray-800 text-sm" onClick={() => { setGlobalEdits(JSON.parse(JSON.stringify((gameConfigs[showConfigFor]||{}).global_policy||{}))); }}>Revert</button>
+                          <button className="text-gray-600 hover:text-gray-800 text-sm" onClick={() => { setEditingGlobal(false); setGlobalEdits(JSON.parse(JSON.stringify((gameConfigs[showConfigFor]||{}).global_policy||{}))); }}>Cancel</button>
+                          <button className="text-white bg-indigo-600 px-3 py-1 rounded text-sm" onClick={async () => {
+                            await mixedGameApi.updateMixedGame(showConfigFor, { global_policy: globalEdits });
+                            const games = await mixedGameApi.getGames();
+                            const map = {};
+                            (games || []).forEach(g => { map[g.id] = { node_policies: g.node_policies || {}, system_config: g.system_config || {}, pricing_config: g.pricing_config || {}, global_policy: g.global_policy || {} }; });
+                            setGameConfigs(map);
+                            setEditingGlobal(false);
+                          }}>Save</button>
+                        </div>
+                      )}
+                    </div>
+                    {!editingGlobal ? (
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        {Object.entries((gameConfigs[showConfigFor] || {}).global_policy || {}).map(([k, v]) => (
+                          <div key={k} className="flex items-center justify-between bg-gray-50 rounded px-3 py-2">
+                            <span className="text-gray-600 truncate mr-2">{k.replaceAll('_',' ')}</span>
+                            <span className="font-medium">{String(v)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 gap-3 text-sm">
+                        {Object.entries(globalEdits || {}).map(([k, v]) => (
+                          <div key={k} className="bg-gray-50 rounded px-3 py-2 flex items-center justify-between">
+                            <span className="text-gray-600 truncate mr-2">{k.replaceAll('_',' ')}</span>
+                            <input type="number" className="w-24 border border-gray-300 rounded px-2 py-1 text-sm" value={globalEdits[k] ?? ''} onChange={e => setGlobalEdits(prev => ({...prev, [k]: e.target.valueAsNumber}))} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Ranges Modal */}
+              {showRangesModal && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-40">
+                  <div className="bg-white rounded-lg shadow-xl w-full max-w-3xl">
+                    <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200">
+                      <h4 className="text-base font-semibold">Edit System Ranges</h4>
+                      <button className="text-gray-500 hover:text-gray-700" onClick={() => { setShowRangesModal(false); setRangeEdits(JSON.parse(JSON.stringify((gameConfigs[showConfigFor]||{}).system_config||{}))); }}>✕</button>
+                    </div>
+                    <div className="p-4 max-h-[70vh] overflow-auto">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {Object.entries(rangeEdits || {}).map(([k, rng]) => {
+                          const orig = ((gameConfigs[showConfigFor]||{}).system_config||{})[k] || {};
+                          const changed = (rng?.min !== orig?.min) || (rng?.max !== orig?.max);
+                          const invalid = Number.isFinite(rng?.min) && Number.isFinite(rng?.max) && rng.min > rng.max;
+                          return (
+                            <div key={k} className={`rounded border ${invalid? 'border-red-300 bg-red-50' : changed ? 'border-yellow-300 bg-yellow-50' : 'border-gray-200 bg-gray-50'} p-3`}>
+                              <div className="text-sm text-gray-700 mb-2 capitalize">{k.replaceAll('_',' ')}</div>
+                              <div className="flex items-center space-x-2">
+                                <div className="flex-1">
+                                  <label className="block text-xs text-gray-500 mb-1">Min</label>
+                                  <input type="number" className="w-full border border-gray-300 rounded px-2 py-1 text-sm" value={rng.min} onChange={(e)=> setRangeEdits(prev => ({...prev, [k]: { ...prev[k], min: e.target.valueAsNumber }}))} />
+                                </div>
+                                <div className="flex-1">
+                                  <label className="block text-xs text-gray-500 mb-1">Max</label>
+                                  <input type="number" className="w-full border border-gray-300 rounded px-2 py-1 text-sm" value={rng.max} onChange={(e)=> setRangeEdits(prev => ({...prev, [k]: { ...prev[k], max: e.target.valueAsNumber }}))} />
+                                </div>
+                              </div>
+                              {invalid && <div className="mt-1 text-xs text-red-600">Min must be ≤ Max</div>}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="px-4 py-3 border-t border-gray-200 flex justify-end space-x-2">
+                      <button className="text-gray-600 hover:text-gray-800 text-sm" onClick={() => { setShowRangesModal(false); setRangeEdits(JSON.parse(JSON.stringify((gameConfigs[showConfigFor]||{}).system_config||{}))); }}>Cancel</button>
+                      <button className="text-white bg-indigo-600 px-3 py-1 rounded text-sm disabled:opacity-50" disabled={Object.values(rangeEdits||{}).some(r => (r?.min ?? 0) > (r?.max ?? 0))} onClick={async () => {
+                        await mixedGameApi.saveSystemConfig(rangeEdits);
+                        const games = await mixedGameApi.getGames();
+                        const map = {};
+                        (games || []).forEach(g => { map[g.id] = { node_policies: g.node_policies || {}, system_config: g.system_config || {}, pricing_config: g.pricing_config || {}, global_policy: g.global_policy || {} }; });
+                        setGameConfigs(map);
+                        setShowRangesModal(false);
+                      }}>Save</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            )}
             <div className="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
               <div className="flex-1 flex justify-between sm:hidden">
                 <button className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
@@ -677,12 +993,12 @@ const AdminDashboard = () => {
 
         {/* Security Tab */}
         {activeTab === 'security' && (
-          <div className="bg-white shadow overflow-hidden sm:rounded-lg">
-            <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
+          <div className="card-surface overflow-hidden sm:rounded-lg">
+            <div className="pad-6 border-b border-gray-200">
               <h3 className="text-lg leading-6 font-medium text-gray-900">Security Settings</h3>
               <p className="mt-1 max-w-2xl text-sm text-gray-500">Manage security settings and access controls</p>
             </div>
-            <div className="px-4 py-5 sm:p-6">
+            <div className="pad-6">
               <div className="space-y-6">
                 <div className="md:grid md:grid-cols-3 md:gap-6">
                   <div className="md:col-span-1">

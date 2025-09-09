@@ -27,7 +27,7 @@ import {
   useColorModeValue,
   Tooltip
 } from '@chakra-ui/react';
-import { AddIcon, DeleteIcon, EditIcon } from '@chakra-ui/icons';
+import { AddIcon, DeleteIcon, EditIcon, UnlockIcon } from '@chakra-ui/icons';
 import { api } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -50,10 +50,13 @@ const Users = () => {
   const cancelRef = React.useRef();
 
   const { isAdmin } = useAuth();
+  const [isPwOpen, setPwOpen] = useState(false);
+  const [pwUser, setPwUser] = useState(null);
+  const [newPassword, setNewPassword] = useState('');
 
   const fetchUsers = async () => {
     try {
-      const response = await api.get('/auth/users/');
+      const response = await api.get('/users/');
       setUsers(response.data);
       setLoading(false);
     } catch (error) {
@@ -66,6 +69,16 @@ const Users = () => {
         isClosable: true,
       });
       setLoading(false);
+    }
+  };
+
+  const toggleAdmin = async (user) => {
+    try {
+      await api.put(`/users/${user.id}`, { is_superuser: !user.is_superuser });
+      toast({ title: 'Role updated', status: 'success', duration: 2000, isClosable: true });
+      fetchUsers();
+    } catch (e) {
+      toast({ title: 'Failed to update role', description: e?.response?.data?.detail || e.message, status: 'error', duration: 5000, isClosable: true });
     }
   };
 
@@ -84,14 +97,25 @@ const Users = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      // Disable create/update in this build; backend endpoints not exposed
-      toast({
-        title: 'Not available',
-        description: 'User create/update is disabled in this build.',
-        status: 'info',
-        duration: 4000,
-        isClosable: true,
-      });
+      if (editingUser) {
+        // Update: email/full_name only (password uses change-password endpoint)
+        await api.put(`/users/${editingUser.id}`, {
+          email: formData.email,
+          full_name: formData.full_name || undefined,
+          is_superuser: !!formData.is_admin,
+        });
+        toast({ title: 'User updated', status: 'success', duration: 3000, isClosable: true });
+      } else {
+        await api.post('/users/', {
+          username: formData.username,
+          email: formData.email,
+          password: formData.password || undefined,
+          is_superuser: !!formData.is_admin,
+        });
+        toast({ title: 'User created', status: 'success', duration: 3000, isClosable: true });
+      }
+      handleClose();
+      fetchUsers();
     } catch (error) {
       console.error('Error saving user:', error);
       toast({
@@ -117,14 +141,10 @@ const Users = () => {
 
   const handleDelete = async (userId) => {
     try {
-      // Disable delete in this build; backend endpoint not exposed
-      toast({
-        title: 'Not available',
-        description: 'User deletion is disabled in this build.',
-        status: 'info',
-        duration: 4000,
-        isClosable: true,
-      });
+      if (!window.confirm('Are you sure you want to delete this user?')) return;
+      await api.delete(`/users/${userId}`);
+      toast({ title: 'User deleted', status: 'info', duration: 3000, isClosable: true });
+      fetchUsers();
     } catch (error) {
       console.error('Error deleting user:', error);
       toast({
@@ -172,8 +192,9 @@ const Users = () => {
           overflow="hidden"
           boxShadow="sm"
           bg={bgColor}
+          className="table-surface"
         >
-          <Box fontSize="sm">
+          <Box fontSize="sm" overflowX="auto">
           <Table variant="simple" size="sm">
             <Thead bg={tableHeaderBg}>
               <Tr>
@@ -183,15 +204,28 @@ const Users = () => {
                 <Th>Actions</Th>
               </Tr>
             </Thead>
-            <Tbody>
-              {users.map((user) => (
-                <Tr key={user.id} _hover={{ bg: rowHoverBg }}>
-                  <Td>{user.username}</Td>
-                  <Td>{user.email}</Td>
+              <Tbody>
+                {users.map((user) => (
+                  <Tr key={user.id} _hover={{ bg: rowHoverBg }}>
                   <Td>
-                    <Badge colorScheme={(user.is_superuser || (Array.isArray(user.roles) && user.roles.includes('admin'))) ? 'purple' : 'green'}>
-                      {(user.is_superuser || (Array.isArray(user.roles) && user.roles.includes('admin'))) ? 'Admin' : 'User'}
-                    </Badge>
+                    <Text isTruncated maxW={{ base: '12rem', sm: '16rem', md: '20rem' }}>
+                      {user.username}
+                    </Text>
+                  </Td>
+                  <Td>
+                    <Text isTruncated maxW={{ base: '16rem', sm: '22rem', md: '28rem' }}>
+                      {user.email}
+                    </Text>
+                  </Td>
+                  <Td>
+                    <HStack>
+                      <Badge colorScheme={user.is_superuser ? 'purple' : 'green'}>
+                        {user.is_superuser ? 'Admin' : 'User'}
+                      </Badge>
+                      <Tooltip label={user.is_superuser ? 'Revoke admin' : 'Make admin'}>
+                        <input type="checkbox" checked={!!user.is_superuser} onChange={() => toggleAdmin(user)} />
+                      </Tooltip>
+                    </HStack>
                   </Td>
                   <Td>
                     <HStack spacing={2}>
@@ -201,6 +235,14 @@ const Users = () => {
                           size="sm"
                           onClick={() => handleEdit(user)}
                           aria-label="Edit user"
+                        />
+                      </Tooltip>
+                      <Tooltip label="Change password">
+                        <IconButton
+                          icon={<UnlockIcon />}
+                          size="sm"
+                          onClick={() => { setPwUser(user); setNewPassword(''); setPwOpen(true); }}
+                          aria-label="Change password"
                         />
                       </Tooltip>
                       <Tooltip label="Delete user">
@@ -286,6 +328,35 @@ const Users = () => {
               <Button colorScheme="blue" type="submit" ml={3}>
                 {editingUser ? 'Update' : 'Create'}
               </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialogOverlay>
+      </AlertDialog>
+
+      {/* Change Password Modal */}
+      <AlertDialog isOpen={isPwOpen} leastDestructiveRef={cancelRef} onClose={() => setPwOpen(false)}>
+        <AlertDialogOverlay>
+          <AlertDialogContent>
+            <AlertDialogHeader>Change Password</AlertDialogHeader>
+            <AlertDialogBody>
+              <VStack>
+                <FormControl isRequired>
+                  <FormLabel>New Password</FormLabel>
+                  <Input type="password" value={newPassword} onChange={(e)=> setNewPassword(e.target.value)} />
+                </FormControl>
+              </VStack>
+            </AlertDialogBody>
+            <AlertDialogFooter>
+              <Button ref={cancelRef} onClick={() => setPwOpen(false)}>Cancel</Button>
+              <Button colorScheme="blue" ml={3} onClick={async () => {
+                try {
+                  await api.post(`/users/${pwUser.id}/change-password`, { current_password: '', new_password: newPassword });
+                  toast({ title: 'Password updated', status: 'success', duration: 3000, isClosable: true });
+                  setPwOpen(false);
+                } catch (e) {
+                  toast({ title: 'Failed', description: e?.response?.data?.detail || e.message, status: 'error', duration: 5000, isClosable: true });
+                }
+              }}>Update</Button>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialogOverlay>

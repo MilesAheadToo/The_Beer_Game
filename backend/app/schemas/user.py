@@ -11,6 +11,7 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     """Schema for creating a new user."""
     password: str = Field(default='Daybreak@2025', min_length=8, max_length=50)
+    is_superuser: Optional[bool] = False
     
     @validator('password')
     def password_strength(cls, v):
@@ -30,6 +31,7 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = Field(None, max_length=100)
     password: Optional[str] = Field(None, min_length=8, max_length=50)
     is_active: Optional[bool] = None
+    is_superuser: Optional[bool] = None
 
 class UserInDBBase(UserBase):
     """Base schema for user data in the database."""

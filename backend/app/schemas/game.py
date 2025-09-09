@@ -71,6 +71,15 @@ class PricingConfig(BaseModel):
         description="Pricing configuration for the factory role"
     )
 
+class NodePolicy(BaseModel):
+    info_delay: int = Field(ge=0, le=52, default=2)
+    ship_delay: int = Field(ge=0, le=52, default=2)
+    init_inventory: int = Field(ge=0, default=12)
+    price: float = Field(ge=0, default=0)
+    standard_cost: float = Field(ge=0, default=0)
+    variable_cost: float = Field(ge=0, default=0)
+    min_order_qty: int = Field(ge=0, default=0)
+
 class GameBase(BaseModel):
     name: str = Field(..., max_length=100)
     max_rounds: int = Field(default=52, ge=1, le=1000)
@@ -80,6 +89,10 @@ class GameBase(BaseModel):
         default_factory=PricingConfig,
         description="Pricing configuration for different roles in the supply chain"
     )
+    # Optional: per-node policies and system-wide variable ranges
+    node_policies: Optional[Dict[str, NodePolicy]] = Field(default=None)
+    system_config: Optional[Dict[str, Any]] = Field(default=None)
+    global_policy: Optional[Dict[str, Any]] = Field(default=None, description="Optional top-level policy values (lead times, inventory, costs, capacities)")
 
 class GameCreate(GameBase):
     player_assignments: List[PlayerAssignment] = Field(

@@ -95,8 +95,8 @@ const Analysis = () => {
           <Grid container spacing={3}>
             {samplePerformanceData.map((item, index) => (
               <Grid item xs={12} sm={6} md={4} key={index}>
-                <Card>
-                  <CardContent>
+                <Card variant="outlined" className="card-surface">
+                  <CardContent className="pad-6">
                     <Typography color="textSecondary" gutterBottom>
                       {item.metric}
                     </Typography>
@@ -123,8 +123,8 @@ const Analysis = () => {
               </Grid>
             ))}
             <Grid item xs={12}>
-              <Card>
-                <CardContent>
+              <Card variant="outlined" className="card-surface">
+                <CardContent className="pad-6">
                   <Typography variant="h6" gutterBottom>
                     Inventory & Demand Over Time
                   </Typography>
@@ -152,8 +152,8 @@ const Analysis = () => {
         return (
           <Grid container spacing={3}>
             <Grid item xs={12} md={6}>
-              <Card>
-                <CardContent>
+              <Card variant="outlined" className="card-surface">
+                <CardContent className="pad-6">
                   <Typography variant="h6" gutterBottom>
                     Bullwhip Effect Analysis
                   </Typography>
@@ -180,8 +180,8 @@ const Analysis = () => {
               </Card>
             </Grid>
             <Grid item xs={12} md={6}>
-              <Card>
-                <CardContent>
+              <Card variant="outlined" className="card-surface">
+                <CardContent className="pad-6">
                   <Typography variant="h6" gutterBottom>
                     Bullwhip Effect by Node
                   </Typography>
@@ -283,8 +283,8 @@ const Analysis = () => {
               </Grid>
             </Grid>
 
-            <Card>
-              <CardContent>
+            <Card variant="outlined" className="card-surface">
+              <CardContent className="pad-6">
                 <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                   <Typography variant="h6">Performance Metrics</Typography>
                   <IconButton size="small">

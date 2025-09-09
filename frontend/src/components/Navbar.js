@@ -20,6 +20,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import GroupIcon from '@mui/icons-material/Group';
+import TuneIcon from '@mui/icons-material/Tune';
 import Logout from '@mui/icons-material/Logout';
 import { styled } from '@mui/material/styles';
 import { useAuth } from '../contexts/AuthContext';
@@ -99,6 +100,34 @@ const Navbar = ({ handleDrawerToggle }) => {
               </Button>
               <Button 
                 color="inherit" 
+                startIcon={<SettingsIcon />}
+                onClick={() => navigate('/system-config')}
+                sx={{ 
+                  mx: 1,
+                  bgcolor: isActive('/system-config') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  '&:hover': {
+                    bgcolor: 'rgba(255, 255, 255, 0.15)'
+                  }
+                }}
+              >
+                System Config
+              </Button>
+              <Button 
+                color="inherit" 
+                startIcon={<TuneIcon />}
+                onClick={() => navigate('/admin?openSystemRanges=1')}
+                sx={{ 
+                  mx: 1,
+                  bgcolor: location.search.includes('openSystemRanges=1') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  '&:hover': {
+                    bgcolor: 'rgba(255, 255, 255, 0.15)'
+                  }
+                }}
+              >
+                Edit System Ranges
+              </Button>
+              <Button 
+                color="inherit" 
                 startIcon={<SportsEsportsIcon />}
                 onClick={() => navigate('/games')}
                 sx={{ 
@@ -127,20 +156,36 @@ const Navbar = ({ handleDrawerToggle }) => {
               </Button>
             </>
           ) : (
-            <Button 
-              color="inherit" 
-              startIcon={<DashboardIcon />}
-              onClick={() => navigate('/dashboard')}
-              sx={{ 
-                mx: 1,
-                bgcolor: isActive('/dashboard') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                '&:hover': {
-                  bgcolor: 'rgba(255, 255, 255, 0.15)'
-                }
-              }}
-            >
-              My Dashboard
-            </Button>
+            <>
+              <Button 
+                color="inherit" 
+                startIcon={<DashboardIcon />}
+                onClick={() => navigate('/dashboard')}
+                sx={{ 
+                  mx: 1,
+                  bgcolor: isActive('/dashboard') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  '&:hover': {
+                    bgcolor: 'rgba(255, 255, 255, 0.15)'
+                  }
+                }}
+              >
+                My Dashboard
+              </Button>
+              <Button 
+                color="inherit" 
+                startIcon={<SportsEsportsIcon />}
+                onClick={() => navigate('/games')}
+                sx={{ 
+                  mx: 1,
+                  bgcolor: isActive('/games') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  '&:hover': {
+                    bgcolor: 'rgba(255, 255, 255, 0.15)'
+                  }
+                }}
+              >
+                Games
+              </Button>
+            </>
           )}
         </Box>
         

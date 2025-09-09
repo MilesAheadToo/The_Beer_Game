@@ -267,7 +267,7 @@ const ProfilePage = () => {
         </div>
 
         {/* Tabs */}
-        <div className="border-b border-gray-200 mb-8">
+        <div className="border-b border-gray-200 mb-8 pad-6">
           <nav className="-mb-px flex space-x-8">
             {[
               { name: 'Overview', id: 'overview' },
@@ -294,7 +294,7 @@ const ProfilePage = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Left Column - Profile Card */}
           <div className="lg:col-span-1">
-            <div className="bg-white overflow-hidden shadow rounded-lg">
+            <div className="card-surface overflow-hidden rounded-lg">
               <div className="px-4 py-5 sm:p-6">
                 <div className="flex flex-col items-center">
                   <div className="relative">
@@ -406,8 +406,8 @@ const ProfilePage = () => {
 
             {/* Quick Stats */}
             {!isEditing && activeTab !== 'leaderboard' && (
-              <div className="mt-6 bg-white overflow-hidden shadow rounded-lg">
-                <div className="px-4 py-5 sm:p-6">
+              <div className="mt-6 card-surface overflow-hidden rounded-lg">
+                <div className="pad-6">
                   <h3 className="text-lg font-medium text-gray-900">Quick Stats</h3>
                   <dl className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2">
                     <div className="px-4 py-5 bg-gray-50 rounded-lg overflow-hidden sm:p-6">
@@ -464,7 +464,7 @@ const ProfilePage = () => {
                 </div>
 
                 {/* Recent Activity */}
-                <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+                <div className="card-surface overflow-hidden sm:rounded-lg">
                   <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
                     <h3 className="text-lg leading-6 font-medium text-gray-900">Recent Activity</h3>
                   </div>
@@ -513,7 +513,7 @@ const ProfilePage = () => {
                 </div>
 
                 {/* Next Achievement */}
-                <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+                <div className="card-surface overflow-hidden sm:rounded-lg">
                   <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
                     <h3 className="text-lg leading-6 font-medium text-gray-900">Next Achievement</h3>
                   </div>
@@ -549,7 +549,7 @@ const ProfilePage = () => {
             )}
 
             {activeTab === 'stats' && (
-              <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+              <div className="card-surface overflow-hidden sm:rounded-lg">
                 <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
                   <h3 className="text-lg leading-6 font-medium text-gray-900">Game Statistics</h3>
                 </div>
@@ -592,7 +592,7 @@ const ProfilePage = () => {
             )}
 
             {activeTab === 'achievements' && (
-              <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+              <div className="card-surface overflow-hidden sm:rounded-lg">
                 <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
                   <h3 className="text-lg leading-6 font-medium text-gray-900">Achievements</h3>
                   <p className="mt-1 max-w-2xl text-sm text-gray-500">
@@ -646,7 +646,7 @@ const ProfilePage = () => {
             )}
 
             {activeTab === 'history' && (
-              <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+              <div className="card-surface overflow-hidden sm:rounded-lg">
                 <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
                   <div className="flex justify-between items-center">
                     <div>
@@ -767,7 +767,7 @@ const ProfilePage = () => {
             )}
 
             {activeTab === 'leaderboard' && (
-              <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+              <div className="card-surface overflow-hidden sm:rounded-lg">
                 <div className="px-4 py-5 sm:px-6 border-b border-gray-200">
                   <div className="flex justify-between items-center">
                     <div>

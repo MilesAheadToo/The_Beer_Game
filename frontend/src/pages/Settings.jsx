@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Typography } from '@mui/material';
 import { useAuth } from '../contexts/AuthContext';
 import { useHelp } from '../contexts/HelpContext';
 import { 
@@ -139,27 +140,23 @@ const Settings = () => {
   // Render a section header
   const SectionHeader = ({ icon: Icon, title, description }) => (
     <div className="md:col-span-1">
-      <div className="px-4 sm:px-0">
-        <h3 className="text-lg font-medium text-gray-900 flex items-center">
+      <div className="pad-6 sm:px-0">
+        <div className="flex items-center">
           <Icon className="h-5 w-5 mr-2 text-gray-500" />
-          {title}
-        </h3>
-        <p className="mt-1 text-sm text-gray-600">
-          {description}
-        </p>
+          <Typography variant="h5" component="h3">{title}</Typography>
+        </div>
+        <Typography variant="subtitle2" sx={{ mt: 1 }}>{description}</Typography>
       </div>
     </div>
   );
   
   // Render a setting control
   const SettingControl = ({ label, description, children, className = '' }) => (
-    <div className={`px-4 py-4 sm:px-6 ${className}`}>
+    <div className={`pad-6 ${className}`}>
       <div className="flex items-center justify-between">
         <div className="flex-grow">
-          <div className="text-sm font-medium text-gray-900">{label}</div>
-          {description && (
-            <div className="mt-1 text-sm text-gray-500">{description}</div>
-          )}
+          <Typography variant="body1" sx={{ fontWeight: 600 }}>{label}</Typography>
+          {description && (<Typography variant="body2" color="text.secondary" sx={{ mt: .5 }}>{description}</Typography>)}
         </div>
         <div className="ml-4">
           {children}
@@ -203,15 +200,11 @@ const Settings = () => {
   );
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-7xl mx-auto pad-8">
       <div className="md:flex md:items-center md:justify-between mb-8">
         <div className="flex-1 min-w-0">
-          <h2 className="text-2xl font-bold leading-7 text-gray-900 sm:text-3xl sm:truncate">
-            Settings
-          </h2>
-          <p className="mt-1 text-sm text-gray-500">
-            Manage your account settings and preferences
-          </p>
+          <Typography variant="h3" component="h2">Settings</Typography>
+          <Typography variant="subtitle2" sx={{ mt: .5 }}>Manage your account settings and preferences</Typography>
         </div>
         <div className="mt-4 flex md:mt-0 md:ml-4
         ">
@@ -257,8 +250,8 @@ const Settings = () => {
               description="Update your profile information and avatar" 
             />
             <div className="mt-5 md:mt-0 md:col-span-2">
-              <div className="shadow overflow-hidden sm:rounded-md">
-                <div className="px-4 py-5 bg-white sm:p-6">
+              <div className="card-surface overflow-hidden sm:rounded-lg">
+                <div className="pad-6">
                   <div className="grid grid-cols-6 gap-6">
                     <div className="col-span-6 sm:col-span-4">
                       <label htmlFor="username" className="block text-sm font-medium text-gray-700">
@@ -327,7 +320,7 @@ const Settings = () => {
                     </div>
                   </div>
                 </div>
-                <div className="px-4 py-3 bg-gray-50 text-right sm:px-6">
+                <div className="pad-6 text-right">
                   <button
                     type="submit"
                     className="inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
@@ -350,8 +343,8 @@ const Settings = () => {
               description="Customize how the app looks and feels" 
             />
             <div className="mt-5 md:mt-0 md:col-span-2">
-              <div className="shadow overflow-hidden sm:rounded-md">
-                <div className="px-4 py-5 bg-white space-y-6 sm:p-6">
+              <div className="card-surface overflow-hidden sm:rounded-lg">
+                <div className="pad-6 space-y-6">
                   <SettingControl
                     label="Theme"
                     description="Select your preferred theme"
@@ -442,8 +435,8 @@ const Settings = () => {
               description="Manage how you receive notifications" 
             />
             <div className="mt-5 md:mt-0 md:col-span-2">
-              <div className="shadow overflow-hidden sm:rounded-md">
-                <div className="px-4 py-5 bg-white space-y-6 sm:p-6">
+              <div className="card-surface overflow-hidden sm:rounded-lg">
+                <div className="pad-6 space-y-6">
                   <SettingControl
                     label="Email notifications"
                     description="Receive email notifications"
@@ -567,7 +560,7 @@ const Settings = () => {
                   </SettingControl>
                 </div>
                 
-                <div className="px-4 py-3 bg-gray-50 text-right sm:px-6">
+                <div className="pad-6 text-right">
                   <button
                     type="button"
                     onClick={() => {

@@ -86,6 +86,33 @@ def next_round(
             detail=str(e)
         )
 
+@router.post("/mixed-games/{game_id}/finish", response_model=GameSchema)
+def finish_game(
+    game_id: int,
+    current_user: User = Depends(get_current_user),
+    game_service: MixedGameService = Depends(get_mixed_game_service)
+):
+    """Finish a game and compute a summary."""
+    try:
+        return game_service.finish_game(game_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+@router.get("/mixed-games/{game_id}/report", response_model=dict)
+def get_game_report(
+    game_id: int,
+    current_user: User = Depends(get_current_user),
+    game_service: MixedGameService = Depends(get_mixed_game_service)
+):
+    """Get simple endgame report."""
+    try:
+        return game_service.get_report(game_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
 @router.get("/mixed-games/{game_id}/state", response_model=GameState)
 def get_game_state(
     game_id: int,
@@ -101,23 +128,25 @@ def get_game_state(
             detail=str(e)
         )
 
-@router.put("/mixed-games/{game_id}", response_model=GameSchema)
+@router.put("/mixed-games/{game_id}", response_model=GameState)
 def update_game(
     game_id: int,
-    game_update: GameUpdate,
+    payload: Dict[str, Any],
     current_user: User = Depends(get_current_user),
     game_service: MixedGameService = Depends(get_mixed_game_service)
 ):
-    """Update game properties."""
+    """Update game configuration (node_policies, system_config, pricing_config, global_policy)."""
     try:
-        # In a real implementation, you would update the game here
-        # For now, we'll just return the current game state
+        game_service.update_game_config(
+            game_id,
+            node_policies=payload.get("node_policies"),
+            system_config=payload.get("system_config"),
+            pricing_config=payload.get("pricing_config"),
+            global_policy=payload.get("global_policy"),
+        )
         return game_service.get_game_state(game_id)
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 @router.get("/mixed-games/", response_model=List[GameInDBBase])
 def list_games(

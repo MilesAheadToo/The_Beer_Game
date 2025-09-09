@@ -309,15 +309,43 @@ def simulate_beer_game(
         }
     return out
 
+def _sample_params_uniform(base: BeerGameParams, ranges: Optional[Dict[str, Tuple[float, float]]] = None) -> BeerGameParams:
+    """Sample BeerGameParams uniformly within provided ranges (inclusive)."""
+    rng = ranges or {}
+    def pick(name: str, cur):
+        if name not in rng:
+            return cur
+        lo, hi = rng[name]
+        # integers for discrete params
+        if isinstance(cur, int):
+            return int(np.random.uniform(lo, hi + 1))
+        else:
+            return float(np.random.uniform(lo, hi))
+
+    return BeerGameParams(
+        info_delay=pick("info_delay", base.info_delay),
+        ship_delay=pick("ship_delay", base.ship_delay),
+        init_inventory=pick("init_inventory", base.init_inventory),
+        holding_cost=pick("holding_cost", base.holding_cost),
+        backlog_cost=pick("backlog_cost", base.backlog_cost),
+        max_inbound_per_link=pick("max_inbound_per_link", base.max_inbound_per_link),
+        max_order=pick("max_order", base.max_order),
+    )
+
 def generate_sim_training_windows(
     num_runs: int,
     T: int,
     window: int = 12,
     horizon: int = 1,
     params: BeerGameParams = BeerGameParams(),
+    param_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
+    randomize: bool = True,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Create imitation-learning windows from the simulator.
+
+    If `randomize` is True, each run samples parameters uniformly within
+    `param_ranges` (or sensible defaults if not provided).
     """
     Xs, Ys, Ps = [], [], []
     A_ship = np.zeros((4, 4), dtype=np.float32)
@@ -328,8 +356,21 @@ def generate_sim_training_windows(
         A_order[u, v] = 1.0
     A = np.stack([A_ship, A_order], axis=0)
 
+    # Default ranges (broad but sane for Beer Game)
+    default_ranges: Dict[str, Tuple[float, float]] = {
+        "info_delay": (0, 6),
+        "ship_delay": (0, 6),
+        "init_inventory": (4, 60),
+        "holding_cost": (0.1, 2.0),
+        "backlog_cost": (0.2, 4.0),
+        "max_inbound_per_link": (50, 300),
+        "max_order": (50, 300),
+    }
+    ranges = param_ranges or default_ranges
+
     for _ in range(num_runs):
-        trace = simulate_beer_game(T=T, params=params)
+        sim_params = _sample_params_uniform(params, ranges) if randomize else params
+        trace = simulate_beer_game(T=T, params=sim_params)
         # slide windows
         for start in range(0, T - (window + horizon) + 1):
             X = np.zeros((window, 4, len(NODE_FEATURES)), dtype=np.float32)
@@ -344,7 +385,7 @@ def generate_sim_training_windows(
                         incoming_orders=int(trace[role]["incoming_orders"][start + t]),
                         incoming_shipments=int(trace[role]["incoming_shipments"][start + t]),
                         on_order=int(trace[role]["on_order"][start + t]),
-                        params=params,
+                        params=sim_params,
                     )
 
             for t in range(horizon):

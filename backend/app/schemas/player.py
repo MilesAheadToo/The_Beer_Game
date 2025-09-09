@@ -34,6 +34,9 @@ class PlayerAssignment(BaseModel):
     user_id: Optional[int] = None  # Required for human players
     strategy: Optional[PlayerStrategy] = PlayerStrategy.NAIVE  # For AI players
     can_see_demand: bool = False  # Whether this player can see customer demand
+    llm_model: Optional[str] = None  # Optional: selected LLM when using LLM strategies
+    llm_config: Optional[dict] = None  # temperature, max_tokens, prompt
+    basic_config: Optional[dict] = None  # heuristic params, e.g., base_stock_target, smoothing
 
     @validator('user_id')
     def validate_user_id(cls, v, values):

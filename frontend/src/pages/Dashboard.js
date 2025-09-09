@@ -149,7 +149,7 @@ const Dashboard = () => {
           {/* Left Column */}
           <GridItem>
             {/* Demand Chart */}
-            <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6}>
+            <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6} className="card-surface pad-6">
               <CardHeader>
                 <Heading size="md">Demand Forecast vs Actual</Heading>
               </CardHeader>
@@ -172,7 +172,7 @@ const Dashboard = () => {
             </Card>
 
             {/* Stock vs Forecast */}
-            <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6}>
+            <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6} className="card-surface pad-6">
               <CardHeader display="flex" justifyContent="space-between" alignItems="center">
                 <Heading size="md">Stock vs Forecast (Next 4 Weeks)</Heading>
                 <Button 
@@ -213,7 +213,7 @@ const Dashboard = () => {
           {/* Right Column */}
           <GridItem>
             {/* Stock vs Safety Stock */}
-            <Card variant="outline" bg={cardBg} borderColor={borderColor} h="100%" mb={6}>
+            <Card variant="outline" bg={cardBg} borderColor={borderColor} h="100%" mb={6} className="card-surface pad-6">
               <CardHeader>
                 <Heading size="md">Stock vs Safety Stock</Heading>
               </CardHeader>
@@ -237,8 +237,8 @@ const Dashboard = () => {
         </Grid>
 
         {/* Full Width Section */}
-        <Card variant="outline" bg={cardBg} borderColor={borderColor}>
-          <CardBody p={0}>
+        <Card variant="outline" bg={cardBg} borderColor={borderColor} className="card-surface">
+          <CardBody p={0} className="pad-6">
             <SkuTable data={[]} />
           </CardBody>
         </Card>

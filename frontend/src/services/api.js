@@ -95,6 +95,14 @@ export const mixedGameApi = {
     const { data } = await http.get("/health");
     return data;
   },
+  async getSystemConfig() {
+    const { data } = await http.get('/config/system');
+    return data;
+  },
+  async saveSystemConfig(cfg) {
+    const { data } = await http.put('/config/system', cfg);
+    return data;
+  },
 
   // Mixed Games management
   async createGame(gameData) {
@@ -103,6 +111,10 @@ export const mixedGameApi = {
   },
   async getGames() {
     const { data } = await http.get('/mixed-games/');
+    return data;
+  },
+  async updateMixedGame(gameId, payload) {
+    const { data } = await http.put(`/mixed-games/${gameId}`, payload);
     return data;
   },
 
@@ -120,9 +132,33 @@ export const mixedGameApi = {
     const { data } = await http.post(`/mixed-games/${gameId}/next-round`);
     return data;
   },
+  async finishGame(gameId) {
+    const { data } = await http.post(`/mixed-games/${gameId}/finish`);
+    return data;
+  },
+  async getReport(gameId) {
+    const { data } = await http.get(`/mixed-games/${gameId}/report`);
+    return data;
+  },
 
   async getGameState(gameId) {
     const { data } = await http.get(`/mixed-games/${gameId}/state`);
+    return data;
+  },
+  async trainModel(payload) {
+    const { data } = await http.post('/model/train', payload);
+    return data;
+  },
+  async getJobStatus(jobId) {
+    const { data } = await http.get(`/model/job/${jobId}/status`);
+    return data;
+  },
+  async generateData(payload) {
+    const { data } = await http.post('/model/generate-data', payload);
+    return data;
+  },
+  async stopJob(jobId) {
+    const { data } = await http.post(`/model/job/${jobId}/stop`);
     return data;
   },
 

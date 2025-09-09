@@ -60,7 +60,7 @@ class UserService:
             hashed_password=hashed_password,
             full_name=user.full_name,
             is_active=True,
-            is_superuser=False
+            is_superuser=bool(user.is_superuser)
         )
         
         try:
@@ -107,6 +107,8 @@ class UserService:
             
         if user_update.is_active is not None and current_user.is_superuser:
             db_user.is_active = user_update.is_active
+        if user_update.is_superuser is not None and current_user.is_superuser:
+            db_user.is_superuser = bool(user_update.is_superuser)
         
         try:
             self.db.commit()

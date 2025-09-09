@@ -5,7 +5,8 @@ from app.api.endpoints import (
     users_router,
     game_router,
     model_router,
-    dashboard_router
+    dashboard_router,
+    config_router
 )
 from app.core.config import settings
 
@@ -17,3 +18,4 @@ api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(game_router, prefix="/games", tags=["games"])
 api_router.include_router(model_router, prefix="/model", tags=["model"])
 api_router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
+api_router.include_router(config_router, tags=["config"])

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Box } from '@chakra-ui/react';
+import { Typography } from '@mui/material';
 import { Helmet } from 'react-helmet-async';
 
 const PageLayout = ({ title, children, maxW = 'container.lg', ...rest }) => {
@@ -19,16 +20,10 @@ const PageLayout = ({ title, children, maxW = 'container.lg', ...rest }) => {
       >
         {title && (
           <Box mb={8}>
-            <Box h="0.5em" /> {/* Half the height of the title */}
-            <h1 style={{ 
-              fontSize: '2.5rem', 
-              fontWeight: 600, 
-              margin: 0,
-              lineHeight: 1.2,
-              color: '#2D3748'
-            }}>
+            <Box h="0.5em" />
+            <Typography variant="h2" component="h1" color="text.primary" sx={{ fontWeight: 700 }}>
               {title}
-            </h1>
+            </Typography>
           </Box>
         )}
         {children}

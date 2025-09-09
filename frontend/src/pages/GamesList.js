@@ -27,6 +27,7 @@ import {
   Alert,
 } from '@mui/material';
 import { PlayArrow, Edit, Delete, Add } from '@mui/icons-material';
+import { useNavigate } from 'react-router-dom';
 import gameApi from '../services/gameApi';
 
 const GamesList = () => {
@@ -36,6 +37,7 @@ const GamesList = () => {
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedGame, setSelectedGame] = useState(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const navigate = useNavigate();
   
   // Form state
   const [formData, setFormData] = useState({
@@ -236,7 +238,7 @@ const GamesList = () => {
           variant="contained"
           color="primary"
           startIcon={<Add />}
-          onClick={() => handleOpenDialog()}
+          onClick={() => navigate('/games/new')}
         >
           New Game
         </Button>
@@ -265,7 +267,11 @@ const GamesList = () => {
             ) : (
               games.map((game) => (
                 <TableRow key={game.id}>
-                  <TableCell>{game.name}</TableCell>
+                  <TableCell>
+                    <Typography noWrap maxWidth={320} title={game.name}>
+                      {game.name}
+                    </Typography>
+                  </TableCell>
                   <TableCell>
                     <Chip
                       label={game.status}
@@ -276,14 +282,17 @@ const GamesList = () => {
                   <TableCell>{game.current_round}</TableCell>
                   <TableCell>{game.max_rounds}</TableCell>
                   <TableCell>
-                    {game.demand_pattern?.type || 'classic'}
-                    {game.demand_pattern?.params?.stable_period && (
-                      <Typography variant="caption" display="block">
-                        Stable: {game.demand_pattern.params.stable_period} weeks
-                      </Typography>
-                    )}
+                    <Typography noWrap maxWidth={260} title={game.demand_pattern?.type || 'classic'}>
+                      {(game.demand_pattern?.type || 'classic')}
+                      {game.demand_pattern?.params?.stable_period &&
+                        ` (Stable: ${game.demand_pattern.params.stable_period} weeks)`}
+                    </Typography>
                   </TableCell>
-                  <TableCell>{formatDate(game.created_at)}</TableCell>
+                  <TableCell>
+                    <Typography noWrap maxWidth={220} title={formatDate(game.created_at)}>
+                      {formatDate(game.created_at)}
+                    </Typography>
+                  </TableCell>
                   <TableCell>
                     <Box display="flex" gap={1}>
                       <Tooltip title="Start Game">

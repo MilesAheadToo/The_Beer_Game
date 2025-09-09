@@ -10,6 +10,7 @@ from app.models.supply_chain import PlayerInventory, Order, GameRound, PlayerRou
 from app.schemas.game import GameCreate, GameUpdate, GameState, PlayerState, GameStatus
 from app.schemas.player import PlayerAssignment, PlayerType, PlayerStrategy
 from app.services.agents import AgentManager, AgentType, AgentStrategy as AgentStrategyEnum
+from app.api.endpoints.config import _read_cfg as read_system_cfg
 
 class MixedGameService:
     """Service for managing games with mixed human and AI players."""
@@ -19,21 +20,49 @@ class MixedGameService:
         self.agent_manager = AgentManager()
     
     def create_game(self, game_data: GameCreate, created_by: int = None) -> Game:
-        """Create a new game with mixed human/agent players."""
+        """Create a new game with mixed human/agent players.
+
+        Persists extended configuration into Game.config JSON to avoid schema changes.
+        """
         # Create the game
+        config: Dict[str, Any] = {
+            "demand_pattern": game_data.demand_pattern.dict() if game_data.demand_pattern else {},
+            "pricing_config": game_data.pricing_config.dict() if hasattr(game_data, 'pricing_config') else {},
+            "node_policies": (game_data.node_policies or {}),
+            "system_config": (game_data.system_config or {}),
+            "global_policy": (game_data.global_policy or {}),
+        }
         game = Game(
             name=game_data.name,
             max_rounds=game_data.max_rounds,
             status=GameStatus.CREATED,
-            demand_pattern=game_data.demand_pattern.dict(),
-            created_by=created_by,
-            is_public=game_data.is_public,
-            description=game_data.description
+            config=config,
         )
         self.db.add(game)
         self.db.flush()
         
         # Create players based on assignments
+        # Validate node policies against system ranges (if provided/persisted)
+        sys_cfg = read_system_cfg()
+        rng = sys_cfg.dict() if sys_cfg else {}
+        def _check_range(key: str, val: float):
+            r = rng.get(key)
+            if not r:
+                return
+            lo, hi = r.get('min'), r.get('max')
+            if lo is not None and val < lo: 
+                raise ValueError(f"{key} below minimum {lo}")
+            if hi is not None and val > hi:
+                raise ValueError(f"{key} above maximum {hi}")
+        for node, pol in (game_data.node_policies or {}).items():
+            _check_range('info_delay', pol.info_delay)
+            _check_range('ship_delay', pol.ship_delay)
+            _check_range('init_inventory', pol.init_inventory)
+            _check_range('price', pol.price)
+            _check_range('standard_cost', pol.standard_cost)
+            _check_range('variable_cost', pol.variable_cost)
+            _check_range('min_order_qty', pol.min_order_qty)
+
         for i, assignment in enumerate(game_data.player_assignments):
             is_ai = assignment.player_type == PlayerType.AGENT
             player = Player(
@@ -41,30 +70,84 @@ class MixedGameService:
                 role=assignment.role,
                 name=f"{assignment.role.capitalize()} ({'AI' if is_ai else 'Human'})",
                 is_ai=is_ai,
-                ai_strategy=assignment.strategy.value if is_ai else None,
+                ai_strategy=(assignment.strategy.value if hasattr(assignment.strategy, 'value') else str(assignment.strategy)) if is_ai else None,
                 can_see_demand=assignment.can_see_demand,
                 user_id=assignment.user_id if not is_ai else None
             )
             self.db.add(player)
-            
+
             # Initialize inventory for the player
             inventory = PlayerInventory(
                 player=player,
-                current_stock=12,  # Starting inventory
+                current_stock=12,
                 incoming_shipments=[],
                 backorders=0
             )
             self.db.add(inventory)
-            
+
             # Initialize AI agent if this is an AI player
             if is_ai:
-                agent_type = AgentType(assignment.role.lower())
-                strategy = AgentStrategyEnum(assignment.strategy.lower())
-                self.agent_manager.set_agent_strategy(agent_type, strategy)
-        
+                try:
+                    agent_type = AgentType(assignment.role.lower())
+                    strategy_value = (assignment.strategy.value if hasattr(assignment.strategy, 'value') else str(assignment.strategy))
+                    strategy = AgentStrategyEnum(strategy_value.lower())
+                    self.agent_manager.set_agent_strategy(agent_type, strategy)
+                except Exception:
+                    # Fallback: ignore if mapping not supported
+                    pass
+
         self.db.commit()
         self.db.refresh(game)
         return game
+
+    def update_game_config(
+        self,
+        game_id: int,
+        node_policies: Optional[Dict[str, Any]] = None,
+        system_config: Optional[Dict[str, Any]] = None,
+        pricing_config: Optional[Dict[str, Any]] = None,
+        global_policy: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        game = self.db.query(Game).filter(Game.id == game_id).first()
+        if not game:
+            raise ValueError("Game not found")
+
+        cfg: Dict[str, Any] = dict(game.config or {})
+        # Validate ranges if provided
+        sys_cfg = read_system_cfg()
+        rng = (sys_cfg.dict() if sys_cfg else {})
+        def _check_range(key: str, val: float):
+            r = rng.get(key)
+            if not r:
+                return
+            lo, hi = r.get('min'), r.get('max')
+            if lo is not None and val < lo: 
+                raise ValueError(f"{key} below minimum {lo}")
+            if hi is not None and val > hi:
+                raise ValueError(f"{key} above maximum {hi}")
+
+        if node_policies:
+            for _, pol in node_policies.items():
+                for k in ['info_delay','ship_delay','init_inventory','price','standard_cost','variable_cost','min_order_qty']:
+                    if k in pol and pol[k] is not None:
+                        _check_range(k, float(pol[k]))
+            cfg['node_policies'] = node_policies
+
+        if system_config:
+            cfg['system_config'] = system_config
+
+        if pricing_config:
+            cfg['pricing_config'] = pricing_config
+
+        if global_policy:
+            for k, v in global_policy.items():
+                if v is not None:
+                    _check_range(k, float(v))
+            cfg['global_policy'] = global_policy
+
+        game.config = cfg
+        self.db.add(game)
+        self.db.commit()
     
     def start_game(self, game_id: int) -> Game:
         """Start a game, initializing the first round."""
@@ -79,6 +162,29 @@ class MixedGameService:
         game.status = GameStatus.IN_PROGRESS
         game.current_round = 0  # Will be incremented in start_new_round
         game.started_at = datetime.utcnow()
+        
+        # Initialize simple engine state if not present
+        cfg = game.config or {}
+        node_policies = cfg.get('node_policies', {})
+        roles = ['retailer','wholesaler','distributor','manufacturer','factory']
+        # allow different naming in node_policies
+        if not node_policies:
+            node_policies = {r: {"info_delay": 2, "ship_delay": 2, "init_inventory": 12, "min_order_qty": 0} for r in roles}
+        engine = {
+            r: {
+                "inventory": int(node_policies.get(r, {}).get("init_inventory", 12)),
+                "backlog": 0,
+                "on_order": 0,
+                "info_queue": [0] * int(node_policies.get(r, {}).get("info_delay", 2)),
+                "ship_queue": [0] * int(node_policies.get(r, {}).get("ship_delay", 2)),
+                "last_order": 0,
+                "holding_cost": 0.0,
+                "backorder_cost": 0.0,
+                "total_cost": 0.0,
+            } for r in node_policies.keys()
+        }
+        cfg['engine_state'] = engine
+        game.config = cfg
         
         # Start the first round
         self.start_new_round(game)
@@ -120,7 +226,7 @@ class MixedGameService:
             self.db.commit()
             return None
         
-        # Get demand for this round
+        # Get demand for this round (retailer)
         demand = self.calculate_demand(game, game.current_round)
         
         # Create new round
@@ -133,9 +239,69 @@ class MixedGameService:
         self.db.add(round)
         self.db.flush()
         
-        # Let AI players make their moves
-        self.process_ai_players(game, round)
-        
+        # Simple engine step using node_policies and global_policy costs
+        cfg = game.config or {}
+        engine = cfg.get('engine_state', {})
+        node_policies = cfg.get('node_policies', {})
+        global_policy = cfg.get('global_policy', {})
+        hold_cost = float(global_policy.get('holding_cost', 0.5))
+        back_cost = float(global_policy.get('backlog_cost', 1.0))
+        # roles chain inferred from node_policies order
+        chain = list(node_policies.keys())
+        if not chain:
+            chain = ['retailer','wholesaler','distributor','manufacturer','factory']
+        # 1) incoming orders at retailer
+        if 'retailer' in engine:
+            engine['retailer']['info_queue'].append(int(demand))
+        # 2) propagate orders upstream
+        for i in range(1, len(chain)):
+            dn = chain[i-1]; up = chain[i]
+            qty = engine[dn]['last_order'] if dn in engine else 0
+            engine[up]['info_queue'].append(int(qty))
+        # 3) process info delays
+        for r in chain:
+            if r not in engine: continue
+            q = engine[r]['info_queue'].pop(0) if engine[r]['info_queue'] else 0
+            engine[r]['incoming_orders'] = q
+        # 4) ship downstream (limited by inventory + ship capacity via ship_queue length)
+        for i in range(len(chain)-2, -1, -1):
+            up = chain[i+1]; dn = chain[i]
+            if up not in engine or dn not in engine: continue
+            demand_here = engine[dn]['incoming_orders'] + engine[dn]['backlog']
+            ship_cap = None  # could read from node_policies
+            can_ship = min(engine[up]['inventory'], demand_here)
+            if ship_cap is not None:
+                can_ship = min(can_ship, ship_cap)
+            engine[dn]['ship_queue'].append(int(can_ship))
+        # 5) process ship delays (arrivals)
+        for r in chain:
+            if r not in engine: continue
+            arriving = engine[r]['ship_queue'].pop(0) if engine[r]['ship_queue'] else 0
+            inv = engine[r]['inventory'] + arriving
+            demand_here = engine[r]['incoming_orders'] + engine[r]['backlog']
+            shipped = min(inv, demand_here)
+            engine[r]['inventory'] = inv - shipped
+            engine[r]['backlog'] = max(0, demand_here - shipped)
+            # costs
+            engine[r]['holding_cost'] += engine[r]['inventory'] * hold_cost
+            engine[r]['backorder_cost'] += engine[r]['backlog'] * back_cost
+            engine[r]['total_cost'] = engine[r]['holding_cost'] + engine[r]['backorder_cost']
+        # 6) place orders based on simple heuristics (base-stock)
+        for r in chain:
+            if r not in engine: continue
+            st = engine[r]
+            pol = node_policies.get(r, {})
+            target = int(pol.get('init_inventory', 12) + 2 * pol.get('ship_delay', 2))
+            desired = target + st['backlog'] - st['inventory'] - st['on_order']
+            order = max(0, int(desired))
+            moq = int(pol.get('min_order_qty', 0))
+            if moq:
+                order = ((order + moq - 1) // moq) * moq
+            st['last_order'] = order
+            st['on_order'] = max(0, st['on_order'] + order - st.get('incoming_shipments', 0))
+        cfg['engine_state'] = engine
+        game.config = cfg
+
         self.db.commit()
         return round
     
@@ -222,6 +388,30 @@ class MixedGameService:
             GameRound.game_id == game_id,
             GameRound.ended_at.is_(None)
         ).first()
+
+    def finish_game(self, game_id: int) -> Game:
+        game = self.db.query(Game).filter(Game.id == game_id).first()
+        if not game:
+            raise ValueError("Game not found")
+        game.status = GameStatus.COMPLETED
+        self.db.commit(); self.db.refresh(game)
+        return game
+
+    def get_report(self, game_id: int) -> Dict[str, Any]:
+        game = self.db.query(Game).filter(Game.id == game_id).first()
+        if not game:
+            raise ValueError("Game not found")
+        cfg = game.config or {}
+        engine = cfg.get('engine_state', {})
+        totals = {r: {
+            'inventory': st.get('inventory',0),
+            'backlog': st.get('backlog',0),
+            'holding_cost': st.get('holding_cost',0.0),
+            'backorder_cost': st.get('backorder_cost',0.0),
+            'total_cost': st.get('total_cost',0.0),
+        } for r, st in engine.items()}
+        total_cost = sum(v['total_cost'] for v in totals.values())
+        return {'game_id': game_id, 'status': str(game.status), 'totals': totals, 'total_cost': total_cost}
     
     def calculate_demand(self, game: Game, round_number: int) -> int:
         """Calculate demand for a given round based on the game's demand pattern."""
@@ -255,7 +445,7 @@ class MixedGameService:
             SELECT 
                 g.id, g.name, g.status, g.current_round, g.max_rounds,
                 g.created_at, g.updated_at, g.started_at, g.completed_at,
-                g.is_public, g.description, g.created_by, g.demand_pattern,
+                g.is_public, g.description, g.created_by, g.demand_pattern, g.config,
                 (SELECT COUNT(*) FROM players WHERE game_id = g.id) as player_count
             FROM games g
         """
@@ -276,6 +466,22 @@ class MixedGameService:
                 demand_pattern = json.loads(row[11]) if row[11] else {"type": "classic", "params": {}}
             except (json.JSONDecodeError, TypeError):
                 demand_pattern = {"type": "classic", "params": {}}
+            # Unpack optional config
+            node_policies = {}
+            system_config = {}
+            try:
+                cfg = json.loads(row[12]) if row[12] else {}
+                if isinstance(cfg, dict):
+                    node_policies = cfg.get('node_policies', {})
+                    system_config = cfg.get('system_config', {})
+                    pricing_config = cfg.get('pricing_config', {})
+                    global_policy = cfg.get('global_policy', {})
+                    if not node_policies:
+                        node_policies = demand_pattern.get('params', {}).get('node_policies', {}) if isinstance(demand_pattern, dict) else {}
+                    if not system_config:
+                        system_config = demand_pattern.get('params', {}).get('system_config', {}) if isinstance(demand_pattern, dict) else {}
+            except Exception:
+                pass
                 
             game_data = {
                 "id": row[0],
@@ -291,6 +497,10 @@ class MixedGameService:
                 "is_public": bool(row[9]) if row[9] is not None else False,
                 "description": row[10] or "",
                 "created_by": row[12],
+                "node_policies": node_policies,
+                "system_config": system_config,
+                "pricing_config": pricing_config if 'pricing_config' in locals() else {},
+                "global_policy": global_policy if 'global_policy' in locals() else {},
                 "players": []  # Will be populated separately if needed
             }
             
@@ -310,7 +520,7 @@ class MixedGameService:
         # Get the game
         game_query = """
             SELECT id, name, status, current_round, max_rounds, 
-                   created_at, updated_at, demand_pattern
+                   created_at, updated_at, demand_pattern, config
             FROM games 
             WHERE id = :game_id
         """
@@ -351,6 +561,25 @@ class MixedGameService:
             demand_pattern = json.loads(game_result[7]) if game_result[7] else {}
         except (json.JSONDecodeError, TypeError):
             demand_pattern = {}
+            # Unpack optional config
+            node_policies = {}
+            system_config = {}
+            pricing_config = {}
+            global_policy = {}
+            try:
+                cfg = json.loads(game_result[8]) if len(game_result) > 8 and game_result[8] else {}
+                if isinstance(cfg, dict):
+                    node_policies = cfg.get('node_policies', {})
+                    system_config = cfg.get('system_config', {})
+                    pricing_config = cfg.get('pricing_config', {})
+                    global_policy = cfg.get('global_policy', {})
+                # Also surface nested in demand_pattern.params if present
+                if not node_policies:
+                    node_policies = demand_pattern.get('params', {}).get('node_policies', {}) if isinstance(demand_pattern, dict) else {}
+                if not system_config:
+                    system_config = demand_pattern.get('params', {}).get('system_config', {}) if isinstance(demand_pattern, dict) else {}
+        except Exception:
+            pass
             
         return GameState(
             id=game_result[0],
@@ -369,5 +598,15 @@ class MixedGameService:
             created_by=None,  # Not in schema
             is_public=False,  # Default value
             description="",  # Default value
-            demand_pattern=demand_pattern
+            demand_pattern=demand_pattern,
+            node_policies=node_policies,
+            system_config=system_config,
+            pricing_config=pricing_config,
+            global_policy=global_policy
         )
+        # Validate optional global policy if provided
+        if getattr(game_data, 'global_policy', None):
+            gp = game_data.global_policy
+            for k in ['info_delay','ship_delay','init_inventory','holding_cost','backlog_cost','max_inbound_per_link','max_order']:
+                if k in gp and gp[k] is not None:
+                    _check_range(k, float(gp[k]))

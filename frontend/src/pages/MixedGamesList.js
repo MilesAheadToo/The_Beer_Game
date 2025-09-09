@@ -34,7 +34,8 @@ import {
   Alert,
   AlertIcon,
   AlertTitle,
-  AlertDescription
+  AlertDescription,
+  Icon
 } from '@chakra-ui/react';
 import PageLayout from '../components/PageLayout';
 import { 
@@ -46,7 +47,8 @@ import {
   ArrowForwardIcon,
   TimeIcon,
   CheckIcon,
-  ViewIcon
+  ViewIcon,
+  WarningTwoIcon
 } from '@chakra-ui/icons';
 import mixedGameApi from '../services/api';
 import { getModelStatus } from '../services/modelService';
@@ -254,6 +256,14 @@ const MixedGamesList = () => {
             </Button>
             <Button
               size="sm"
+              colorScheme="red"
+              variant="outline"
+              onClick={async ()=> { try { await mixedGameApi.finishGame(game.id); fetchGames(); } catch(e){} }}
+            >
+              Finish Game
+            </Button>
+            <Button
+              size="sm"
               colorScheme="orange"
               leftIcon={<TimeIcon />}
               onClick={() => handleStopGame(game.id)}
@@ -302,8 +312,11 @@ const MixedGamesList = () => {
           variant="left-accent"
           mb={6}
           borderRadius="md"
+          alignItems="center"
         >
-          <AlertIcon />
+          <Box mr={4} display="flex" alignItems="center">
+            <Icon as={WarningTwoIcon} boxSize="2.5rem" color="red.500" />
+          </Box>
           <Box flex="1">
             <AlertTitle>
               {modelStatus.is_trained ? 'GNN Model Trained' : 'GNN Model Not Trained'}
@@ -333,7 +346,7 @@ const MixedGamesList = () => {
         </VStack>
         <Button 
           as={Link} 
-          to="/games/mixed/new" 
+          to="/games/new" 
           colorScheme="blue"
           leftIcon={<AddIcon />}
           size="md"
@@ -359,9 +372,10 @@ const MixedGamesList = () => {
         borderColor={borderColor}
         overflow="hidden"
         boxShadow="sm"
+        className="table-surface"
       >
         {/* Slightly lighter, compact table font */}
-        <Box fontSize="sm">
+        <Box fontSize="sm" overflowX="auto">
           <Table variant="simple" size="sm">
             <Thead>
               <Tr>
@@ -402,8 +416,19 @@ const MixedGamesList = () => {
               games.map((game) => (
                 <Tr key={game.id} _hover={{ bg: 'gray.50' }}>
                   <Td>
-                    <Text fontSize="sm" fontWeight="semibold">
-                      <Link to={`/games/${game.id}`} style={{ textDecoration: 'underline' }}>
+                    <Text
+                      fontSize="sm"
+                      fontWeight="semibold"
+                      isTruncated
+                      maxW={{ base: '16rem', sm: '20rem', md: '28rem', lg: '36rem' }}
+                      display="inline-block"
+                    >
+                      <Link to={`/games/new?name=${encodeURIComponent(game.name || '')}` +
+                        `&description=${encodeURIComponent(game.description || '')}` +
+                        (game.pricing_config ? `&pricing_config=${encodeURIComponent(JSON.stringify(game.pricing_config))}` : '') +
+                        (game.system_config ? `&system_config=${encodeURIComponent(JSON.stringify(game.system_config))}` : '') +
+                        (game.node_policies ? `&node_policies=${encodeURIComponent(JSON.stringify(game.node_policies))}` : '')
+                      } style={{ textDecoration: 'underline' }}>
                         {game.name}
                       </Link>
                       {game.description && (
@@ -437,7 +462,7 @@ const MixedGamesList = () => {
                     </HStack>
                   </Td>
                   <Td>
-                    <Text fontSize="sm">
+                    <Text fontSize="sm" noOfLines={1} maxW={{ base: '12rem', sm: '16rem', md: '20rem' }}>
                       {new Date(game.created_at).toLocaleString()}
                     </Text>
                   </Td>

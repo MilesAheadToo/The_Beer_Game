@@ -234,8 +234,8 @@ const GameStats = () => {
 
   // Stats cards
   const StatCard = ({ title, value, icon: Icon, change, changeType = 'neutral' }) => (
-    <div className="bg-white overflow-hidden shadow rounded-lg">
-      <div className="p-5">
+    <div className="card-surface overflow-hidden rounded-lg">
+      <div className="pad-6">
         <div className="flex items-center">
           <div className="flex-shrink-0 bg-indigo-500 rounded-md p-3">
             <Icon className="h-6 w-6 text-white" aria-hidden="true" />
@@ -278,8 +278,8 @@ const GameStats = () => {
       `${Math.floor(game.duration_seconds / 60)}m ${game.duration_seconds % 60}s` : 'N/A';
     
     return (
-      <div className="bg-white shadow overflow-hidden sm:rounded-lg mb-4">
-        <div className="px-4 py-5 sm:px-6 flex justify-between items-center">
+      <div className="card-surface overflow-hidden sm:rounded-lg mb-4">
+        <div className="pad-6 flex justify-between items-center">
           <div>
             <h3 className="text-lg leading-6 font-medium text-gray-900">
               {game.name || 'Untitled Game'}
@@ -344,7 +344,7 @@ const GameStats = () => {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="max-w-7xl mx-auto pad-8">
       <div className="flex justify-between items-center mb-8">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Game Statistics</h1>
@@ -395,7 +395,7 @@ const GameStats = () => {
 
       {/* Charts */}
       <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
-        <div className="bg-white p-6 rounded-lg shadow">
+        <div className="card-surface pad-6 rounded-lg">
           {preparePerformanceData().labels.length > 0 ? (
             <Line data={preparePerformanceData()} options={performanceOptions} />
           ) : (
@@ -404,7 +404,7 @@ const GameStats = () => {
             </div>
           )}
         </div>
-        <div className="bg-white p-6 rounded-lg shadow">
+        <div className="card-surface pad-6 rounded-lg">
           {stats?.games_played > 0 ? (
             <div className="h-64 flex items-center justify-center">
               <Pie data={prepareWinLossData()} options={winLossOptions} />
@@ -433,7 +433,7 @@ const GameStats = () => {
             ))}
           </div>
         ) : (
-          <div className="text-center py-12 bg-white shadow rounded-lg">
+          <div className="text-center py-12 card-surface rounded-lg">
             <UserGroupIcon className="mx-auto h-12 w-12 text-gray-400" />
             <h3 className="mt-2 text-sm font-medium text-gray-900">No games played yet</h3>
             <p className="mt-1 text-sm text-gray-500">

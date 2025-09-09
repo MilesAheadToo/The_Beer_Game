@@ -63,7 +63,7 @@ const GameLobby = () => {
   };
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div className="max-w-7xl mx-auto pad-8">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-2xl font-bold text-gray-900">Game Lobby</h1>
         <div className="flex space-x-3">
@@ -121,7 +121,7 @@ const GameLobby = () => {
           </div>
         </div>
       ) : (
-        <div className="bg-white shadow overflow-hidden sm:rounded-md">
+        <div className="card-surface overflow-hidden sm:rounded-md">
           <ul role="list" className="divide-y divide-gray-200">
             {games.map((game) => (
               <li key={game.id}>
@@ -197,8 +197,8 @@ const GameLobby = () => {
         </div>
       )}
       
-      <div className="mt-8 bg-white shadow sm:rounded-lg">
-        <div className="px-4 py-5 sm:p-6">
+      <div className="mt-8 card-surface sm:rounded-lg pad-6">
+        <div className="pad-6">
           <h3 className="text-lg leading-6 font-medium text-gray-900">How to Play</h3>
           <div className="mt-2 max-w-xl text-sm text-gray-500">
             <p>The Beer Game is a simulation that demonstrates the challenges of supply chain management.</p>

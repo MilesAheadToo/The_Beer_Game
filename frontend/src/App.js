@@ -13,7 +13,10 @@ import { useAuth } from "./contexts/AuthContext";       // <— unified
 import "./utils/fetchInterceptor";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminDashboard from "./pages/admin/Dashboard.jsx";
+import AdminTraining from "./pages/admin/Training.jsx";
 import Users from "./pages/Users";
+import Settings from "./pages/Settings";
+import SystemConfig from "./pages/SystemConfig.jsx";
 import Unauthorized from "./pages/Unauthorized";
 
 window.onerror = function (message, source, lineno, colno, error) {
@@ -50,7 +53,7 @@ const AppContent = () => {
 
   return (
     <Box sx={{ display: "flex" }}>
-      <Box component="main" sx={{ flexGrow: 1, p: 3, width: "100%" }}>
+      <Box component="main" sx={{ flexGrow: 1, px: 3, py: 0, width: "100%" }}>
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/unauthorized" element={<Unauthorized />} />
@@ -61,7 +64,7 @@ const AppContent = () => {
               element={
                 <>
                   <Navbar />
-                  <Box sx={{ height: 64 }} />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
                   <Dashboard />
                 </>
               }
@@ -72,7 +75,7 @@ const AppContent = () => {
               element={
                 <>
                   <Navbar />
-                  <Box sx={{ height: 64 }} />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
                   <MixedGamesList />
                 </>
               }
@@ -83,7 +86,7 @@ const AppContent = () => {
               element={
                 <>
                   <Navbar />
-                  <Box sx={{ height: 64 }} />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
                   <CreateMixedGame />
                 </>
               }
@@ -95,13 +98,13 @@ const AppContent = () => {
                 isGamePage ? (
                   <WebSocketProvider>
                     <Navbar />
-                    <Box sx={{ height: 64 }} />
+                    <Box sx={(theme) => theme.mixins.toolbar} />
                     <GameBoard />
                   </WebSocketProvider>
                 ) : (
                   <>
                     <Navbar />
-                    <Box sx={{ height: 64 }} />
+                    <Box sx={(theme) => theme.mixins.toolbar} />
                     <GameBoard />
                   </>
                 )
@@ -115,8 +118,20 @@ const AppContent = () => {
                 <ProtectedRoute allowedRoles={["admin"]}>
                   <>
                     <Navbar />
-                    <Box sx={{ height: 64 }} />
+                    <Box sx={(theme) => theme.mixins.toolbar} />
                     <AdminDashboard />
+                  </>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/training"
+              element={
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <>
+                    <Navbar />
+                    <Box sx={(theme) => theme.mixins.toolbar} />
+                    <AdminTraining />
                   </>
                 </ProtectedRoute>
               }
@@ -127,8 +142,32 @@ const AppContent = () => {
                 <ProtectedRoute allowedRoles={["admin"]}>
                   <>
                     <Navbar />
-                    <Box sx={{ height: 64 }} />
+                    <Box sx={(theme) => theme.mixins.toolbar} />
                     <Users />
+                  </>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/settings"
+              element={
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <Settings />
+                </>
+              }
+            />
+
+            <Route
+              path="/system-config"
+              element={
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <>
+                    <Navbar />
+                    <Box sx={(theme) => theme.mixins.toolbar} />
+                    <SystemConfig />
                   </>
                 </ProtectedRoute>
               }

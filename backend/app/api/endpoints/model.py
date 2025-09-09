@@ -7,6 +7,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import func, and_, select
 from pydantic import BaseModel
+import json
 
 from app.db.session import get_db
 from app.models.supply_chain import Game, Player, GameRound, PlayerRound
@@ -53,6 +54,153 @@ async def get_model_status_endpoint():
     Returns information about whether the model is trained and its metadata.
     """
     return get_model_status()
+
+class TrainRequest(BaseModel):
+    server_host: str = "aiserver.local"
+    source: str = "sim"  # 'sim' or 'db'
+    window: int = 12
+    horizon: int = 1
+    epochs: int = 10
+    device: Optional[str] = None
+    steps_table: str = "beer_game_steps"
+    db_url: Optional[str] = None
+
+@router.post("/model/train", response_model=Dict[str, Any])
+async def launch_training(req: TrainRequest):
+    """Launch tGNN training. Default server_host is 'aiserver.local'.
+    This implementation starts a local background process and returns a handle.
+    """
+    import subprocess, uuid
+    jobs_dir = Path("training_jobs"); jobs_dir.mkdir(parents=True, exist_ok=True)
+    job_id = str(uuid.uuid4())
+    log_path = jobs_dir / f"job_{job_id}.log"
+    cmd = [
+        "python", "scripts/training/train_gnn.py",
+        "--source", req.source,
+        "--window", str(req.window),
+        "--horizon", str(req.horizon),
+        "--epochs", str(req.epochs),
+        "--save-path", str(MODEL_PATH),
+    ]
+    if req.device:
+        cmd += ["--device", req.device]
+    if req.source == "db":
+        if req.db_url:
+            cmd += ["--db-url", req.db_url]
+        cmd += ["--steps-table", req.steps_table]
+    note = None
+    if req.server_host not in ("localhost", "127.0.0.1", "aiserver.local"):
+        note = f"Remote host '{req.server_host}' not configured for remote execution; launching locally."
+    with open(log_path, "w") as log:
+        proc = subprocess.Popen(cmd, stdout=log, stderr=log)
+    # write job metadata
+    meta = {
+        "pid": proc.pid,
+        "cmd": cmd,
+        "started_at": datetime.utcnow().isoformat(),
+        "log": str(log_path),
+        "type": "train",
+    }
+    with open(jobs_dir / f"job_{job_id}.json", "w") as jf:
+        json.dump(meta, jf)
+    return {
+        "job_id": job_id,
+        "log": str(log_path),
+        "cmd": " ".join(cmd),
+        "note": note,
+        "model_path": str(MODEL_PATH.absolute())
+    }
+
+@router.get("/model/job/{job_id}/status", response_model=Dict[str, Any])
+async def get_job_status(job_id: str):
+    jobs_dir = Path("training_jobs")
+    meta_path = jobs_dir / f"job_{job_id}.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="Job not found")
+    meta = json.loads(meta_path.read_text())
+    log_path = Path(meta.get("log", ""))
+    running = False
+    pid = meta.get("pid")
+    try:
+        if pid:
+            # check process liveness (POSIX)
+            os.kill(pid, 0)
+            running = True
+    except Exception:
+        running = False
+    log_tail = ""
+    log_size = 0
+    if log_path.exists():
+        log_size = log_path.stat().st_size
+        try:
+            with open(log_path, "r") as f:
+                lines = f.readlines()[-50:]
+                log_tail = "".join(lines)
+        except Exception:
+            log_tail = ""
+    return {"running": running, "pid": pid, "log_size": log_size, "log_tail": log_tail, **meta}
+
+class GenerateDataRequest(BaseModel):
+    num_runs: int = 64
+    T: int = 64
+    window: int = 12
+    horizon: int = 1
+    param_ranges: Optional[Dict[str, List[float]]] = None
+    distribution: Optional[str] = "uniform"  # 'uniform' or 'normal'
+    normal_means: Optional[Dict[str, float]] = None
+    normal_stds: Optional[Dict[str, float]] = None
+
+@router.post("/model/generate-data", response_model=Dict[str, Any])
+async def generate_data(req: GenerateDataRequest):
+    """Generate synthetic training data (npz) using simulator with optional ranges."""
+    import numpy as np
+    from app.rl.data_generator import generate_sim_training_windows, BeerGameParams
+    # Build ranges
+    ranges = None
+    if req.distribution == "uniform":
+        if req.param_ranges:
+            ranges = {k: (float(v[0]), float(v[1])) for k, v in req.param_ranges.items() if isinstance(v, (list, tuple)) and len(v) == 2}
+    elif req.distribution == "normal":
+        # Approximate normal by uniform over [mean-2std, mean+2std]
+        if req.normal_means and req.normal_stds:
+            ranges = {}
+            for k, mu in req.normal_means.items():
+                sigma = float(req.normal_stds.get(k, 0))
+                lo, hi = float(mu) - 2 * sigma, float(mu) + 2 * sigma
+                if lo > hi:
+                    lo, hi = hi, lo
+                ranges[k] = (lo, hi)
+    X, A, P, Y = generate_sim_training_windows(
+            num_runs=req.num_runs,
+            T=req.T,
+            window=req.window,
+            horizon=req.horizon,
+            params=BeerGameParams(),
+            param_ranges=ranges,
+            randomize=True,
+        )
+    out_dir = Path("training_jobs"); out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / f"dataset_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.npz"
+    np.savez(out_path, X=X, A=A, P=P, Y=Y)
+    return {"path": str(out_path), "X": list(X.shape), "A": list(A.shape), "P": list(P.shape), "Y": list(Y.shape)}
+
+@router.post("/model/job/{job_id}/stop", response_model=Dict[str, Any])
+async def stop_job(job_id: str):
+    jobs_dir = Path("training_jobs")
+    meta_path = jobs_dir / f"job_{job_id}.json"
+    if not meta_path.exists():
+        raise HTTPException(status_code=404, detail="Job not found")
+    meta = json.loads(meta_path.read_text())
+    pid = meta.get("pid")
+    if not pid:
+        raise HTTPException(status_code=400, detail="No PID recorded for job")
+    try:
+        os.kill(pid, 15)  # SIGTERM
+        meta["stopped_at"] = datetime.utcnow().isoformat()
+        meta_path.write_text(json.dumps(meta))
+        return {"stopped": True, "pid": pid}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to stop job: {e}")
 
 @router.get("/games/{game_id}/metrics", response_model=Dict[str, Any])
 async def get_game_metrics(
