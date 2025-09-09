@@ -104,6 +104,16 @@ export const mixedGameApi = {
     return data;
   },
 
+  // Model configuration
+  async getModelConfig() {
+    const { data } = await http.get('/config/model');
+    return data;
+  },
+  async saveModelConfig(cfg) {
+    const { data } = await http.put('/config/model', cfg);
+    return data;
+  },
+
   // Mixed Games management
   async createGame(gameData) {
     const { data } = await http.post('/mixed-games/', gameData);

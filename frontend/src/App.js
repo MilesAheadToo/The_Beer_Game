@@ -14,6 +14,7 @@ import "./utils/fetchInterceptor";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminDashboard from "./pages/admin/Dashboard.jsx";
 import AdminTraining from "./pages/admin/Training.jsx";
+import ModelSetup from "./pages/admin/ModelSetup.jsx";
 import Users from "./pages/Users";
 import Settings from "./pages/Settings";
 import SystemConfig from "./pages/SystemConfig.jsx";
@@ -132,6 +133,18 @@ const AppContent = () => {
                     <Navbar />
                     <Box sx={(theme) => theme.mixins.toolbar} />
                     <AdminTraining />
+                  </>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin/model-setup"
+              element={
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <>
+                    <Navbar />
+                    <Box sx={(theme) => theme.mixins.toolbar} />
+                    <ModelSetup />
                   </>
                 </ProtectedRoute>
               }

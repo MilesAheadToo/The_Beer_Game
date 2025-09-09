@@ -43,12 +43,14 @@ services:
     container_name: the_beer_game_backend
     restart: unless-stopped
     environment:
-      - MYSQL_SERVER=${MYSQL_SERVER:-db}
-      - MYSQL_PORT=${MYSQL_PORT:-3306}
-      - MYSQL_USER=${MYSQL_USER:-beer_user}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-beer_password}
-      - MYSQL_DB=${MYSQL_DB:-beer_game}
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-root_password}
+      # MariaDB/MySQL connection (used by backend/main.py engine builder)
+      - MARIADB_HOST=${MARIADB_HOST:-db}
+      - MARIADB_PORT=${MARIADB_PORT:-3306}
+      - MARIADB_DATABASE=${MARIADB_DATABASE:-beer_game}
+      - MARIADB_USER=${MARIADB_USER:-beer_user}
+      - MARIADB_PASSWORD=${MARIADB_PASSWORD:-beer_password}
+      # Direct URL takes precedence if provided
+      - DATABASE_URL=${DATABASE_URL:-mysql+pymysql://beer_user:beer_password@db:3306/beer_game?charset=utf8mb4}
       - SECRET_KEY=${SECRET_KEY:-dev-secret}
       - ALGORITHM=HS256
       - ACCESS_TOKEN_EXPIRE_MINUTES=30
@@ -59,12 +61,12 @@ services:
       - DB_WAIT_TIMEOUT=30
       - DB_CONNECTION_TIMEOUT=30
       - PYTHONPATH=/app
-      - DATABASE_URL=mysql+aiomysql://${MYSQL_USER:-beer_user}:${MYSQL_PASSWORD:-beer_password}@${MYSQL_SERVER:-db}:3307/${MYSQL_DB:-beer_game}
-      - DB_HOST=db
-      - DB_USER=beer_user
-      - DB_PASSWORD=Daybreak@2025
-      - DB_NAME=beer_game
-      - DB_PORT=3307
+      # Backward-compat fallbacks for older envs
+      - MYSQL_SERVER=${MYSQL_SERVER:-db}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_USER=${MYSQL_USER:-beer_user}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-beer_password}
+      - MYSQL_DB=${MYSQL_DB:-beer_game}
     ports:
       - "8000:8000"
     volumes:

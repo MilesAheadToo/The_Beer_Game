@@ -312,6 +312,10 @@ const AdminDashboard = () => {
                   <CogIcon className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
                   Edit Ranges
                 </button>
+                <button type="button" onClick={() => navigate('/admin/model-setup')} className="inline-flex items-center px-4 py-2 text-sm rounded-md text-white bg-indigo-600">
+                  <CogIcon className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
+                  Model Setup
+                </button>
                 <button type="button" onClick={() => navigate('/admin/training')} className="inline-flex items-center px-4 py-2 text-sm rounded-md text-white bg-green-600">
                   Training
                 </button>

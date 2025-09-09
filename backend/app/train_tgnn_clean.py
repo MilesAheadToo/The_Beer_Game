@@ -217,6 +217,15 @@ def train_agents(
     
     # Create save directory if it doesn't exist
     os.makedirs(save_dir, exist_ok=True)
+
+    # Resolve device and set CUDA-related performance flags
+    device = torch.device(device)
+    use_cuda = device.type == 'cuda'
+    if use_cuda:
+        try:
+            torch.backends.cudnn.benchmark = True
+        except Exception:
+            pass
     
     # Set up TensorBoard
     log_dir = os.path.join("runs", f"tgnn_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
@@ -239,7 +248,7 @@ def train_agents(
             node_id=i,
             model=model if i == 0 else None,  # Share the same model instance
             learning_rate=learning_rate,
-            device=device
+            device=str(device)
         )
         for i in range(4)  # 4 roles: retailer, wholesaler, distributor, manufacturer
     ]
@@ -272,18 +281,28 @@ def train_agents(
         train_dataset = SupplyChainDataset(train_data)
         val_dataset = SupplyChainDataset(val_data)
         
-        # Create data loaders with custom collate function
+        # Create data loaders with custom collate function and GPU-friendly opts
+        num_workers = max(0, min(4, (os.cpu_count() or 1) // 2))
+        pin_memory = use_cuda
+        persistent_workers = bool(num_workers)
+
         train_loader = DataLoader(
             train_dataset, 
             batch_size=batch_size, 
             shuffle=True,
-            collate_fn=collate_fn
+            collate_fn=collate_fn,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=persistent_workers
         )
         val_loader = DataLoader(
             val_dataset, 
             batch_size=batch_size, 
             shuffle=False,
-            collate_fn=collate_fn
+            collate_fn=collate_fn,
+            num_workers=num_workers,
+            pin_memory=pin_memory,
+            persistent_workers=persistent_workers
         )
         
         # Training
@@ -314,16 +333,16 @@ def train_agents(
                     node_features = observations[t].unsqueeze(0).unsqueeze(1)  # Add batch and seq_len dimensions
                     
                     obs = {
-                        'node_features': node_features.to(device),
-                        'edge_index': batch['edge_index'].to(device),
-                        'edge_attr': batch['edge_attr'].to(device) if 'edge_attr' in batch else None
+                        'node_features': node_features.to(device, non_blocking=True),
+                        'edge_index': batch['edge_index'].to(device, non_blocking=True),
+                        'edge_attr': batch['edge_attr'].to(device, non_blocking=True) if 'edge_attr' in batch else None
                     }
                     
                     next_node_features = next_observations[t].unsqueeze(0).unsqueeze(1)
                     next_obs = {
-                        'node_features': next_node_features.to(device),
-                        'edge_index': batch['edge_index'].to(device),
-                        'edge_attr': batch['edge_attr'].to(device) if 'edge_attr' in batch else None
+                        'node_features': next_node_features.to(device, non_blocking=True),
+                        'edge_index': batch['edge_index'].to(device, non_blocking=True),
+                        'edge_attr': batch['edge_attr'].to(device, non_blocking=True) if 'edge_attr' in batch else None
                     }
                     
                     # Update agent
@@ -388,9 +407,9 @@ def train_agents(
                         # Get model outputs
                         with torch.no_grad():
                             outputs = agent.model(
-                                obs['node_features'].unsqueeze(0).to(device),
-                                obs['edge_index'].to(device),
-                                obs['edge_attr'].to(device) if 'edge_attr' in obs else None
+                                obs['node_features'].unsqueeze(0).to(device, non_blocking=True),
+                                obs['edge_index'].to(device, non_blocking=True),
+                                obs['edge_attr'].to(device, non_blocking=True) if 'edge_attr' in obs else None
                             )
                             
                             # Get order quantities and demand forecasts

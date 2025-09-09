@@ -304,6 +304,340 @@ async def secure_ping(user: Dict[str, Any] = Depends(get_current_user)):
     return {"message": f"pong, {user['email']}", "role": user["role"]}
 
 # ------------------------------------------------------------------------------
+# System config (master ranges) and Model config (game model setup)
+# ------------------------------------------------------------------------------
+from pydantic import Field, validator
+from typing import List, Optional, Mapping
+import json
+from sqlalchemy import create_engine, Column, Integer, Text, DateTime
+from sqlalchemy.orm import declarative_base, sessionmaker
+
+
+DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "data"))
+SYSTEM_CONFIG_PATH = os.path.join(DATA_DIR, "system_config.json")
+MODEL_CONFIG_PATH = os.path.join(DATA_DIR, "model_config.json")
+os.makedirs(DATA_DIR, exist_ok=True)
+
+# Build SQLAlchemy engine from env (MariaDB/MySQL preferred; fallback to SQLite for dev)
+def _build_engine():
+    # Highest priority: DATABASE_URL
+    database_url = os.getenv("DATABASE_URL", "").strip()
+    if database_url:
+        return create_engine(database_url)
+
+    # Next: MariaDB/MYSQL discrete env vars
+    host = os.getenv("MARIADB_HOST") or os.getenv("MYSQL_SERVER") or os.getenv("MYSQL_HOST") or "localhost"
+    port = int(os.getenv("MARIADB_PORT") or os.getenv("MYSQL_PORT") or 3306)
+    name = os.getenv("MARIADB_DATABASE") or os.getenv("MYSQL_DB") or os.getenv("MYSQL_DATABASE") or "beer_game"
+    user = os.getenv("MARIADB_USER") or os.getenv("MYSQL_USER") or "root"
+    pwd = os.getenv("MARIADB_PASSWORD") or os.getenv("MYSQL_PASSWORD") or ""
+
+    mariadb_url = f"mysql+pymysql://{user}:{pwd}@{host}:{port}/{name}?charset=utf8mb4"
+    try:
+        eng = create_engine(mariadb_url, pool_pre_ping=True)
+        # Attempt a lightweight connection test
+        with eng.connect() as conn:
+            conn.execute("SELECT 1")
+        return eng
+    except Exception:
+        # Fallback to SQLite (dev only)
+        db_path = os.path.join(DATA_DIR, "app.db")
+        return create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
+
+
+engine = _build_engine()
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
+Base = declarative_base()
+
+
+class SystemConfigRow(Base):
+    __tablename__ = "system_config"
+    id = Column(Integer, primary_key=True)
+    version = Column(Integer, default=1)
+    payload = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+class ModelConfigRow(Base):
+    __tablename__ = "model_config"
+    id = Column(Integer, primary_key=True)
+    version = Column(Integer, default=1)
+    payload = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception:
+    pass
+
+
+class Range(BaseModel):
+    min: float
+    max: float
+
+
+class SystemConfigModel(BaseModel):
+    info_delay: Range = Field(default=Range(min=0, max=8))
+    ship_delay: Range = Field(default=Range(min=0, max=8))
+    init_inventory: Range = Field(default=Range(min=0, max=1000))
+    holding_cost: Range = Field(default=Range(min=0, max=100))
+    backlog_cost: Range = Field(default=Range(min=0, max=200))
+    max_inbound_per_link: Range = Field(default=Range(min=10, max=2000))
+    max_order: Range = Field(default=Range(min=10, max=2000))
+    price: Range = Field(default=Range(min=0, max=10000))
+    standard_cost: Range = Field(default=Range(min=0, max=10000))
+    variable_cost: Range = Field(default=Range(min=0, max=10000))
+    min_order_qty: Range = Field(default=Range(min=0, max=1000))
+
+
+def _ensure_data_dir():
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+
+def _read_system_cfg() -> SystemConfigModel:
+    # Try DB first
+    try:
+        db = SessionLocal()
+        row = db.query(SystemConfigRow).order_by(SystemConfigRow.updated_at.desc()).first()
+        if row and row.payload:
+            return SystemConfigModel(**json.loads(row.payload))
+    except Exception:
+        pass
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+    # Fallback: read file and seed DB
+    try:
+        if os.path.exists(SYSTEM_CONFIG_PATH):
+            with open(SYSTEM_CONFIG_PATH, "r") as f:
+                data = json.load(f)
+                try:
+                    db = SessionLocal()
+                    seed = SystemConfigRow(id=1, version=1, payload=json.dumps(data), created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+                    db.add(seed)
+                    db.commit()
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        db.close()
+                    except Exception:
+                        pass
+                return SystemConfigModel(**data)
+    except Exception:
+        pass
+    return SystemConfigModel()
+
+
+@api.get("/config/system", response_model=SystemConfigModel)
+def get_system_config():
+    return _read_system_cfg()
+
+
+@api.put("/config/system", response_model=SystemConfigModel)
+def put_system_config(cfg: SystemConfigModel):
+    # Save to DB (single row upsert)
+    try:
+        payload = json.dumps(cfg.dict())
+        db = SessionLocal()
+        row = db.query(SystemConfigRow).filter(SystemConfigRow.id == 1).first()
+        now = datetime.utcnow()
+        if row:
+            row.payload = payload
+            row.updated_at = now
+        else:
+            row = SystemConfigRow(id=1, version=1, payload=payload, created_at=now, updated_at=now)
+            db.add(row)
+        db.commit()
+        return cfg
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save system config: {e}")
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+# ---------------------- Model Config ----------------------
+class Item(BaseModel):
+    id: str
+    name: str
+
+
+class Site(BaseModel):
+    id: str
+    type: str  # supplier|manufacturer|distributor|retailer
+    name: str
+    items_sold: List[str] = Field(default_factory=list)
+
+
+class SiteItemSettings(BaseModel):
+    inventory_target: float
+    holding_cost: float
+    backorder_cost: float
+    avg_selling_price: float
+    standard_cost: float
+    moq: float
+
+
+class Lane(BaseModel):
+    from_site_id: str
+    to_site_id: str
+    item_id: str
+    lead_time: float
+    capacity: Optional[float] = None
+    otif_target: Optional[float] = Field(default=None, description="0-1 fraction or 0-100 percent")
+
+    @validator("otif_target")
+    def _normalize_otif(cls, v):
+        if v is None:
+            return v
+        # Accept 0-1 or 0-100; normalize to 0-1
+        return v / 100.0 if v > 1 else v
+
+
+class RetailerDemand(BaseModel):
+    distribution: str = Field(default="profile")  # profile|poisson|normal
+    params: Mapping[str, float] = Field(default_factory=dict)
+    expected_delivery_offset: Optional[float] = 0.0
+
+
+class ModelConfig(BaseModel):
+    version: int = 1
+    items: List[Item]
+    sites: List[Site]
+    # site_item_settings[siteId][itemId] = SiteItemSettings
+    site_item_settings: Mapping[str, Mapping[str, SiteItemSettings]]
+    lanes: List[Lane]
+    retailer_demand: RetailerDemand
+    supplier_lead_times: Mapping[str, float] = Field(default_factory=dict)
+
+
+def _read_model_cfg() -> ModelConfig:
+    # Try DB first
+    try:
+        db = SessionLocal()
+        row = db.query(ModelConfigRow).order_by(ModelConfigRow.updated_at.desc()).first()
+        if row and row.payload:
+            return ModelConfig(**json.loads(row.payload))
+    except Exception:
+        pass
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+    # Fallback to file and seed DB
+    if os.path.exists(MODEL_CONFIG_PATH):
+        with open(MODEL_CONFIG_PATH, "r") as f:
+            data = json.load(f)
+            try:
+                db = SessionLocal()
+                seed = ModelConfigRow(id=1, version=1, payload=json.dumps(data), created_at=datetime.utcnow(), updated_at=datetime.utcnow())
+                db.add(seed)
+                db.commit()
+            except Exception:
+                pass
+            finally:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+            return ModelConfig(**data)
+    # Default classic beer game
+    default = ModelConfig(
+        items=[Item(id="item_1", name="Item 1")],
+        sites=[
+            Site(id="supplier_1", type="supplier", name="Supplier 1", items_sold=["item_1"]),
+            Site(id="manufacturer_1", type="manufacturer", name="Manufacturer 1", items_sold=["item_1"]),
+            Site(id="distributor_1", type="distributor", name="Distributor 1", items_sold=["item_1"]),
+            Site(id="retailer_1", type="retailer", name="Retailer 1", items_sold=["item_1"]),
+        ],
+        site_item_settings={
+            "supplier_1": {"item_1": SiteItemSettings(inventory_target=20, holding_cost=0.5, backorder_cost=1.0, avg_selling_price=7.0, standard_cost=5.0, moq=0)},
+            "manufacturer_1": {"item_1": SiteItemSettings(inventory_target=20, holding_cost=0.5, backorder_cost=1.0, avg_selling_price=7.0, standard_cost=5.0, moq=0)},
+            "distributor_1": {"item_1": SiteItemSettings(inventory_target=20, holding_cost=0.5, backorder_cost=1.0, avg_selling_price=7.0, standard_cost=5.0, moq=0)},
+            "retailer_1": {"item_1": SiteItemSettings(inventory_target=20, holding_cost=0.5, backorder_cost=1.0, avg_selling_price=7.0, standard_cost=5.0, moq=0)},
+        },
+        lanes=[
+            Lane(from_site_id="supplier_1", to_site_id="manufacturer_1", item_id="item_1", lead_time=2, capacity=None, otif_target=0.95),
+            Lane(from_site_id="manufacturer_1", to_site_id="distributor_1", item_id="item_1", lead_time=2, capacity=None, otif_target=0.95),
+            Lane(from_site_id="distributor_1", to_site_id="retailer_1", item_id="item_1", lead_time=2, capacity=None, otif_target=0.95),
+        ],
+        retailer_demand=RetailerDemand(distribution="profile", params={"week1_4": 4, "week5_plus": 8}, expected_delivery_offset=1),
+        supplier_lead_times={"item_1": 2},
+    )
+    return default
+
+
+def _validate_model_config(cfg: ModelConfig, ranges: SystemConfigModel):
+    # Validate site-item settings against ranges
+    errors = []
+    for site_id, item_map in cfg.site_item_settings.items():
+        for item_id, s in item_map.items():
+            if not (ranges.init_inventory.min <= s.inventory_target <= ranges.init_inventory.max):
+                errors.append(f"site {site_id} item {item_id}: inventory_target {s.inventory_target} not in [{ranges.init_inventory.min},{ranges.init_inventory.max}]")
+            if not (ranges.holding_cost.min <= s.holding_cost <= ranges.holding_cost.max):
+                errors.append(f"site {site_id} item {item_id}: holding_cost {s.holding_cost} not in [{ranges.holding_cost.min},{ranges.holding_cost.max}]")
+            if not (ranges.backlog_cost.min <= s.backorder_cost <= ranges.backlog_cost.max):
+                errors.append(f"site {site_id} item {item_id}: backorder_cost {s.backorder_cost} not in [{ranges.backlog_cost.min},{ranges.backlog_cost.max}]")
+            if not (ranges.price.min <= s.avg_selling_price <= ranges.price.max):
+                errors.append(f"site {site_id} item {item_id}: avg_selling_price {s.avg_selling_price} not in [{ranges.price.min},{ranges.price.max}]")
+            if not (ranges.standard_cost.min <= s.standard_cost <= ranges.standard_cost.max):
+                errors.append(f"site {site_id} item {item_id}: standard_cost {s.standard_cost} not in [{ranges.standard_cost.min},{ranges.standard_cost.max}]")
+            if not (ranges.min_order_qty.min <= s.moq <= ranges.min_order_qty.max):
+                errors.append(f"site {site_id} item {item_id}: moq {s.moq} not in [{ranges.min_order_qty.min},{ranges.min_order_qty.max}]")
+
+    # Validate lanes
+    for lane in cfg.lanes:
+        if not (ranges.ship_delay.min <= lane.lead_time <= ranges.ship_delay.max):
+            errors.append(f"lane {lane.from_site_id}->{lane.to_site_id} item {lane.item_id}: lead_time {lane.lead_time} not in [{ranges.ship_delay.min},{ranges.ship_delay.max}]")
+        if lane.capacity is not None and not (ranges.max_inbound_per_link.min <= lane.capacity <= ranges.max_inbound_per_link.max):
+            errors.append(f"lane {lane.from_site_id}->{lane.to_site_id} item {lane.item_id}: capacity {lane.capacity} not in [{ranges.max_inbound_per_link.min},{ranges.max_inbound_per_link.max}]")
+
+    if errors:
+        raise HTTPException(status_code=422, detail={"message": "Model config out of bounds", "errors": errors})
+
+
+@api.get("/config/model", response_model=ModelConfig)
+def get_model_config(user: Dict[str, Any] = Depends(get_current_user)):
+    return _read_model_cfg()
+
+
+@api.put("/config/model", response_model=ModelConfig)
+def put_model_config(cfg: ModelConfig, user: Dict[str, Any] = Depends(get_current_user)):
+    # Validate against system ranges
+    ranges = _read_system_cfg()
+    _validate_model_config(cfg, ranges)
+    # Save to DB (single row upsert)
+    try:
+        payload = json.dumps(cfg.dict())
+        db = SessionLocal()
+        row = db.query(ModelConfigRow).filter(ModelConfigRow.id == 1).first()
+        now = datetime.utcnow()
+        if row:
+            row.payload = payload
+            row.updated_at = now
+        else:
+            row = ModelConfigRow(id=1, version=1, payload=payload, created_at=now, updated_at=now)
+            db.add(row)
+        db.commit()
+        return cfg
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save model config: {e}")
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+# ------------------------------------------------------------------------------
 # Minimal in-memory Mixed Games API to support the UI
 # ------------------------------------------------------------------------------
 from enum import Enum

@@ -233,7 +233,8 @@ class SupplyChainAgent:
         device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
     ):
         self.node_id = node_id
-        self.device = device
+        # Normalize device into torch.device
+        self.device = torch.device(device)
         
         if model is None:
             self.model = SupplyChainTemporalGNN().to(device)
@@ -265,11 +266,11 @@ class SupplyChainAgent:
         self.model.train(training)
         
         # Move data to device
-        node_features = observation['node_features'].to(self.device)
-        edge_index = observation['edge_index'].to(self.device)
+        node_features = observation['node_features'].to(self.device, non_blocking=True)
+        edge_index = observation['edge_index'].to(self.device, non_blocking=True)
         edge_attr = observation.get('edge_attr')
         if edge_attr is not None:
-            edge_attr = edge_attr.to(self.device)
+            edge_attr = edge_attr.to(self.device, non_blocking=True)
         
         # Process one sample at a time
         batch_size = node_features.size(0)
@@ -343,29 +344,29 @@ class SupplyChainAgent:
             done = dones[i]     # This is a boolean
             
             # Convert to tensors and move to device
-            node_features = obs['node_features'].to(self.device)  # [batch_size, seq_len, num_nodes, node_features]
-            next_node_features = next_obs['node_features'].to(self.device)
-            edge_index = obs['edge_index'].to(self.device)
+            node_features = obs['node_features'].to(self.device, non_blocking=True)  # [batch_size, seq_len, num_nodes, node_features]
+            next_node_features = next_obs['node_features'].to(self.device, non_blocking=True)
+            edge_index = obs['edge_index'].to(self.device, non_blocking=True)
             edge_attr = obs.get('edge_attr')
             if edge_attr is not None:
-                edge_attr = edge_attr.to(self.device)
+                edge_attr = edge_attr.to(self.device, non_blocking=True)
             
             # Ensure action is a tensor with proper shape [batch_size]
             if torch.is_tensor(action):
-                action_tensor = action.to(self.device)
+                action_tensor = action.to(self.device, non_blocking=True)
             else:
-                action_tensor = torch.tensor(action, dtype=torch.long).to(self.device)
+                action_tensor = torch.tensor(action, dtype=torch.long, device=self.device)
             
             # Ensure reward and done are tensors with proper shapes
             if torch.is_tensor(reward):
-                reward_tensor = reward.to(self.device)
+                reward_tensor = reward.to(self.device, non_blocking=True)
             else:
-                reward_tensor = torch.tensor(reward, dtype=torch.float32).to(self.device)
+                reward_tensor = torch.tensor(reward, dtype=torch.float32, device=self.device)
                 
             if torch.is_tensor(done):
-                done_tensor = done.to(self.device)
+                done_tensor = done.to(self.device, non_blocking=True)
             else:
-                done_tensor = torch.tensor(done, dtype=torch.float32).to(self.device)
+                done_tensor = torch.tensor(done, dtype=torch.float32, device=self.device)
             
             # Forward pass for current state
             outputs = self.model(

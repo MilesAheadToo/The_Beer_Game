@@ -139,7 +139,10 @@ def create_data_loaders(
     batch_size: int = 32,
     seq_len: int = 10,
     train_ratio: float = 0.8,
-    val_ratio: float = 0.1
+    val_ratio: float = 0.1,
+    device: str = 'cuda' if torch.cuda.is_available() else 'cpu',
+    num_workers: int = None,
+    pin_memory: bool = None
 ) -> Tuple[DataLoader, DataLoader, DataLoader]:
     """
     Create train, validation, and test data loaders.
@@ -168,15 +171,37 @@ def create_data_loaders(
         generator=torch.Generator().manual_seed(42)
     )
     
+    # Derive performant defaults for workers and pinning
+    if num_workers is None:
+        num_workers = max(0, min(4, (os.cpu_count() or 1) // 2))
+    if pin_memory is None:
+        pin_memory = (str(device).startswith('cuda') or getattr(device, 'type', '') == 'cuda')
+    persistent_workers = bool(num_workers)
+
     # Create data loaders
     train_loader = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=True
+        train_dataset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
     )
     val_loader = DataLoader(
-        val_dataset, batch_size=batch_size, shuffle=False
+        val_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
     )
     test_loader = DataLoader(
-        test_dataset, batch_size=batch_size, shuffle=False
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
     )
     
     return train_loader, val_loader, test_loader
