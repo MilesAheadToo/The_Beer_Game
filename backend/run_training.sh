@@ -14,12 +14,14 @@ else
     exit 1
 fi
 
-# Run the training script
-python scripts/train.py \
-    --config scripts/training/config/cpu_config.yaml \
-    --data-dir data/processed \
-    --output-dir checkpoints_cpu \
-    --device cpu
+# Run the training script (use simple training CLI)
+python scripts/training/train_gnn.py \
+    --source sim \
+    --window 12 \
+    --horizon 1 \
+    --epochs 10 \
+    --device cpu \
+    --save-path checkpoints_cpu/temporal_gnn.pt
 
 # Deactivate virtual environment
 deactivate
