@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: up up-dev up-tls up-tls-only rebuild-frontend down ps logs seed reset-admin proxy-url help remote-train remote-train-dataset
+.PHONY: up up-dev up-tls up-tls-only rebuild-frontend down ps logs seed reset-admin proxy-url help remote-train remote-train-dataset train-setup train-cpu
 
 up:
 	@echo "\n[+] Building and starting full system (proxy, frontend, backend, db)..."; \
@@ -68,6 +68,8 @@ help:
 	echo "  make seed          - run user seeder (admin and role users)"; \
 	echo "  make reset-admin   - reset admin password to Daybreak@2025"; \
 	echo "  make proxy-url     - print URLs and login info"; \
+	echo "  make train-setup   - create Python venv and install training deps (local)"; \
+	echo "  make train-cpu     - run local CPU training using backend/run_training.sh"; \
 	echo "  make remote-train REMOTE=user@host [EPOCHS=50 DEVICE=cuda WINDOW=12 HORIZON=1 NUM_RUNS=64 T=64 REMOTE_DIR=~/beer-game SAVE_LOCAL=backend/checkpoints/supply_chain_gnn.pth]"; \
 	echo "                     - generate dataset locally, sync to remote, train with --dataset, copy checkpoint back"; \
 	echo "  make remote-train-dataset REMOTE=user@host DATASET=training_jobs/dataset_xxx.npz [other vars...]";
@@ -107,3 +109,12 @@ remote-train-dataset:
 	  --device "$(DEVICE)" \
 	  --dataset "$(DATASET)" \
 	  --save-local "$(SAVE_LOCAL)"
+
+# Local training helpers
+train-setup:
+	@echo "\n[+] Setting up local training environment (venv + deps)..."; \
+	cd backend && bash scripts/setup_training_env.sh
+
+train-cpu:
+	@echo "\n[+] Running local CPU training..."; \
+	cd backend && bash run_training.sh
