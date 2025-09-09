@@ -13,8 +13,7 @@ import {
   FormHelperText,
   CircularProgress,
   Alert,
-  Divider,
-  IconButton
+  Divider
 } from '@mui/material';
 import { Save, Delete } from '@mui/icons-material';
 import { useFormik } from 'formik';
@@ -95,7 +94,7 @@ const AgentConfigForm = ({ gameId, configId, onSuccess }) => {
     };
 
     fetchData();
-  }, [gameId, configId]);
+  }, [gameId, configId, formik]);
 
   const renderConfigFields = () => {
     const { agent_type } = formik.values;

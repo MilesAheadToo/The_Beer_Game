@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { 
+import {
   AppBar,
   Toolbar,
   IconButton,
@@ -12,8 +12,6 @@ import {
   Divider,
   ListItemIcon,
   ListItemText,
-  useMediaQuery,
-  useTheme,
   Avatar,
   Badge,
   Tooltip
@@ -38,8 +36,6 @@ const Navbar = () => {
   const [anchorEl, setAnchorEl] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const open = Boolean(anchorEl);
   
   // Update current path when location changes

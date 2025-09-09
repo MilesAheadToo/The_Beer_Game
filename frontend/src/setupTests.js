@@ -1,3 +1,5 @@
+import '@testing-library/jest-dom';
+
 // Mock localStorage
 const localStorageMock = {
   getItem: jest.fn(),
@@ -44,4 +46,3 @@ jest.mock('axios', () => {
   const create = jest.fn(() => mockInstance);
   return { __esModule: true, default: { create }, create };
 });
-import '@testing-library/jest-dom';

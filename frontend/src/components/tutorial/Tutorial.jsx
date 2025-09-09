@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { XMarkIcon, ArrowRightIcon, ArrowLeftIcon, PlayIcon, UserGroupIcon, ChartBarIcon, TrophyIcon, CogIcon, QuestionMarkCircleIcon } from '@heroicons/react/24/outline';
+import { useState, useEffect, useCallback } from 'react';
+import { XMarkIcon, ArrowRightIcon, ArrowLeftIcon, PlayIcon } from '@heroicons/react/24/outline';
 import { useNavigate } from 'react-router-dom';
 
 const Tutorial = ({ onClose, showOnboarding = false }) => {
@@ -60,19 +60,27 @@ const Tutorial = ({ onClose, showOnboarding = false }) => {
 
   const currentStepData = steps[currentStep];
 
-  const handleNext = () => {
+  const handleFinish = useCallback(() => {
+    if (showOnboarding) {
+      localStorage.setItem('hasCompletedOnboarding', 'true');
+      navigate('/lobby');
+    }
+    onClose();
+  }, [navigate, onClose, showOnboarding]);
+
+  const handleNext = useCallback(() => {
     if (currentStep < steps.length - 1) {
       setCurrentStep(currentStep + 1);
     } else {
       handleFinish();
     }
-  };
+  }, [currentStep, steps.length, handleFinish]);
 
-  const handlePrev = () => {
+  const handlePrev = useCallback(() => {
     if (currentStep > 0) {
       setCurrentStep(currentStep - 1);
     }
-  };
+  }, [currentStep]);
 
   const handleSkip = () => {
     if (showOnboarding) {
@@ -81,13 +89,7 @@ const Tutorial = ({ onClose, showOnboarding = false }) => {
     onClose();
   };
 
-  const handleFinish = () => {
-    if (showOnboarding) {
-      localStorage.setItem('hasCompletedOnboarding', 'true');
-      navigate('/lobby');
-    }
-    onClose();
-  };
+  
 
   // Close on Escape key
   useEffect(() => {
@@ -103,7 +105,7 @@ const Tutorial = ({ onClose, showOnboarding = false }) => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentStep]);
+  }, [currentStep, onClose, handleNext, handlePrev]);
 
   // Progress dots
   const ProgressDots = () => (

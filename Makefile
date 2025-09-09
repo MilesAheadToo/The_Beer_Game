@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-.PHONY: up up-dev up-tls up-tls-only rebuild-frontend down ps logs seed reset-admin proxy-url help
+.PHONY: up up-dev up-tls up-tls-only rebuild-frontend down ps logs seed reset-admin proxy-url help remote-train remote-train-dataset
 
 up:
 	@echo "\n[+] Building and starting full system (proxy, frontend, backend, db)..."; \
@@ -67,4 +67,43 @@ help:
 	echo "  make logs          - tail logs"; \
 	echo "  make seed          - run user seeder (admin and role users)"; \
 	echo "  make reset-admin   - reset admin password to Daybreak@2025"; \
-	echo "  make proxy-url     - print URLs and login info"
+	echo "  make proxy-url     - print URLs and login info"; \
+	echo "  make remote-train REMOTE=user@host [EPOCHS=50 DEVICE=cuda WINDOW=12 HORIZON=1 NUM_RUNS=64 T=64 REMOTE_DIR=~/beer-game SAVE_LOCAL=backend/checkpoints/supply_chain_gnn.pth]"; \
+	echo "                     - generate dataset locally, sync to remote, train with --dataset, copy checkpoint back"; \
+	echo "  make remote-train-dataset REMOTE=user@host DATASET=training_jobs/dataset_xxx.npz [other vars...]";
+
+# Remote training wrappers (see scripts/remote_train.sh for full help)
+REMOTE        ?=
+REMOTE_DIR    ?= ~/beer-game
+EPOCHS        ?= 50
+DEVICE        ?= cuda
+WINDOW        ?= 12
+HORIZON       ?= 1
+NUM_RUNS      ?= 64
+T             ?= 64
+DATASET       ?=
+SAVE_LOCAL    ?= backend/checkpoints/supply_chain_gnn.pth
+
+remote-train:
+	@if [ -z "$(REMOTE)" ]; then echo "REMOTE is required, e.g. make remote-train REMOTE=user@host"; exit 1; fi; \
+	bash scripts/remote_train.sh \
+	  --remote "$(REMOTE)" \
+	  --remote-dir "$(REMOTE_DIR)" \
+	  --epochs "$(EPOCHS)" \
+	  --device "$(DEVICE)" \
+	  --window "$(WINDOW)" \
+	  --horizon "$(HORIZON)" \
+	  --num-runs "$(NUM_RUNS)" \
+	  --T "$(T)" \
+	  --save-local "$(SAVE_LOCAL)"
+
+remote-train-dataset:
+	@if [ -z "$(REMOTE)" ]; then echo "REMOTE is required, e.g. make remote-train-dataset REMOTE=user@host DATASET=..."; exit 1; fi; \
+	if [ -z "$(DATASET)" ]; then echo "DATASET is required for remote-train-dataset"; exit 1; fi; \
+	bash scripts/remote_train.sh \
+	  --remote "$(REMOTE)" \
+	  --remote-dir "$(REMOTE_DIR)" \
+	  --epochs "$(EPOCHS)" \
+	  --device "$(DEVICE)" \
+	  --dataset "$(DATASET)" \
+	  --save-local "$(SAVE_LOCAL)"

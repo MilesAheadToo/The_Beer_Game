@@ -122,7 +122,7 @@ const GameLobby = () => {
         </div>
       ) : (
         <div className="card-surface overflow-hidden sm:rounded-md">
-          <ul role="list" className="divide-y divide-gray-200">
+          <ul className="divide-y divide-gray-200">
             {games.map((game) => (
               <li key={game.id}>
                 <div className="px-4 py-4 sm:px-6">

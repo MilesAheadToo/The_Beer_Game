@@ -1,53 +1,89 @@
-# Beer Game API Documentation
+# 🍺 Beer Game API v1.1
 
-This document provides detailed information about the Beer Game API endpoints, including request/response formats and examples.
+## 🔐 Authentication
+- JWT with HTTP-only cookies
+- Required header: `X-CSRF-Token` for non-GET requests
+- Login: `POST /auth/login`
+- Get current user: `GET /auth/me`
 
-## Base URL
-All API endpoints are relative to the base URL:
-```
-http://localhost:8000/api/v1
-```
+## 🎮 Game Endpoints
 
-## Authentication
-All endpoints require authentication. Include a valid JWT token in the `Authorization` header:
-```
-Authorization: Bearer <your_jwt_token>
-```
-
-## Game Endpoints
-
-### Create a New Game
-```
+### Create Game
+```http
 POST /games/
 ```
-
-**Request Body:**
+**Request:**
 ```json
 {
-  "name": "My Beer Game",
+  "name": "Supply Chain Challenge",
   "max_rounds": 20,
+  "player_count": 4,
   "demand_pattern": {
-    "type": "classic",
+    "type": "step",
     "params": {
-      "stable_period": 5,
-      "step_increase": 4
+      "initial_demand": 4,
+      "step_round": 5,
+      "step_size": 2
     }
   }
 }
 ```
 
-**Response (201 Created):**
+### Join Game
+```http
+POST /games/{game_id}/join
+```
+**Request:**
+```json
+{"role": "retailer"}
+```
+
+### Submit Order
+```http
+POST /games/{game_id}/orders
+```
+**Request:**
 ```json
 {
-  "id": 1,
-  "name": "My Beer Game",
-  "status": "created",
-  "current_round": 0,
-  "max_rounds": 20,
-  "created_at": "2023-04-01T10:00:00Z",
-  "updated_at": "2023-04-01T10:00:00Z"
+  "round": 1,
+  "quantity": 8,
+  "type": "regular"
 }
 ```
+
+### Get Game State
+```http
+GET /games/{game_id}/state
+```
+**Response:**
+```json
+{
+  "game_id": "550e8400-e29b-41d4-a716-446655440000",
+  "status": "in_progress",
+  "current_round": 5,
+  "players": [
+    {
+      "id": 42,
+      "role": "retailer",
+      "inventory": 15,
+      "backlog": 0,
+      "last_order": 8
+    }
+  ]
+}
+```
+
+## 🔄 WebSocket
+```
+ws://localhost:8000/ws/game/{game_id}
+```
+
+## ⚠️ Error Responses
+- `400 Bad Request`: Invalid parameters
+- `401 Unauthorized`: Invalid/missing token
+- `403 Forbidden`: Insufficient permissions
+- `404 Not Found`: Resource not found
+- `429 Too Many Requests`: Rate limit exceeded
 
 ### Get Game Details
 ```

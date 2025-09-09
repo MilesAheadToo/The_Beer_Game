@@ -32,7 +32,6 @@ import {
   Spinner,
   Heading,
   Alert,
-  AlertIcon,
   AlertTitle,
   AlertDescription,
   Icon

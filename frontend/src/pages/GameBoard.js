@@ -50,14 +50,8 @@ const GameBoard = () => {
   const [playerRole, setPlayerRole] = useState('');
   const [playerId, setPlayerId] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [orderQuantity, setOrderQuantity] = useState(0);
-  const [inventory, setInventory] = useState(0);
-  const [backlog, setBacklog] = useState(0);
-  const [cost, setCost] = useState(0);
   const [isPlayerTurn, setIsPlayerTurn] = useState(false);
-  const [roundEndsAt, setRoundEndsAt] = useState(null);
-  const [hasSubmitted, setHasSubmitted] = useState(false);
+  
   const { isOpen, onClose } = useDisclosure();
   const { gameStatus } = useWebSocket();
   
@@ -71,9 +65,7 @@ const GameBoard = () => {
           
           // Update derived state
           if (state.current_round) {
-            setRoundEndsAt(new Date(state.current_round.ends_at));
             setIsPlayerTurn(state.current_round.current_player_id === state.player_id);
-            setHasSubmitted(state.current_round.submitted_players.some(p => p.id === state.player_id));
           }
         } catch (error) {
           console.error('Error fetching game state:', error);

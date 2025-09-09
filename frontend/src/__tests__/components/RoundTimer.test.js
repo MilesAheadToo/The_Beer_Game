@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, waitFor } from '@testing-library/react';
 
 // Mock the mixedGameApi default export used by RoundTimer
 jest.mock('../../services/api', () => ({

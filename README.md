@@ -1,53 +1,82 @@
-# The Beer Game with Amazon Supply Chain Model
+# The Beer Game with Supply Chain Analytics
 
-A simulation of the Beer Distribution Game using Amazon's Supply Chain Data Model, featuring:
-- MariaDB database integration
-- Graph Neural Network (GNN) for supply chain analysis
-- Smart agents at each supply chain node
-- Configurable distributions for lead times, capacities, and throughput
-- React-based web interface with Material-UI
-- Containerized with Docker for easy deployment
+A comprehensive simulation of the Beer Distribution Game featuring AI-powered supply chain analysis and optimization. This implementation includes:
+
+- **Secure Authentication**: JWT-based authentication with role-based access control
+- **Advanced Analytics**: Real-time supply chain metrics and visualization
+- **AI-Powered Insights**: Machine learning models for demand forecasting and optimization
+- **Multiplayer Support**: Play with both human and AI players
+- **Containerized Deployment**: Easy setup with Docker and Docker Compose
 
 ## 🚀 Features
 
-- **Interactive Supply Chain Visualization**: Drag-and-drop interface for building supply chain networks
-- **Advanced Simulation Engine**: Configurable parameters for demand, lead times, and inventory policies
-- **Real-time Analytics**: Monitor key performance indicators and metrics
-- **Bullwhip Effect Analysis**: Visualize and analyze demand amplification in the supply chain
-- **Role-based Access Control**: Secure authentication and authorization
-- **API-First Design**: RESTful API for integration with other systems
+- **Secure Authentication**
+  - JWT-based authentication with HTTP-only cookies
+  - CSRF protection with double-submit cookie pattern
+  - Role-based access control (Admin, Manager, Player)
+  - Secure password hashing with bcrypt
+
+- **Supply Chain Simulation**
+  - Configurable supply chain networks
+  - Real-time inventory and order tracking
+  - Demand forecasting with machine learning
+  - Bullwhip effect visualization
+
+- **Admin Dashboard**
+  - User management
+  - Game configuration
+  - System monitoring
+  - Analytics and reporting
+
+- **API-First Design**
+  - RESTful API with OpenAPI documentation
+  - WebSocket support for real-time updates
+  - Comprehensive error handling and logging
 
 ## 🛠 Tech Stack
 
-- **Frontend**: React, Material-UI, Redux, React Flow, Recharts
-- **Backend**: FastAPI, Python 3.9
-- **Database**: MariaDB
-- **AI/ML**: PyTorch, PyTorch Geometric
-- **Containerization**: Docker, Docker Compose
-- **CI/CD**: GitHub Actions (sample configuration included)
+- **Frontend**: React 18, Material-UI 5, Redux Toolkit, React Query, Recharts
+- **Backend**: FastAPI, Python 3.10, SQLAlchemy 2.0, Pydantic 2.0
+- **Database**: MariaDB 10.8 with connection pooling
+- **Security**: JWT, CSRF protection, CORS, rate limiting
+- **DevOps**: Docker, Docker Compose, GitHub Actions
+- **Testing**: Pytest, Jest, React Testing Library
 
 ## 📦 Prerequisites
 
-- Docker 20.10+ and Docker Compose 1.29+
-- Node.js 16+ (for local development)
-- Python 3.9+ (for local development)
+- Docker 20.10+ and Docker Compose 2.0+
+- Node.js 18+ (for local development)
+- Python 3.10+ (for local development)
 
 ## 🚀 Quick Start
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/yourusername/beer-game.git
-   cd beer-game
+   git clone https://github.com/MilesAheadToo/The_Beer_Game.git
+   cd The_Beer_Game
    ```
 
-2. Start the application using Docker Compose:
+2. Copy the example environment files:
    ```bash
-   docker-compose up -d
+   cp .env.example .env
+   cp frontend/.env.example frontend/.env
    ```
 
-3. Access the application:
+3. Start the application using Docker Compose:
+   ```bash
+   docker-compose up -d --build
+   ```
+
+4. Initialize the database (first time only):
+   ```bash
+   docker-compose exec backend python -m app.db.init_db
+   ```
+
+5. Access the application:
    - Frontend: http://localhost:3000
    - Backend API: http://localhost:8000
+   - API Documentation: http://localhost:8000/docs
+   - Admin Dashboard: http://localhost:3000/admin
    - API Documentation: http://localhost:8000/docs
    - Database Admin (phpMyAdmin): http://localhost:8080
      - Username: root

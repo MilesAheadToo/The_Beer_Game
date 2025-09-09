@@ -183,7 +183,7 @@ export const getPlayerPosition = (game, userId) => {
   return sortedPlayers.findIndex(p => p.user_id === userId) + 1;
 };
 
-export default {
+const gameUtils = {
   formatDuration,
   calculateScore,
   validateOrder,
@@ -195,3 +195,5 @@ export default {
   sortPlayersByScore,
   getPlayerPosition,
 };
+
+export default gameUtils;

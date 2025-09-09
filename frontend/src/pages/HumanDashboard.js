@@ -19,7 +19,6 @@ import {
   AlertDescription,
   Badge,
   Divider,
-  Container,
   useToast
 } from '@chakra-ui/react';
 import { Line } from 'react-chartjs-2';

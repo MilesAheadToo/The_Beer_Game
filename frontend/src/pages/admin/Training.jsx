@@ -18,7 +18,7 @@ export default function Training() {
     info_delay: [0, 6], ship_delay: [0, 6], init_inventory: [4, 60],
     holding_cost: [0.1, 2.0], backlog_cost: [0.2, 4.0], max_inbound_per_link: [50, 300], max_order: [50, 300]
   });
-  const [dataset, setDataset] = useState(null);
+  // Generated dataset info (optional)
   const toast = useToast();
 
   const launch = async () => {
@@ -55,7 +55,6 @@ export default function Training() {
     try {
       const param_ranges = Object.fromEntries(Object.entries(ranges).map(([k,v]) => [k, [Number(v[0]), Number(v[1])]]));
       const data = await mixedGameApi.generateData({ num_runs: 64, T: 64, window: windowSize, horizon, param_ranges });
-      setDataset(data);
       toast({ title: 'Dataset generated', description: data.path, status: 'success', duration: 4000, isClosable: true });
     } catch (e) {
       toast({ title: 'Failed to generate dataset', description: e?.response?.data?.detail || e.message, status: 'error', duration: 5000, isClosable: true });

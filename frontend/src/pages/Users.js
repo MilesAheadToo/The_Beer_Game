@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Button,
@@ -29,7 +29,6 @@ import {
 } from '@chakra-ui/react';
 import { AddIcon, DeleteIcon, EditIcon, UnlockIcon } from '@chakra-ui/icons';
 import { api } from '../services/api';
-import { useAuth } from '../contexts/AuthContext';
 
 const Users = () => {
   const bgColor = useColorModeValue('white', 'gray.800');
@@ -49,12 +48,12 @@ const Users = () => {
   const { isOpen, onOpen, onClose } = useDisclosure();
   const cancelRef = React.useRef();
 
-  const { isAdmin } = useAuth();
+  // const { isAdmin } = useAuth();
   const [isPwOpen, setPwOpen] = useState(false);
   const [pwUser, setPwUser] = useState(null);
   const [newPassword, setNewPassword] = useState('');
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
       const response = await api.get('/users/');
       setUsers(response.data);
@@ -70,7 +69,7 @@ const Users = () => {
       });
       setLoading(false);
     }
-  };
+  }, [toast]);
 
   const toggleAdmin = async (user) => {
     try {
@@ -84,7 +83,7 @@ const Users = () => {
 
   useEffect(() => {
     fetchUsers();
-  }, []);
+  }, [fetchUsers]);
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -30,7 +30,7 @@ const AgentConfigs = ({ gameId }) => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingConfig, setEditingConfig] = useState(null);
 
-  const fetchConfigs = async () => {
+  const fetchConfigs = useCallback(async () => {
     try {
       setLoading(true);
       const response = await api.get(`/api/games/${gameId}/agent-configs`);
@@ -42,11 +42,11 @@ const AgentConfigs = ({ gameId }) => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [gameId]);
 
   useEffect(() => {
     fetchConfigs();
-  }, [gameId]);
+  }, [fetchConfigs]);
 
   const handleDelete = async (id) => {
     if (window.confirm('Are you sure you want to delete this configuration?')) {

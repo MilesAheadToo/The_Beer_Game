@@ -200,6 +200,21 @@ const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
 const CreateMixedGame = () => {
   const [searchParams] = useSearchParams();
   const [gameName, setGameName] = useState(searchParams.get('name') || '');
+  const [systemConfig, setSystemConfig] = useState({
+    // Default system configuration values
+    min_order_quantity: 0,
+    max_order_quantity: 100,
+    min_holding_cost: 0,
+    max_holding_cost: 10,
+    min_backlog_cost: 0,
+    max_backlog_cost: 20,
+    min_demand: 0,
+    max_demand: 100,
+    min_lead_time: 0,
+    max_lead_time: 4,
+    min_starting_inventory: 0,
+    max_starting_inventory: 100,
+  });
   const [maxRounds, setMaxRounds] = useState(20);
   const [description, setDescription] = useState(searchParams.get('description') || '');
   const [isPublic, setIsPublic] = useState(true);
@@ -209,6 +224,51 @@ const CreateMixedGame = () => {
     wholesaler: { selling_price: 75.0, standard_cost: 60.0 },
     distributor: { selling_price: 60.0, standard_cost: 45.0 },
     factory: { selling_price: 45.0, standard_cost: 30.0 }
+  });
+  // Missing local state for system configuration ranges and per-node policies
+  // Node policies for each role in the supply chain
+  const [nodePolicies, setNodePolicies] = useState({
+    retailer: {
+      // Default policy values for retailer
+      policy_type: 'base_stock',
+      base_stock_level: 50,
+      reorder_point: 20,
+      order_up_to: 100,
+      smoothing_alpha: 0.3,
+      smoothing_beta: 0.1,
+      smoothing_gamma: 0.2,
+      forecast_horizon: 4
+    },
+    wholesaler: {
+      policy_type: 'base_stock',
+      base_stock_level: 100,
+      reorder_point: 40,
+      order_up_to: 200,
+      smoothing_alpha: 0.3,
+      smoothing_beta: 0.1,
+      smoothing_gamma: 0.2,
+      forecast_horizon: 4
+    },
+    distributor: {
+      policy_type: 'base_stock',
+      base_stock_level: 150,
+      reorder_point: 60,
+      order_up_to: 300,
+      smoothing_alpha: 0.3,
+      smoothing_beta: 0.1,
+      smoothing_gamma: 0.2,
+      forecast_horizon: 4
+    },
+    factory: {
+      policy_type: 'base_stock',
+      base_stock_level: 200,
+      reorder_point: 80,
+      order_up_to: 400,
+      smoothing_alpha: 0.3,
+      smoothing_beta: 0.1,
+      smoothing_gamma: 0.2,
+      forecast_horizon: 4
+    }
   });
   // Policy/Simulation settings (bounded)
   const [policy, setPolicy] = useState({
@@ -324,7 +384,6 @@ const CreateMixedGame = () => {
     }
   }, [systemRanges]);
 
-  const showSystemCfgHint = !systemConfig || Object.keys(systemConfig || {}).length === 0;
 
   const handlePlayerTypeChange = (index, type) => {
     setPlayers(players.map((player, i) => {

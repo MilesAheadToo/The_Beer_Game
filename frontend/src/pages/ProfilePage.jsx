@@ -4,14 +4,12 @@ import {
   UserCircleIcon, 
   TrophyIcon, 
   ChartBarIcon, 
-  ClockIcon, 
+  CalendarIcon,
   PencilIcon,
   CheckIcon,
   XMarkIcon,
   ShieldCheckIcon,
-  EnvelopeIcon,
-  CalendarIcon,
-  UserGroupIcon
+  
 } from '@heroicons/react/24/outline';
 
 const ProfilePage = () => {
@@ -104,6 +102,7 @@ const ProfilePage = () => {
     if (user) {
       fetchData();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user]);
 
   const handleInputChange = (e) => {

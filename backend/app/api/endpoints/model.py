@@ -64,6 +64,7 @@ class TrainRequest(BaseModel):
     device: Optional[str] = None
     steps_table: str = "beer_game_steps"
     db_url: Optional[str] = None
+    dataset_path: Optional[str] = None
 
 @router.post("/model/train", response_model=Dict[str, Any])
 async def launch_training(req: TrainRequest):
@@ -88,6 +89,8 @@ async def launch_training(req: TrainRequest):
         if req.db_url:
             cmd += ["--db-url", req.db_url]
         cmd += ["--steps-table", req.steps_table]
+    if req.dataset_path:
+        cmd += ["--dataset", req.dataset_path]
     note = None
     if req.server_host not in ("localhost", "127.0.0.1", "aiserver.local"):
         note = f"Remote host '{req.server_host}' not configured for remote execution; launching locally."

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { 
   Box, 
   Grid, 
@@ -57,10 +57,10 @@ const stockVsForecast = [
   { name: 'Part F', stock: 6780, forecast: 5200 },
 ];
 
-function useQuery() {
-  const { search } = useLocation();
-  return new URLSearchParams(search);
-}
+// function useQuery() {
+//   const { search } = useLocation();
+//   return new URLSearchParams(search);
+// }
 
 const Dashboard = () => {
   // Theme values - must be called unconditionally at the top level
@@ -69,11 +69,10 @@ const Dashboard = () => {
   
   // State
   const [loading, setLoading] = useState(true);
-  const [gameResult, setGameResult] = useState(null);
   const navigate = useNavigate();
-  const query = useQuery();
-  // Keep gameId for potential future use
-  const gameId = query.get('gameId');
+  // const query = useQuery();
+  // Query params used for future deep-linking
+  // const gameId = query.get('gameId');
 
 
   useEffect(() => {
@@ -81,7 +80,6 @@ const Dashboard = () => {
     setLoading(true);
     const timer = setTimeout(() => {
       setLoading(false);
-      setGameResult({ roundsCompleted: 5, status: 'In Progress' });
     }, 1000);
     return () => clearTimeout(timer);
   }, []);

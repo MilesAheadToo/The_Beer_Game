@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import '@testing-library/jest-dom';
 import PasswordReset from '../../pages/PasswordReset';
@@ -98,9 +98,7 @@ describe('PasswordReset', () => {
       
       // Submit the form
       const submitButton = screen.getByRole('button', { name: /send reset link/i });
-      await act(async () => {
-        fireEvent.click(submitButton);
-      });
+      fireEvent.click(submitButton);
       
       // Check that the API was called
       expect(requestPasswordReset).toHaveBeenCalledWith('test@example.com');
@@ -178,15 +176,13 @@ describe('PasswordReset', () => {
       const confirmPasswordInput = screen.getByPlaceholderText('Confirm new password');
       const submitButton = screen.getByRole('button', { name: /reset password/i });
       
-      await act(async () => {
-        fireEvent.change(newPasswordInput, {
-          target: { value: 'NewPassword123!' },
-        });
-        fireEvent.change(confirmPasswordInput, {
-          target: { value: 'NewPassword123!' },
-        });
-        fireEvent.click(submitButton);
+      fireEvent.change(newPasswordInput, {
+        target: { value: 'NewPassword123!' },
       });
+      fireEvent.change(confirmPasswordInput, {
+        target: { value: 'NewPassword123!' },
+      });
+      fireEvent.click(submitButton);
       
       // Check that the API was called with the right parameters
       expect(require('../../services/api').mixedGameApi.resetPassword).toHaveBeenCalledWith(

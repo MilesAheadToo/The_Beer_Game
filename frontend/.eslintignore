@@ -1,0 +1,10 @@
+node_modules/
+build/
+dist/
+coverage/
+.cache/
+vite.config.ts
+public/
+**/*.min.js
+backend/
+scripts/

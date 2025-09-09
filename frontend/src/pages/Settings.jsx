@@ -10,11 +10,12 @@ import {
   MoonIcon, 
   SunIcon, 
   ComputerDesktopIcon,
-  CheckIcon
+  CheckIcon,
+  QuestionMarkCircleIcon
 } from '@heroicons/react/24/outline';
 
 const Settings = () => {
-  const { user, updateProfile } = useAuth();
+  const { user } = useAuth();
   const { openHelp } = useHelp();
   
   // Settings state

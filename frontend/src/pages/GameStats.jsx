@@ -13,7 +13,7 @@ import {
   Legend, 
   ArcElement 
 } from 'chart.js';
-import { Bar, Line, Pie } from 'react-chartjs-2';
+import { Line, Pie } from 'react-chartjs-2';
 import { format, subDays } from 'date-fns';
 import { 
   ArrowUpIcon, 
@@ -22,8 +22,6 @@ import {
   UserGroupIcon, 
   ClockIcon, 
   ChartBarIcon,
-  CalendarIcon,
-  UserIcon,
   StarIcon
 } from '@heroicons/react/24/outline';
 

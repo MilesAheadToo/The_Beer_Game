@@ -20,7 +20,24 @@ export function AuthProvider({ children }) {
   
   const logoutTimer = useRef(null);
   const warningTimer = useRef(null);
-  const activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart'];
+  const activityEvents = useMemo(() => ['mousedown', 'keydown', 'scroll', 'touchstart'], []);
+
+  const logout = useCallback(async () => {
+    try {
+      setLoading(true);
+      await mixedGameApi.logout();
+    } catch (error) {
+      console.error('Logout error:', error);
+    } finally {
+      if (logoutTimer.current) clearTimeout(logoutTimer.current);
+      if (warningTimer.current) clearTimeout(warningTimer.current);
+      setUser(null);
+      setIsAuthenticated(false);
+      setShowTimeoutWarning(false);
+      setLoading(false);
+      localStorage.removeItem('authState');
+    }
+  }, []);
 
   // Handle user activity - reset timers
   const resetTimers = useCallback(() => {
@@ -60,7 +77,7 @@ export function AuthProvider({ children }) {
       
       return () => clearInterval(interval);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, logout]);
 
   // Set up activity listeners
   useEffect(() => {
@@ -86,7 +103,7 @@ export function AuthProvider({ children }) {
         if (warningTimer.current) clearTimeout(warningTimer.current);
       };
     }
-  }, [isAuthenticated, resetTimers]);
+  }, [isAuthenticated, resetTimers, activityEvents]);
 
   // Check if user is authenticated on initial load and handle token refresh
   useEffect(() => {
@@ -124,7 +141,7 @@ export function AuthProvider({ children }) {
     };
 
     checkAuth();
-  }, []);
+  }, [logout]);
 
   const login = useCallback(async (credentials) => {
     try {
@@ -150,26 +167,7 @@ export function AuthProvider({ children }) {
     }
   }, [resetTimers]);
 
-  const logout = useCallback(async () => {
-    try {
-      setLoading(true);
-      await mixedGameApi.logout();
-    } catch (error) {
-      console.error('Logout error:', error);
-    } finally {
-      // Clear timers
-      if (logoutTimer.current) clearTimeout(logoutTimer.current);
-      if (warningTimer.current) clearTimeout(warningTimer.current);
-      
-      setUser(null);
-      setIsAuthenticated(false);
-      setShowTimeoutWarning(false);
-      setLoading(false);
-      
-      // Clear any sensitive data from localStorage
-      localStorage.removeItem('authState');
-    }
-  }, []);
+  
 
   const refreshUser = useCallback(async () => {
     try {

@@ -175,35 +175,6 @@ class WebSocketService {
     }
   }
   
-  /**
-   * Attempt to reconnect to the WebSocket server with exponential backoff
-   */
-  attemptReconnect() {
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached');
-      this.notifyCallbacks('error', { error: 'Connection lost. Please refresh the page.' });
-      return;
-    }
-    
-    if (!this.connectionParams) {
-      console.error('No connection parameters available for reconnection');
-      return;
-    }
-    
-    const { gameId, accessToken, playerId } = this.connectionParams;
-    
-    // Calculate delay with exponential backoff (capped at maxReconnectDelay)
-    const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts), this.maxReconnectDelay);
-    
-    console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
-    
-    this.reconnectTimeout = setTimeout(() => {
-      if (!this.connected) {
-        this.reconnectAttempts++;
-        this.connect(gameId, accessToken, playerId);
-      }
-    }, delay);
-  }
 
   send(message) {
     if (this.socket && this.connected) {

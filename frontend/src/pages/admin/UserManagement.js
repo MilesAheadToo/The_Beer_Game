@@ -30,7 +30,7 @@ function UserManagement() {
   const fetchUsers = async () => {
     try {
       // Admin list endpoint (cookie auth)
-      const { data } = await mixedGameApi.health(); // quick health check to ensure API reachable
+      await mixedGameApi.health(); // quick health check to ensure API reachable
       const res = await fetch('/api/v1/auth/users/', { credentials: 'include' });
       if (!res.ok) throw new Error('Failed to fetch users');
       const list = await res.json();

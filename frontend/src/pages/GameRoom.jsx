@@ -1,13 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
   ArrowPathIcon, 
   ArrowUturnLeftIcon,
   ChatBubbleLeftRightIcon,
-  Cog6ToothIcon,
   UserGroupIcon,
-  ChartBarIcon,
-  InformationCircleIcon
+  ChartBarIcon
 } from '@heroicons/react/24/outline';
 import gameApi from '../services/gameApi';
 import { mixedGameApi } from '../services/api';
@@ -29,7 +27,7 @@ const GameRoom = () => {
   const ws = useRef(null);
 
   // Fetch game data
-  const fetchGame = async () => {
+  const fetchGame = useCallback(async () => {
     try {
       const gameData = await gameApi.getGame(gameId);
       setGame(gameData);
@@ -41,7 +39,7 @@ const GameRoom = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [gameId, navigate]);
 
   // Set up WebSocket connection
   useEffect(() => {
@@ -112,7 +110,7 @@ const GameRoom = () => {
         ws.current = null;
       }
     };
-  }, [gameId, navigate]);
+  }, [gameId, navigate, fetchGame]);
   
   // Auto-scroll chat to bottom when new messages arrive
   useEffect(() => {

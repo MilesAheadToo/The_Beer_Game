@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { XMarkIcon, QuestionMarkCircleIcon, BookOpenIcon, EnvelopeIcon, ArrowRightIcon, ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
+import { XMarkIcon, BookOpenIcon, EnvelopeIcon, ArrowRightIcon, ChevronDownIcon, ChevronUpIcon, PlayIcon } from '@heroicons/react/24/outline';
 import Tutorial from '../tutorial/Tutorial';
 
 const HelpCenter = ({ onClose }) => {

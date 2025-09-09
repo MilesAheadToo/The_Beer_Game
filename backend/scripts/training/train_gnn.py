@@ -118,17 +118,27 @@ def main():
                       help="Device to train on (cuda/cpu)")
     parser.add_argument("--save-path", default="artifacts/temporal_gnn.pt",
                       help="Path to save the trained model")
+    parser.add_argument("--dataset", default=None,
+                      help="Optional path to an .npz dataset with arrays X,A,P,Y. If provided, overrides --source/--db-url.")
     args = parser.parse_args()
 
     # --- Load/Generate data
-    print(f"Loading data from {args.source}...")
-    X, A, P, Y = get_data(
-        source=args.source,
-        window=args.window,
-        horizon=args.horizon,
-        db_url=args.db_url,
-        steps_table=args.steps_table,
-    )
+    if args.dataset:
+        print(f"Loading dataset from {args.dataset}...")
+        data = np.load(args.dataset)
+        required = {"X", "A", "P", "Y"}
+        if not required.issubset(set(data.files)):
+            raise RuntimeError(f"Dataset {args.dataset} missing required arrays {required}. Found: {set(data.files)}")
+        X, A, P, Y = data["X"], data["A"], data["P"], data["Y"]
+    else:
+        print(f"Loading data from {args.source}...")
+        X, A, P, Y = get_data(
+            source=args.source,
+            window=args.window,
+            horizon=args.horizon,
+            db_url=args.db_url,
+            steps_table=args.steps_table,
+        )
     print(f"Loaded {len(X)} training samples")
     print(f"Input shape: {X.shape}, Target shape: {Y.shape}")
 

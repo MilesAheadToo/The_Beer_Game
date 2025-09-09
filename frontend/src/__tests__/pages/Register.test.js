@@ -136,10 +136,11 @@ describe('Register', () => {
     await waitFor(() => {
       const { toast } = require('react-toastify');
       expect(toast.success).toHaveBeenCalled();
-      expect(toast.success.mock.calls[0][0]).toBe(
-        'Registration successful! Please check your email to verify your account.'
-      );
     });
+    const { toast } = require('react-toastify');
+    expect(toast.success.mock.calls[0][0]).toBe(
+      'Registration successful! Please check your email to verify your account.'
+    );
   });
 
   it('handles registration failure', async () => {
