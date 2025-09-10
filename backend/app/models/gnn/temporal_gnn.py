@@ -2,24 +2,66 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch_geometric.nn import GATv2Conv
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple, List, Union, Any
 import numpy as np
+
+from app.utils.device import (
+    get_available_device, 
+    to_device, 
+    device_scope,
+    is_cuda_available,
+    empty_cache
+)
+
+# Type aliases
+Tensor = torch.Tensor
+Device = Union[str, torch.device]
 
 class TemporalGNN(nn.Module):
     """
     A simple temporal graph neural network layer that combines graph and temporal information.
     This is a simplified version for debugging purposes.
     """
-    def __init__(self, in_channels: int, out_channels: int, edge_dim: int = 1, heads: int = 1):
+    def __init__(self, in_channels: int, out_channels: int, edge_dim: int = 3, heads: int = 1,
+                 device: Optional[Device] = None):
         super().__init__()
-        self.gat = GATv2Conv(in_channels, out_channels, heads=1, edge_dim=edge_dim)
-        self.gru = nn.GRU(out_channels, out_channels, batch_first=True)
-        self.edge_dim = edge_dim
+        self.device = get_available_device(device)
+        self.edge_dim = edge_dim  # Should match the edge_attr dimension (3 in our case)
+        self.in_channels = in_channels
+        self.out_channels = out_channels
         
-    def forward(self, x: torch.Tensor, edge_index: torch.Tensor, edge_attr: torch.Tensor = None) -> torch.Tensor:
+        # Initialize layers with proper device handling
+        # Note: edge_dim should match the dimension of edge_attr (3 in our case)
+        self.gat = GATv2Conv(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            heads=1,
+            edge_dim=edge_dim,
+            add_self_loops=True
+        )
+        
+        self.gru = nn.GRU(
+            input_size=out_channels,
+            hidden_size=out_channels,
+            batch_first=True
+        )
+        
+        # Move to device after initialization
+        self.to(self.device)
+        
+    def forward(self, x: Tensor, edge_index: Tensor, edge_attr: Optional[Tensor] = None) -> Tensor:
+        # Ensure all tensors are on the same device as the model
+        device = next(self.parameters()).device
+        x = x.to(device)
+        edge_index = edge_index.to(device)
+        if edge_attr is not None:
+            edge_attr = edge_attr.to(device)
+            
+        # Ensure GAT and GRU are on the same device
+        self.gat = self.gat.to(device)
+        self.gru = self.gru.to(device)
+        
         # x shape: [batch_size, seq_len, num_nodes, in_channels] or [seq_len, num_nodes, in_channels]
-        # We need to process each time step separately to avoid dimension issues
-        
         # Add batch dimension if missing
         if x.dim() == 3:  # [seq_len, num_nodes, in_channels]
             x = x.unsqueeze(0)  # [1, seq_len, num_nodes, in_channels]
@@ -38,11 +80,49 @@ class TemporalGNN(nn.Module):
                 # Get features for this batch element: [num_nodes, in_channels]
                 x_bt = x_t[b]  # [num_nodes, in_channels]
                 
-                # Apply GAT with edge attributes if provided
+                # Ensure all tensors are on the same device and have correct dimensions
+                device = next(self.parameters()).device
+                x_bt = x_bt.to(device)
+                edge_idx = edge_index.to(device)
+                
+                # Ensure edge_attr has the correct shape [num_edges, edge_dim]
                 if edge_attr is not None:
-                    h_bt = self.gat(x_bt, edge_index, edge_attr)  # [num_nodes, out_channels]
+                    edge_attr_dev = edge_attr.to(device)
+                    # Ensure edge_attr has shape [num_edges, edge_dim]
+                    if edge_attr_dev.dim() == 1:
+                        edge_attr_dev = edge_attr_dev.unsqueeze(-1)  # [num_edges, 1]
+                    elif edge_attr_dev.dim() > 2:
+                        edge_attr_dev = edge_attr_dev.view(edge_attr_dev.size(0), -1)  # Flatten to [num_edges, edge_dim]
                 else:
-                    h_bt = self.gat(x_bt, edge_index)  # [num_nodes, out_channels]
+                    edge_attr_dev = None
+                
+                # Ensure GAT is on the same device
+                self.gat = self.gat.to(device)
+                
+                # Apply GAT with edge attributes if provided
+                try:
+                    if edge_attr_dev is not None:
+                        # Ensure edge_attr has the correct shape [num_edges, edge_dim]
+                        if edge_attr_dev.size(1) != self.edge_dim:
+                            # If edge_attr has wrong dimension, project it to the correct dimension
+                            if hasattr(self, 'edge_proj'):
+                                edge_attr_dev = self.edge_proj(edge_attr_dev)
+                            else:
+                                # Create a projection layer if it doesn't exist
+                                self.edge_proj = nn.Linear(edge_attr_dev.size(1), self.edge_dim).to(device)
+                                edge_attr_dev = self.edge_proj(edge_attr_dev)
+                        
+                        h_bt = self.gat(x_bt, edge_idx, edge_attr=edge_attr_dev)  # [num_nodes, out_channels]
+                    else:
+                        h_bt = self.gat(x_bt, edge_idx)  # [num_nodes, out_channels]
+                except RuntimeError as e:
+                    print(f"Error in GAT forward pass:")
+                    print(f"x_bt device: {x_bt.device}, shape: {x_bt.shape}")
+                    print(f"edge_index device: {edge_idx.device}, shape: {edge_idx.shape}")
+                    if edge_attr_dev is not None:
+                        print(f"edge_attr device: {edge_attr_dev.device}, shape: {edge_attr_dev.shape}")
+                    print(f"GAT device: {next(self.gat.parameters()).device if next(self.gat.parameters(), None) is not None else 'no parameters'}")
+                    raise
                 
                 batch_h.append(h_bt.unsqueeze(0))  # Add batch dimension back
                 
@@ -56,7 +136,11 @@ class TemporalGNN(nn.Module):
         # Apply GRU
         h = h.permute(0, 2, 1, 3)  # [batch_size, num_nodes, seq_len, out_channels]
         h = h.reshape(batch_size * num_nodes, seq_len, -1)  # [batch_size * num_nodes, seq_len, out_channels]
+        
+        # Ensure GRU is on the correct device
+        self.gru = self.gru.to(h.device)
         h, _ = self.gru(h)  # [batch_size * num_nodes, seq_len, out_channels]
+        
         h = h.reshape(batch_size, num_nodes, seq_len, -1)  # [batch_size, num_nodes, seq_len, out_channels]
         h = h.permute(0, 2, 1, 3)  # [batch_size, seq_len, num_nodes, out_channels]
         
@@ -78,15 +162,49 @@ class SupplyChainTemporalGNN(nn.Module):
         dropout: float = 0.1,
         seq_len: int = 10,      # Number of time steps to consider
         num_nodes: int = 4,     # retailer, wholesaler, distributor, manufacturer
+        device: Optional[Device] = None,
     ):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
         self.seq_len = seq_len
         self.num_nodes = num_nodes
+        self.device = get_available_device(device)
+        
+        # Initialize layers on CPU first
+        self.node_encoder = nn.Linear(node_features, hidden_dim)
+        self.edge_encoder = nn.Linear(edge_features, hidden_dim) if edge_features > 0 else None
+        
+        # Create temporal GNN layers
+        self.tgnn_layers = nn.ModuleList([
+            TemporalGNN(
+                hidden_dim, 
+                hidden_dim, 
+                edge_dim=hidden_dim if edge_features > 0 else None,
+                device='cpu'  # Initialize on CPU first
+            ) for _ in range(num_layers)
+        ])
+        
+        # Output heads
+        self.order_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, 1)  # Predict single order quantity
+        )
+        
+        self.demand_head = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim // 2, 1)  # Predict single demand value
+        )
+        
+        # Move model to device after initialization
+        self.to(self.device)
         
         # Input projection
-        self.input_proj = nn.Linear(node_features, hidden_dim)
+        self.input_proj = nn.Linear(node_features, hidden_dim).to(self.device)
         
         # Store edge dimension
         self.edge_dim = edge_features
@@ -99,7 +217,8 @@ class SupplyChainTemporalGNN(nn.Module):
                     in_channels=hidden_dim,
                     out_channels=hidden_dim,
                     edge_dim=edge_features,
-                    heads=1  # Using single head for simplicity
+                    heads=1,  # Using single head for simplicity
+                    device=self.device
                 )
             )
         
@@ -109,17 +228,20 @@ class SupplyChainTemporalGNN(nn.Module):
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim // 2, 1)  # Predict order quantity
-        )
+        ).to(self.device)
         
         self.demand_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim // 2, 1)  # Predict next demand
-        )
+        ).to(self.device)
         
         # Initialize weights
         self._init_weights()
+        
+        # Move model to device
+        self.to(self.device)
     
     def _init_weights(self):
         for m in self.modules():
@@ -130,11 +252,80 @@ class SupplyChainTemporalGNN(nn.Module):
     
     def forward(
         self,
-        x: torch.Tensor,
-        edge_index: torch.Tensor,
-        edge_attr: Optional[torch.Tensor] = None,
-        hx: Optional[torch.Tensor] = None
+        node_features: torch.Tensor,  # [batch_size, seq_len, num_nodes, node_features]
+        edge_index: torch.Tensor,     # [2, num_edges]
+        edge_attr: Optional[torch.Tensor] = None  # [num_edges, edge_features]
     ) -> Dict[str, torch.Tensor]:
+        with device_scope(self.device):
+            # Ensure all tensors are on the correct device
+            if not node_features.is_cuda and next(self.parameters()).is_cuda:
+                node_features = node_features.to(self.device)
+            if not edge_index.is_cuda and next(self.parameters()).is_cuda:
+                edge_index = edge_index.to(self.device)
+            if edge_attr is not None and not edge_attr.is_cuda and next(self.parameters()).is_cuda:
+                edge_attr = edge_attr.to(self.device)
+            
+            # Debug shapes
+            print(f"Input node_features shape: {node_features.shape}")
+            print(f"Input edge_index shape: {edge_index.shape}")
+            if edge_attr is not None:
+                print(f"Input edge_attr shape: {edge_attr.shape}")
+            
+            try:
+                batch_size, seq_len, num_nodes, node_feat_dim = node_features.size()
+            except Exception as e:
+                print(f"Error unpacking node_features shape: {node_features.shape}")
+                raise
+            
+            try:
+                # Encode node and edge features
+                h = self.node_encoder(node_features)  # [batch_size, seq_len, num_nodes, hidden_dim]
+                
+                # Encode edge attributes if provided
+                if edge_attr is not None and self.edge_encoder is not None:
+                    edge_embeddings = self.edge_encoder(edge_attr)  # [num_edges, hidden_dim]
+                else:
+                    edge_embeddings = None
+                    
+                # Apply temporal GNN layers
+                for layer in self.tgnn_layers:
+                    h = layer(h, edge_index, edge_embeddings)  # [batch_size, seq_len, num_nodes, hidden_dim]
+                    
+                # Get the last time step's hidden state for each node
+                last_hidden = h[:, -1]  # [batch_size, num_nodes, hidden_dim]
+                
+                # Predict order quantities and demand forecasts
+                order_quantities = self.order_head(last_hidden).squeeze(-1)  # [batch_size, num_nodes]
+                demand_forecasts = self.demand_head(last_hidden).squeeze(-1)  # [batch_size, num_nodes]
+                
+                # Return node embeddings and predictions
+                return {
+                    'order_quantity': order_quantities,  # [batch_size, num_nodes]
+                    'demand_forecast': demand_forecasts,  # [batch_size, num_nodes]
+                    'node_embeddings': last_hidden  # [batch_size, num_nodes, hidden_dim]
+                }
+                
+            except RuntimeError as e:
+                if 'out of memory' in str(e).lower() and is_cuda_available():
+                    # Clear CUDA cache and retry once
+                    empty_cache()
+                    return self.forward(node_features, edge_index, edge_attr)
+                raise
+                
+    def forward_original(
+        self,
+        x: Tensor,
+        edge_index: Tensor,
+        edge_attr: Optional[Tensor] = None,
+        hx: Optional[Tensor] = None
+    ) -> Dict[str, Tensor]:
+        # Ensure tensors are on the correct device
+        x = to_device(x, self.device)
+        edge_index = to_device(edge_index, self.device)
+        if edge_attr is not None:
+            edge_attr = to_device(edge_attr, self.device)
+        if hx is not None:
+            hx = to_device(hx, self.device)
         """
         Forward pass of the model.
         
@@ -224,32 +415,42 @@ class SupplyChainTemporalGNN(nn.Module):
 class SupplyChainAgent:
     """
     Agent that uses the TemporalGNN for supply chain decisions.
+    Handles device management and training/inference for a single node in the supply chain.
     """
     def __init__(
         self,
         node_id: int,
         model: Optional[SupplyChainTemporalGNN] = None,
         learning_rate: float = 1e-3,
-        device: str = 'cuda' if torch.cuda.is_available() else 'cpu'
+        device: Optional[Union[str, torch.device]] = None
     ):
         self.node_id = node_id
-        # Normalize device into torch.device
-        self.device = torch.device(device)
         
+        # Get device, defaulting to auto-detect if not specified
+        self.device = get_available_device(device)
+        
+        # Initialize model on CPU first, then move to device
         if model is None:
-            self.model = SupplyChainTemporalGNN().to(device)
+            self.model = SupplyChainTemporalGNN(device='cpu')
         else:
-            self.model = model.to(device)
+            self.model = model
+            
+        # Move model to the specified device
+        self.model = self.model.to(self.device)
         
+        # Initialize optimizer and loss function
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
         self.criterion = nn.MSELoss()
         self.hidden_state = None
+        
+        # Set model to evaluation mode by default
+        self.model.eval()
     
     def reset_hidden_state(self):
         """Reset the hidden state of the model's RNN components."""
         self.hidden_state = None
     
-    def act(self, observation: Dict[str, torch.Tensor], training: bool = True) -> torch.Tensor:
+    def act(self, observation: Dict[str, torch.Tensor], training: bool = False) -> torch.Tensor:
         """
         Generate an action (order quantity) based on the observation.
         
@@ -261,48 +462,54 @@ class SupplyChainAgent:
             training: Whether to use training mode (affects dropout, batch norm, etc.)
             
         Returns:
-            action: [batch_size] tensor of order quantities
+            action: [batch_size] tensor of order quantities on CPU
         """
-        self.model.train(training)
-        
-        # Move data to device
-        node_features = observation['node_features'].to(self.device, non_blocking=True)
-        edge_index = observation['edge_index'].to(self.device, non_blocking=True)
-        edge_attr = observation.get('edge_attr')
-        if edge_attr is not None:
-            edge_attr = edge_attr.to(self.device, non_blocking=True)
-        
-        # Process one sample at a time
-        batch_size = node_features.size(0)
-        all_actions = []
-        
-        for i in range(batch_size):
-            # Process one sample at a time
-            sample = {
-                'node_features': node_features[i:i+1],  # Keep batch dim
-                'edge_index': edge_index,
-                'edge_attr': edge_attr
-            }
+        with device_scope(self.device):
+            self.model.train(training)
             
-            # Forward pass for this sample
-            with torch.set_grad_enabled(training):
-                outputs = self.model(
-                    x=sample['node_features'],
-                    edge_index=sample['edge_index'],
-                    edge_attr=sample['edge_attr'],
-                    hx=self.hidden_state
-                )
+            try:
+                # Move data to device with non-blocking transfer if possible
+                node_features = to_device(observation['node_features'], self.device, non_blocking=True)
+                edge_index = to_device(observation['edge_index'], self.device, non_blocking=True)
+                edge_attr = to_device(observation.get('edge_attr'), self.device, non_blocking=True)
                 
-                # Get order quantity for this node
-                order_quantity = outputs['order_quantity'][0, self.node_id]  # [1] -> scalar
-                all_actions.append(order_quantity.unsqueeze(0))
+                # Process one sample at a time for stability
+                batch_size = node_features.size(0)
+                all_actions = []
                 
-                # Update hidden state if using RNN
-                if hasattr(self.model, 'hidden_state'):
-                    self.hidden_state = outputs.get('hidden_state')
-        
-        # Stack all actions
-        return torch.cat(all_actions, dim=0).detach().cpu()
+                for i in range(batch_size):
+                    # Process one sample at a time
+                    sample = {
+                        'node_features': node_features[i:i+1],  # Keep batch dim
+                        'edge_index': edge_index,
+                        'edge_attr': edge_attr
+                    }
+                    
+                    # Forward pass for this sample
+                    with torch.set_grad_enabled(training):
+                        outputs = self.model(
+                            node_features=sample['node_features'],
+                            edge_index=sample['edge_index'],
+                            edge_attr=sample['edge_attr']
+                        )
+                        
+                        # Get order quantity for this node and ensure it's on CPU
+                        order_quantity = outputs['order_quantity'][0, self.node_id]  # [1] -> scalar
+                        all_actions.append(order_quantity.unsqueeze(0).cpu())
+                        
+                        # Update hidden state if using RNN
+                        if hasattr(self, 'hidden_state') and 'hidden_state' in outputs:
+                            self.hidden_state = outputs['hidden_state']
+                
+                # Stack all actions (already on CPU)
+                return torch.cat(all_actions, dim=0).detach()
+                
+            except RuntimeError as e:
+                if 'out of memory' in str(e).lower() and is_cuda_available():
+                    # Clear CUDA cache and retry once
+                    empty_cache()
+                    return self.act(observation, training)
+                raise
     
     def update(
         self,
@@ -311,7 +518,8 @@ class SupplyChainAgent:
         rewards: List[float],
         next_observations: List[Dict[str, torch.Tensor]],
         dones: List[bool],
-        gamma: float = 0.99
+        gamma: float = 0.99,
+        clip_grad_norm: Optional[float] = 1.0
     ) -> Dict[str, float]:
         """
         Update the model using temporal difference learning.
@@ -323,115 +531,144 @@ class SupplyChainAgent:
             next_observations: List of next observation dictionaries
             dones: List of done flags
             gamma: Discount factor
+            clip_grad_norm: Maximum gradient norm for gradient clipping
             
         Returns:
             Dictionary containing loss and other metrics
         """
-        self.model.train()
-        
-        # Process one sample at a time
-        total_loss = 0.0
-        total_q_value = 0.0
-        total_target_q_value = 0.0
-        num_samples = len(observations)
-        
-        for i in range(num_samples):
-            # Get current sample
-            obs = observations[i]
-            next_obs = next_observations[i]
-            action = actions[i]  # This is a tensor of shape [batch_size]
-            reward = rewards[i]  # This is a scalar
-            done = dones[i]     # This is a boolean
+        with device_scope(self.device):
+            self.model.train()
             
-            # Convert to tensors and move to device
-            node_features = obs['node_features'].to(self.device, non_blocking=True)  # [batch_size, seq_len, num_nodes, node_features]
-            next_node_features = next_obs['node_features'].to(self.device, non_blocking=True)
-            edge_index = obs['edge_index'].to(self.device, non_blocking=True)
-            edge_attr = obs.get('edge_attr')
-            if edge_attr is not None:
-                edge_attr = edge_attr.to(self.device, non_blocking=True)
+            # Initialize metrics
+            metrics = {
+                'loss': 0.0,
+                'q_value': 0.0,
+                'target_q_value': 0.0,
+                'grad_norm': 0.0
+            }
+            num_samples = len(observations)
             
-            # Ensure action is a tensor with proper shape [batch_size]
-            if torch.is_tensor(action):
-                action_tensor = action.to(self.device, non_blocking=True)
-            else:
-                action_tensor = torch.tensor(action, dtype=torch.long, device=self.device)
-            
-            # Ensure reward and done are tensors with proper shapes
-            if torch.is_tensor(reward):
-                reward_tensor = reward.to(self.device, non_blocking=True)
-            else:
-                reward_tensor = torch.tensor(reward, dtype=torch.float32, device=self.device)
-                
-            if torch.is_tensor(done):
-                done_tensor = done.to(self.device, non_blocking=True)
-            else:
-                done_tensor = torch.tensor(done, dtype=torch.float32, device=self.device)
-            
-            # Forward pass for current state
-            outputs = self.model(
-                x=node_features,
-                edge_index=edge_index,
-                edge_attr=edge_attr,
-                hx=self.hidden_state
-            )
-            
-            # Get the order quantity tensor [batch_size, num_nodes]
-            order_quantity = outputs['order_quantity']  # [1, 4]
-            
-            # Ensure action indices are within valid range [0, num_nodes-1] and have int64 dtype
-            action_tensor = action_tensor.clamp(0, order_quantity.size(1) - 1).to(torch.int64)
-            
-            # For the current test case, we have batch_size=1 and num_nodes=4
-            # The action_tensor has shape [4], representing actions for each node
-            # We need to select the Q-value for each node's action
-            
-            # Reshape order_quantity to [batch_size * num_nodes] and gather using action indices
-            # The action_tensor should have the same shape as the flattened order_quantity
-            q_values = order_quantity.view(-1).gather(0, action_tensor.view(-1).to(torch.int64))
-            
-            # Get target Q-values
-            with torch.no_grad():
-                next_outputs = self.model(
-                    x=next_node_features,
-                    edge_index=edge_index,
-                    edge_attr=edge_attr,
-                    hx=self.hidden_state
-                )
-                # Max Q-value for next state
-                next_q_values = next_outputs['order_quantity'].max(1)[0]
-                
-                # Ensure shapes match for the TD target
-                if reward_tensor.dim() == 0:
-                    reward_tensor = reward_tensor.unsqueeze(0)
-                if done_tensor.dim() == 0:
-                    done_tensor = done_tensor.unsqueeze(0)
+            # Process one sample at a time
+            for i in range(num_samples):
+                try:
+                    # Get current observation
+                    obs_data = observations[i]
+                    next_obs_data = next_observations[i]
                     
-                target_q_values = reward_tensor + gamma * (1 - done_tensor) * next_q_values
+                    # Ensure node_features has shape [batch_size, seq_len, num_nodes, node_features]
+                    node_features = to_device(obs_data['node_features'], self.device, non_blocking=True)
+                    if len(node_features.shape) == 3:
+                        node_features = node_features.unsqueeze(1)  # Add seq_len dimension if missing
+                    
+                    next_node_features = to_device(next_obs_data['node_features'], self.device, non_blocking=True)
+                    if len(next_node_features.shape) == 3:
+                        next_node_features = next_node_features.unsqueeze(1)
+                    
+                    # Create observation dictionaries
+                    obs = {
+                        'node_features': node_features,
+                        'edge_index': to_device(obs_data['edge_index'], self.device, non_blocking=True),
+                        'edge_attr': to_device(obs_data.get('edge_attr'), self.device, non_blocking=True)
+                    }
+                    
+                    next_obs = {
+                        'node_features': next_node_features,
+                        'edge_index': to_device(next_obs_data['edge_index'], self.device, non_blocking=True),
+                        'edge_attr': to_device(next_obs_data.get('edge_attr'), self.device, non_blocking=True)
+                    }
+                    
+                    # Convert to tensors if needed
+                    action = to_device(actions[i], self.device, non_blocking=True)
+                    reward = to_device(torch.tensor(rewards[i], dtype=torch.float32), self.device, non_blocking=True)
+                    done = to_device(torch.tensor(dones[i], dtype=torch.float32), self.device, non_blocking=True)
+                    
+                    # Ensure action has proper shape and type
+                    if not isinstance(action, torch.Tensor):
+                        action = torch.tensor(action, dtype=torch.long, device=self.device)
+                    
+                    # Forward pass for current state
+                    self.optimizer.zero_grad()
+                    
+                    # Debug shapes
+                    print(f"node_features shape: {obs['node_features'].shape}")
+                    print(f"edge_index shape: {obs['edge_index'].shape}")
+                    if obs['edge_attr'] is not None:
+                        print(f"edge_attr shape: {obs['edge_attr'].shape}")
+                    
+                    outputs = self.model(
+                        node_features=obs['node_features'],
+                        edge_index=obs['edge_index'],
+                        edge_attr=obs['edge_attr']
+                    )
+                    
+                    # Get Q-values and select the taken actions
+                    # q_values shape: [batch_size, num_nodes] where num_nodes=4 (retailer, wholesaler, distributor, manufacturer)
+                    q_values = outputs['order_quantity']
+                    
+                    # Select Q-values for the current agent's node
+                    # Since each agent corresponds to a specific node in the graph,
+                    # we use the node_id to select the appropriate Q-value
+                    current_q = q_values[:, self.node_id].unsqueeze(1)  # [batch_size, 1]
+                    
+                    # Compute target Q-values using target network (if available) or current network
+                    with torch.no_grad():
+                        next_outputs = self.model(
+                            node_features=next_obs['node_features'],
+                            edge_index=next_obs['edge_index'],
+                            edge_attr=next_obs['edge_attr']
+                        )
+                        next_q_values = next_outputs['order_quantity']
+                        # Select next Q-values for the current agent's node
+                        next_q = next_q_values[:, self.node_id]  # [batch_size]
+                        target_q = reward + (1 - done) * gamma * next_q
+                    
+                    # Compute loss
+                    loss = self.criterion(current_q.squeeze(), target_q.detach())
+                    
+                    # Backward pass and optimize
+                    loss.backward()
+                    
+                    # Clip gradients if specified
+                    if clip_grad_norm is not None:
+                        grad_norm = torch.nn.utils.clip_grad_norm_(
+                            self.model.parameters(), 
+                            clip_grad_norm
+                        )
+                        metrics['grad_norm'] += grad_norm.item()
+                    
+                    # Update parameters
+                    self.optimizer.step()
+                    
+                    # Update metrics
+                    metrics['loss'] += loss.item()
+                    metrics['q_value'] += current_q.mean().item()
+                    metrics['target_q_value'] += target_q.mean().item()
+                    
+                except RuntimeError as e:
+                    if 'out of memory' in str(e).lower() and is_cuda_available():
+                        # Clear CUDA cache and retry once
+                        empty_cache()
+                        return self.update(
+                            observations[i:], 
+                            actions[i:], 
+                            rewards[i:], 
+                            next_observations[i:], 
+                            dones[i:], 
+                            gamma, 
+                            clip_grad_norm
+                        )
+                    raise
             
-            # Compute loss for this sample
-            loss = self.criterion(q_values, target_q_values)
-            
-            # Backward pass
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-            
-            # Accumulate metrics
-            total_loss += loss.item()
-            total_q_value += q_values.mean().item()
-            total_target_q_value += target_q_values.mean().item()
-        
-        # Return average metrics
-        return {
-            'total_loss': total_loss / num_samples,
-            'q_value': total_q_value / num_samples,
-            'target_q_value': total_target_q_value / num_samples
-        }
+            # Average metrics
+            for k in metrics:
+                metrics[k] /= max(1, num_samples)
+                
+            return metrics  
 
 def create_supply_chain_agents(
     num_agents: int = 4,
     shared_model: bool = True,
+    device: Optional[Union[str, torch.device]] = None,
     **kwargs
 ) -> List[SupplyChainAgent]:
     """
@@ -440,23 +677,30 @@ def create_supply_chain_agents(
     Args:
         num_agents: Number of agents to create (one per node in the supply chain)
         shared_model: Whether agents should share the same model parameters
+        device: Device to place the model on (None for auto-detect)
         **kwargs: Additional arguments to pass to SupplyChainAgent
         
     Returns:
         List of SupplyChainAgent instances
     """
+    # If device is None, auto-detect the best available device
+    if device is None:
+        device = get_available_device()
+    
+    agents = []
+    shared_model_instance = None
+    
     if shared_model:
-        # Create a single shared model
-        model = SupplyChainTemporalGNN(**kwargs)
-        agents = [
-            SupplyChainAgent(node_id=i, model=model, **kwargs)
-            for i in range(num_agents)
-        ]
-    else:
-        # Create separate models for each agent
-        agents = [
-            SupplyChainAgent(node_id=i, model=None, **kwargs)
-            for i in range(num_agents)
-        ]
+        # Create one model to be shared among all agents
+        shared_model_instance = SupplyChainTemporalGNN(device=device)
+    
+    for i in range(num_agents):
+        agent = SupplyChainAgent(
+            node_id=i,
+            model=shared_model_instance if shared_model else None,
+            device=device,
+            **kwargs
+        )
+        agents.append(agent)
     
     return agents

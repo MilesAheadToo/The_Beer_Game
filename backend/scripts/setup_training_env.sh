@@ -19,13 +19,13 @@ if [ ! -d "venv" ]; then
     # Upgrade pip and build tooling inside the venv
     python -m pip install --upgrade pip setuptools wheel
 
-    # Install PyTorch for CPU (uses venv pip)
-    echo "Installing PyTorch for CPU..."
-    python -m pip install torch==2.0.1 --index-url https://download.pytorch.org/whl/cpu
+    # Install PyTorch with CUDA 12.1 support (compatible with your CUDA 12.2)
+    echo "Installing PyTorch with CUDA 12.1 support..."
+    python -m pip install torch==2.1.0+cu121 torchvision==0.16.0+cu121 torchaudio==2.1.0+cu121 --index-url https://download.pytorch.org/whl/cu121
 
     # Install PyTorch Geometric and its dependencies
-    echo "Installing PyTorch Geometric dependencies..."
-    python -m pip install torch-scatter torch-sparse torch-cluster torch-spline-conv -f https://data.pyg.org/whl/torch-2.0.0+cpu.html
+    echo "Installing PyTorch Geometric dependencies with CUDA support..."
+    python -m pip install pyg-lib torch-scatter torch-sparse -f https://data.pyg.org/whl/torch-2.1.0+cu121.html
     python -m pip install torch-geometric
 
     # Install other requirements

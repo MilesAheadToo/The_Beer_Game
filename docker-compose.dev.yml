@@ -24,6 +24,13 @@ services:
     networks:
       - beer-game-network
 
+  # GPU-specific runtime configuration
+  backend:
+    runtime: ${GPU_RUNTIME:-}
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
 networks:
   beer-game-network:
     external: false

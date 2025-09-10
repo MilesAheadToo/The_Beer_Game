@@ -6,6 +6,7 @@ import Navbar from "./components/Navbar";
 import Dashboard from "./pages/Dashboard";
 import MixedGamesList from "./pages/MixedGamesList";
 import CreateMixedGame from "./pages/CreateMixedGame";
+import CreateGameFromConfig from "./components/game/CreateGameFromConfig";
 import GameBoard from "./pages/GameBoard";
 import Login from "./pages/Login";
 import { WebSocketProvider } from "./contexts/WebSocketContext";
@@ -89,6 +90,17 @@ const AppContent = () => {
                   <Navbar />
                   <Box sx={(theme) => theme.mixins.toolbar} />
                   <CreateMixedGame />
+                </>
+              }
+            />
+
+            <Route
+              path="/games/new-from-config/:configId"
+              element={
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <CreateGameFromConfig />
                 </>
               }
             />
