@@ -28,6 +28,13 @@ class TemporalGNN(nn.Module):
         self.device = get_available_device(device)
         self.edge_dim = edge_dim  # Should match the edge_attr dimension (3 in our case)
         self.in_channels = in_channels
+        
+        # Ensure the device is properly set
+        if isinstance(self.device, str):
+            self.device = torch.device(self.device)
+            
+        # Move all parameters to the specified device during initialization
+        self._register_load_state_dict_pre_hook(self._move_to_device_hook)
         self.out_channels = out_channels
         
         # Initialize layers with proper device handling
@@ -49,19 +56,28 @@ class TemporalGNN(nn.Module):
         # Move to device after initialization
         self.to(self.device)
         
+    def _move_to_device_hook(self, state_dict, prefix, *args, **kwargs):
+        """Ensure all parameters and buffers are moved to the correct device."""
+        for key, param in self.named_parameters():
+            if param is not None:
+                param.data = param.data.to(self.device)
+        for key, buf in self.named_buffers():
+            if buf is not None:
+                buf.data = buf.data.to(self.device)
+                
     def forward(self, x: Tensor, edge_index: Tensor, edge_attr: Optional[Tensor] = None) -> Tensor:
-        # Ensure all tensors are on the same device as the model
-        device = next(self.parameters()).device
-        x = x.to(device)
-        edge_index = edge_index.to(device)
-        if edge_attr is not None:
-            edge_attr = edge_attr.to(device)
+        # Ensure all input tensors are on the correct device
+        with device_scope(self.device):
+            x = to_device(x, self.device, non_blocking=True)
+            edge_index = to_device(edge_index, self.device, non_blocking=True)
+            if edge_attr is not None:
+                edge_attr = to_device(edge_attr, self.device, non_blocking=True)
+                
+            # Ensure model parameters are on the correct device
+            self.gat = self.gat.to(self.device)
+            self.gru = self.gru.to(self.device)
             
-        # Ensure GAT and GRU are on the same device
-        self.gat = self.gat.to(device)
-        self.gru = self.gru.to(device)
-        
-        # x shape: [batch_size, seq_len, num_nodes, in_channels] or [seq_len, num_nodes, in_channels]
+            # x shape: [batch_size, seq_len, num_nodes, in_channels] or [seq_len, num_nodes, in_channels]
         # Add batch dimension if missing
         if x.dim() == 3:  # [seq_len, num_nodes, in_channels]
             x = x.unsqueeze(0)  # [1, seq_len, num_nodes, in_channels]
@@ -169,19 +185,30 @@ class SupplyChainTemporalGNN(nn.Module):
         self.num_layers = num_layers
         self.seq_len = seq_len
         self.num_nodes = num_nodes
-        self.device = get_available_device(device)
         
-        # Initialize layers on CPU first
+        # Initialize device handling
+        self.device = get_available_device(device)
+        if isinstance(self.device, str):
+            self.device = torch.device(self.device)
+            
+        # Store edge dimension
+        self.edge_dim = edge_features
+        
+        # Register hook to ensure parameters are moved to the correct device
+        self._register_load_state_dict_pre_hook(self._move_to_device_hook)
+        
+        # Initialize layers
         self.node_encoder = nn.Linear(node_features, hidden_dim)
         self.edge_encoder = nn.Linear(edge_features, hidden_dim) if edge_features > 0 else None
         
         # Create temporal GNN layers
         self.tgnn_layers = nn.ModuleList([
             TemporalGNN(
-                hidden_dim, 
-                hidden_dim, 
-                edge_dim=hidden_dim if edge_features > 0 else None,
-                device='cpu'  # Initialize on CPU first
+                in_channels=hidden_dim,
+                out_channels=hidden_dim,
+                edge_dim=edge_features,
+                heads=1,  # Using single head for simplicity
+                device=self.device
             ) for _ in range(num_layers)
         ])
         
@@ -190,57 +217,21 @@ class SupplyChainTemporalGNN(nn.Module):
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_dim // 2, 1)  # Predict single order quantity
-        )
-        
-        self.demand_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim // 2, 1)  # Predict single demand value
-        )
-        
-        # Move model to device after initialization
-        self.to(self.device)
-        
-        # Input projection
-        self.input_proj = nn.Linear(node_features, hidden_dim).to(self.device)
-        
-        # Store edge dimension
-        self.edge_dim = edge_features
-        
-        # Temporal GNN layers
-        self.tgnn_layers = nn.ModuleList()
-        for i in range(num_layers):
-            self.tgnn_layers.append(
-                TemporalGNN(
-                    in_channels=hidden_dim,
-                    out_channels=hidden_dim,
-                    edge_dim=edge_features,
-                    heads=1,  # Using single head for simplicity
-                    device=self.device
-                )
-            )
-        
-        # Output heads
-        self.order_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            nn.Dropout(dropout),
             nn.Linear(hidden_dim // 2, 1)  # Predict order quantity
-        ).to(self.device)
+        )
         
         self.demand_head = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(hidden_dim // 2, 1)  # Predict next demand
-        ).to(self.device)
+        )
         
-        # Initialize weights
+        # Input projection
+        self.input_proj = nn.Linear(node_features, hidden_dim)
+        
+        # Initialize weights and move to device
         self._init_weights()
-        
-        # Move model to device
         self.to(self.device)
     
     def _init_weights(self):
@@ -250,20 +241,27 @@ class SupplyChainTemporalGNN(nn.Module):
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
     
+    def _move_to_device_hook(self, state_dict, prefix, *args, **kwargs):
+        """Ensure all parameters and buffers are moved to the correct device."""
+        for key, param in self.named_parameters():
+            if param is not None:
+                param.data = param.data.to(self.device)
+        for key, buf in self.named_buffers():
+            if buf is not None:
+                buf.data = buf.data.to(self.device)
+                
     def forward(
         self,
-        node_features: torch.Tensor,  # [batch_size, seq_len, num_nodes, node_features]
+        node_features: torch.Tensor,  # [batch_size, seq_len, num_nodes, node_features] or [batch_size, 1, seq_len, num_nodes, node_features]
         edge_index: torch.Tensor,     # [2, num_edges]
         edge_attr: Optional[torch.Tensor] = None  # [num_edges, edge_features]
     ) -> Dict[str, torch.Tensor]:
         with device_scope(self.device):
-            # Ensure all tensors are on the correct device
-            if not node_features.is_cuda and next(self.parameters()).is_cuda:
-                node_features = node_features.to(self.device)
-            if not edge_index.is_cuda and next(self.parameters()).is_cuda:
-                edge_index = edge_index.to(self.device)
-            if edge_attr is not None and not edge_attr.is_cuda and next(self.parameters()).is_cuda:
-                edge_attr = edge_attr.to(self.device)
+            # Move all inputs to the correct device
+            node_features = to_device(node_features, self.device, non_blocking=True)
+            edge_index = to_device(edge_index, self.device, non_blocking=True)
+            if edge_attr is not None:
+                edge_attr = to_device(edge_attr, self.device, non_blocking=True)
             
             # Debug shapes
             print(f"Input node_features shape: {node_features.shape}")
@@ -271,8 +269,20 @@ class SupplyChainTemporalGNN(nn.Module):
             if edge_attr is not None:
                 print(f"Input edge_attr shape: {edge_attr.shape}")
             
+            # Handle both 5D and 6D input shapes
+            original_shape = node_features.shape
+            if len(original_shape) == 6:
+                # Reshape from [batch_size, 1, 1, seq_len, num_nodes, node_features] to [batch_size, seq_len, num_nodes, node_features]
+                node_features = node_features.squeeze(1).squeeze(1)
+                print(f"Reshaped node_features from {original_shape} to {node_features.shape}")
+            elif len(original_shape) == 5:
+                # Reshape from [batch_size, 1, seq_len, num_nodes, node_features] to [batch_size, seq_len, num_nodes, node_features]
+                node_features = node_features.squeeze(1)
+                print(f"Reshaped node_features from {original_shape} to {node_features.shape}")
+            
             try:
                 batch_size, seq_len, num_nodes, node_feat_dim = node_features.size()
+                print(f"Successfully unpacked shape: batch_size={batch_size}, seq_len={seq_len}, num_nodes={num_nodes}, node_feat_dim={node_feat_dim}")
             except Exception as e:
                 print(f"Error unpacking node_features shape: {node_features.shape}")
                 raise
@@ -428,19 +438,21 @@ class SupplyChainAgent:
         
         # Get device, defaulting to auto-detect if not specified
         self.device = get_available_device(device)
+        if isinstance(self.device, str):
+            self.device = torch.device(self.device)
         
-        # Initialize model on CPU first, then move to device
+        # Initialize model
         if model is None:
-            self.model = SupplyChainTemporalGNN(device='cpu')
+            self.model = SupplyChainTemporalGNN(device=self.device)
         else:
-            self.model = model
-            
-        # Move model to the specified device
-        self.model = self.model.to(self.device)
+            self.model = model.to(self.device)
         
-        # Initialize optimizer and loss function
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
-        self.criterion = nn.MSELoss()
+        # Initialize optimizer with parameters on the correct device
+        self.optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, self.model.parameters()),
+            lr=learning_rate
+        )
+        self.criterion = nn.MSELoss().to(self.device)
         self.hidden_state = None
         
         # Set model to evaluation mode by default
@@ -468,6 +480,9 @@ class SupplyChainAgent:
             self.model.train(training)
             
             try:
+                # Ensure model is on the correct device
+                self.model = self.model.to(self.device)
+                
                 # Move data to device with non-blocking transfer if possible
                 node_features = to_device(observation['node_features'], self.device, non_blocking=True)
                 edge_index = to_device(observation['edge_index'], self.device, non_blocking=True)
@@ -521,23 +536,35 @@ class SupplyChainAgent:
         gamma: float = 0.99,
         clip_grad_norm: Optional[float] = 1.0
     ) -> Dict[str, float]:
-        """
-        Update the model using temporal difference learning.
-        
-        Args:
-            observations: List of observation dictionaries
-            actions: List of actions taken (indices of order quantities)
-            rewards: List of rewards received
-            next_observations: List of next observation dictionaries
-            dones: List of done flags
-            gamma: Discount factor
-            clip_grad_norm: Maximum gradient norm for gradient clipping
-            
-        Returns:
-            Dictionary containing loss and other metrics
-        """
         with device_scope(self.device):
+            # Ensure model is in training mode and on the correct device
             self.model.train()
+            self.model = self.model.to(self.device)
+            
+            # Move data to device
+            obs_batch = []
+            next_obs_batch = []
+            
+            # Use a single device transfer for all tensors
+            with torch.cuda.amp.autocast(enabled=torch.cuda.is_available()):
+                for obs, next_obs in zip(observations, next_observations):
+                    # Move observation data to device
+                    obs_device = {
+                        'node_features': to_device(obs['node_features'], self.device, non_blocking=True),
+                        'edge_index': to_device(obs['edge_index'], self.device, non_blocking=True)
+                    }
+                    if 'edge_attr' in obs and obs['edge_attr'] is not None:
+                        obs_device['edge_attr'] = to_device(obs['edge_attr'], self.device, non_blocking=True)
+                    obs_batch.append(obs_device)
+                    
+                    # Move next observation data to device
+                    next_obs_device = {
+                        'node_features': to_device(next_obs['node_features'], self.device, non_blocking=True),
+                        'edge_index': to_device(next_obs['edge_index'], self.device, non_blocking=True)
+                    }
+                    if 'edge_attr' in next_obs and next_obs.get('edge_attr') is not None:
+                        next_obs_device['edge_attr'] = to_device(next_obs['edge_attr'], self.device, non_blocking=True)
+                    next_obs_batch.append(next_obs_device)
             
             # Initialize metrics
             metrics = {
@@ -552,29 +579,29 @@ class SupplyChainAgent:
             for i in range(num_samples):
                 try:
                     # Get current observation
-                    obs_data = observations[i]
-                    next_obs_data = next_observations[i]
+                    obs_data = obs_batch[i]
+                    next_obs_data = next_obs_batch[i]
                     
                     # Ensure node_features has shape [batch_size, seq_len, num_nodes, node_features]
-                    node_features = to_device(obs_data['node_features'], self.device, non_blocking=True)
+                    node_features = obs_data['node_features']
                     if len(node_features.shape) == 3:
                         node_features = node_features.unsqueeze(1)  # Add seq_len dimension if missing
                     
-                    next_node_features = to_device(next_obs_data['node_features'], self.device, non_blocking=True)
+                    next_node_features = next_obs_data['node_features']
                     if len(next_node_features.shape) == 3:
                         next_node_features = next_node_features.unsqueeze(1)
                     
                     # Create observation dictionaries
                     obs = {
                         'node_features': node_features,
-                        'edge_index': to_device(obs_data['edge_index'], self.device, non_blocking=True),
-                        'edge_attr': to_device(obs_data.get('edge_attr'), self.device, non_blocking=True)
+                        'edge_index': obs_data['edge_index'],
+                        'edge_attr': obs_data.get('edge_attr')
                     }
                     
                     next_obs = {
                         'node_features': next_node_features,
-                        'edge_index': to_device(next_obs_data['edge_index'], self.device, non_blocking=True),
-                        'edge_attr': to_device(next_obs_data.get('edge_attr'), self.device, non_blocking=True)
+                        'edge_index': next_obs_data['edge_index'],
+                        'edge_attr': next_obs_data.get('edge_attr')
                     }
                     
                     # Convert to tensors if needed
@@ -672,7 +699,7 @@ def create_supply_chain_agents(
     **kwargs
 ) -> List[SupplyChainAgent]:
     """
-    Create a list of supply chain agents.
+    Create a list of supply chain agents with proper GPU support.
     
     Args:
         num_agents: Number of agents to create (one per node in the supply chain)
@@ -683,24 +710,54 @@ def create_supply_chain_agents(
     Returns:
         List of SupplyChainAgent instances
     """
-    # If device is None, auto-detect the best available device
-    if device is None:
-        device = get_available_device()
+    # Get the device and ensure it's a torch.device
+    device = get_available_device(device)
+    if isinstance(device, str):
+        device = torch.device(device)
     
-    agents = []
-    shared_model_instance = None
+    # Print device info for debugging
+    print(f"Creating {num_agents} agents on device: {device}")
+    if device.type == 'cuda':
+        print(f"  CUDA Device: {torch.cuda.get_device_name(device)}")
+        print(f"  CUDA Memory: {torch.cuda.memory_allocated(device) / 1024**2:.2f}MB allocated")
+        print(f"  CUDA Memory: {torch.cuda.memory_reserved(device) / 1024**2:.2f}MB reserved")
     
-    if shared_model:
-        # Create one model to be shared among all agents
-        shared_model_instance = SupplyChainTemporalGNN(device=device)
-    
-    for i in range(num_agents):
-        agent = SupplyChainAgent(
-            node_id=i,
-            model=shared_model_instance if shared_model else None,
-            device=device,
-            **kwargs
-        )
-        agents.append(agent)
+    # Create shared model if needed
+    try:
+        if shared_model:
+            print("Creating shared model for all agents...")
+            model = SupplyChainTemporalGNN(device=device, **kwargs)
+            agents = [
+                SupplyChainAgent(node_id=i, model=model, device=device, **kwargs)
+                for i in range(num_agents)
+            ]
+            print("Shared model created successfully.")
+        else:
+            # Create separate models for each agent
+            print(f"Creating {num_agents} separate models...")
+            agents = []
+            for i in range(num_agents):
+                print(f"  Creating model for agent {i}...")
+                agent_model = SupplyChainTemporalGNN(device=device, **kwargs)
+                agent = SupplyChainAgent(
+                    node_id=i,
+                    model=agent_model,
+                    device=device,
+                    **kwargs
+                )
+                agents.append(agent)
+                # Free up memory
+                if device.type == 'cuda':
+                    torch.cuda.empty_cache()
+            print("All agent models created successfully.")
+            
+    except RuntimeError as e:
+        print(f"Error creating models: {e}")
+        if 'CUDA out of memory' in str(e):
+            print("CUDA out of memory error detected. Trying to free up memory...")
+            if device.type == 'cuda':
+                torch.cuda.empty_cache()
+            print("Please reduce model size or batch size and try again.")
+        raise
     
     return agents

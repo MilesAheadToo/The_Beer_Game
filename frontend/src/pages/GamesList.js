@@ -26,9 +26,10 @@ import {
   Snackbar,
   Alert,
 } from '@mui/material';
-import { PlayArrow, Edit, Delete, Add } from '@mui/icons-material';
+import { PlayArrow, Edit, Delete, Add, Settings } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import gameApi from '../services/gameApi';
+import { Alert as ChakraAlert, AlertTitle, AlertDescription, AlertIcon, Box as ChakraBox } from '@chakra-ui/react';
 
 const GamesList = () => {
   const [games, setGames] = useState([]);
@@ -37,6 +38,8 @@ const GamesList = () => {
   const [openDialog, setOpenDialog] = useState(false);
   const [selectedGame, setSelectedGame] = useState(null);
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [modelStatus, setModelStatus] = useState({ is_trained: false });
+  const [loadingModelStatus, setLoadingModelStatus] = useState(true);
   const navigate = useNavigate();
   
   // Form state
@@ -60,6 +63,27 @@ const GamesList = () => {
   // Close snackbar
   const handleCloseSnackbar = React.useCallback(() => {
     setSnackbar(prev => ({ ...prev, open: false }));
+  }, []);
+
+  // Check if Daybreak agent is trained
+  const [modelStatus, setModelStatus] = useState(null);
+  const [loadingModelStatus, setLoadingModelStatus] = useState(true);
+
+  // Fetch model status
+  const fetchModelStatus = async () => {
+    try {
+      const status = await gameApi.getModelStatus();
+      setModelStatus(status);
+    } catch (error) {
+      console.error('Failed to fetch model status:', error);
+    } finally {
+      setLoadingModelStatus(false);
+    }
+  };
+
+  // Load model status on component mount
+  useEffect(() => {
+    fetchModelStatus();
   }, []);
 
   // Fetch games from the API
@@ -224,19 +248,87 @@ const GamesList = () => {
 
   if (error) {
     return (
-      <Box p={3}>
+      <Box sx={{ p: 3 }}>
+        {/* Admin Navigation Buttons */}
+        <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'flex-end' }}>
+          <Button
+            variant="outlined"
+            startIcon={<Settings />}
+            onClick={() => navigate('/admin/config')}
+            color="primary"
+          >
+            System Configuration
+          </Button>
+          <Button
+            variant="outlined"
+            startIcon={<Settings />}
+            onClick={() => navigate('/admin/training')}
+            color="secondary"
+          >
+            Training Configuration
+          </Button>
+        </Box>
+
+        {/* Daybreak Agent Not Trained Alert */}
+        {!loadingModelStatus && modelStatus && !modelStatus.is_trained && (
+          <ChakraBox mb={4}>
+            <Alert status="error" variant="left-accent" borderRadius="md">
+              <AlertIcon />
+              <Box>
+                <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
+                <AlertDescription fontSize="sm">
+                  The Daybreak agent has not yet been trained, so it cannot be used until training completes.
+                  You may still select Basic (heuristics) or LLM agents.
+                </AlertDescription>
+              </Box>
+            </Alert>
+          </ChakraBox>
+        )}
         <Typography color="error">{error}</Typography>
       </Box>
     );
   }
 
   return (
-    <Box p={3}>
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Games</Typography>
+    <Box sx={{ p: 3 }}>
+      {/* Admin Navigation Buttons */}
+      <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'flex-end' }}>
+        <Button
+          variant="outlined"
+          startIcon={<Settings />}
+          onClick={() => navigate('/admin/config')}
+          color="primary"
+        >
+          System Configuration
+        </Button>
+        <Button
+          variant="outlined"
+          startIcon={<Settings />}
+          onClick={() => navigate('/admin/training')}
+          color="secondary"
+        >
+          Training Configuration
+        </Button>
+      </Box>
+
+      {/* Daybreak Agent Not Trained Alert */}
+      {!loadingModelStatus && modelStatus && !modelStatus.is_trained && (
+        <ChakraBox mb={4}>
+          <ChakraAlert status="error" variant="left-accent" borderRadius="md" bg="red.50">
+            <AlertIcon color="red.500" />
+            <Box>
+              <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
+              <AlertDescription fontSize="sm">
+                The Daybreak agent has not yet been trained, so it cannot be used until training completes.
+                You may still select Basic (heuristics) or LLM agents.
+              </AlertDescription>
+            </Box>
+          </ChakraAlert>
+        </ChakraBox>
+      )}
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 3 }}>
         <Button
           variant="contained"
-          color="primary"
           startIcon={<Add />}
           onClick={() => navigate('/games/new')}
         >
