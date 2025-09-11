@@ -1,4 +1,3 @@
-// /frontend/src/App.js
 import React from "react";
 import { Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import { Box, CircularProgress } from "@mui/material";
@@ -10,7 +9,7 @@ import CreateGameFromConfig from "./components/game/CreateGameFromConfig";
 import GameBoard from "./pages/GameBoard";
 import Login from "./pages/Login";
 import { WebSocketProvider } from "./contexts/WebSocketContext";
-import { useAuth } from "./contexts/AuthContext";       // <— unified
+import { useAuth } from "./contexts/AuthContext";
 import "./utils/fetchInterceptor";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AdminDashboard from "./pages/admin/Dashboard.jsx";
@@ -20,6 +19,8 @@ import Users from "./pages/Users";
 import Settings from "./pages/Settings";
 import SystemConfig from "./pages/SystemConfig.jsx";
 import Unauthorized from "./pages/Unauthorized";
+import SupplyChainConfigList from "./components/supply-chain-config/SupplyChainConfigList";
+import SupplyChainConfigForm from "./components/supply-chain-config/SupplyChainConfigForm";
 
 window.onerror = function (message, source, lineno, colno, error) {
   console.error("Global error:", { message, source, lineno, colno, error });
@@ -193,6 +194,43 @@ const AppContent = () => {
                     <Navbar />
                     <Box sx={(theme) => theme.mixins.toolbar} />
                     <SystemConfig />
+                  </>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/supply-chain-config"
+              element={
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <>
+                    <Navbar />
+                    <Box sx={(theme) => theme.mixins.toolbar} />
+                    <SupplyChainConfigList />
+                  </>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/supply-chain-config/new"
+              element={
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <>
+                    <Navbar />
+                    <Box sx={(theme) => theme.mixins.toolbar} />
+                    <SupplyChainConfigForm />
+                  </>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/supply-chain-config/edit/:id"
+              element={
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <>
+                    <Navbar />
+                    <Box sx={(theme) => theme.mixins.toolbar} />
+                    <SupplyChainConfigForm />
                   </>
                 </ProtectedRoute>
               }

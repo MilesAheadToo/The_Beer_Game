@@ -27,6 +27,7 @@ class SystemConfigModel(BaseModel):
   standard_cost: Range = Field(default=Range(min=0, max=10000))
   variable_cost: Range = Field(default=Range(min=0, max=10000))
   min_order_qty: Range = Field(default=Range(min=0, max=1000))
+  max_rounds: Range = Field(default=Range(min=0, max=100))
 
 
 def _ensure_dir():

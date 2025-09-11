@@ -21,6 +21,7 @@ from app.models.player import Player, PlayerRole, PlayerType, PlayerStrategy
 from app.models.auth_models import PasswordHistory, PasswordResetToken
 from app.models.session import TokenBlacklist, UserSession
 from app.models.game import Game, GameStatus, Round, PlayerAction
+from scripts.seed_core_config import seed_core_config
 
 # Ensure all models are imported and registered with SQLAlchemy
 # This is necessary for proper relationship resolution
@@ -129,9 +130,12 @@ async def init_db():
                 db.add(admin)
                 await db.commit()
                 logger.info("Admin user created successfully")
-            
+
+            # Seed core supply chain configuration
+            await seed_core_config(db)
+
             # Add other initial data as needed
-            
+
             await db.commit()
             logger.info("Initial data added successfully")
             

@@ -1,4 +1,7 @@
-import math
+import json
+import logging
+import os
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -15,6 +18,8 @@ from .config import (
     ORDER_EDGES,
     SHIPMENT_EDGES,
 )
+
+logger = logging.getLogger(__name__)
 
 # ---------- Action indexing helpers ------------------------------------------
 
@@ -332,6 +337,72 @@ def _sample_params_uniform(base: BeerGameParams, ranges: Optional[Dict[str, Tupl
         max_order=pick("max_order", base.max_order),
     )
 
+
+def _load_param_ranges_from_config(
+    config_id: int,
+    db_url: Optional[str] = None,
+) -> Dict[str, Tuple[float, float]]:
+    """Load parameter ranges from SupplyChainConfig and system config.
+
+    Looks for ItemNodeConfig ranges (init_inventory, holding_cost, backlog_cost)
+    associated with the provided ``config_id`` and combines them with global
+    ranges defined in ``data/system_config.json`` for parameters like
+    ``info_delay`` and ``ship_delay``.
+    """
+
+    ranges: Dict[str, Tuple[float, float]] = {}
+
+    # --- Read system config ranges -----------------------------------------
+    try:
+        cfg_path = Path(__file__).resolve().parents[3] / "data" / "system_config.json"
+        if cfg_path.exists():
+            data = json.loads(cfg_path.read_text())
+            for key in [
+                "info_delay",
+                "ship_delay",
+                "init_inventory",
+                "holding_cost",
+                "backlog_cost",
+                "max_inbound_per_link",
+                "max_order",
+            ]:
+                val = data.get(key)
+                if isinstance(val, dict) and "min" in val and "max" in val:
+                    ranges[key] = (float(val["min"]), float(val["max"]))
+    except Exception as exc:
+        logger.warning("Failed to read system config ranges: %s", exc)
+
+    # --- Aggregate ItemNodeConfig ranges -----------------------------------
+    try:
+        engine = create_engine(db_url or os.getenv("DATABASE_URL", ""))
+        sql = text(
+            """
+            SELECT
+                inc.initial_inventory_range,
+                inc.holding_cost_range,
+                inc.backlog_cost_range
+            FROM item_node_configs inc
+            JOIN nodes n ON inc.node_id = n.id
+            WHERE n.config_id = :cid
+            """
+        )
+        with engine.connect() as conn:
+            rows = conn.execute(sql, {"cid": config_id}).mappings().all()
+
+        def merge(json_key: str, out_key: str):
+            mins = [r[json_key]["min"] for r in rows if r[json_key] and "min" in r[json_key]]
+            maxs = [r[json_key]["max"] for r in rows if r[json_key] and "max" in r[json_key]]
+            if mins and maxs:
+                ranges[out_key] = (float(min(mins)), float(max(maxs)))
+
+        merge("initial_inventory_range", "init_inventory")
+        merge("holding_cost_range", "holding_cost")
+        merge("backlog_cost_range", "backlog_cost")
+    except Exception as exc:
+        logger.warning("Failed to load ranges from DB: %s", exc)
+
+    return ranges
+
 def generate_sim_training_windows(
     num_runs: int,
     T: int,
@@ -340,12 +411,16 @@ def generate_sim_training_windows(
     params: BeerGameParams = BeerGameParams(),
     param_ranges: Optional[Dict[str, Tuple[float, float]]] = None,
     randomize: bool = True,
+    supply_chain_config_id: Optional[int] = None,
+    db_url: Optional[str] = None,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Create imitation-learning windows from the simulator.
 
     If `randomize` is True, each run samples parameters uniformly within
-    `param_ranges` (or sensible defaults if not provided).
+    the provided ``param_ranges``. When ``supply_chain_config_id`` is given,
+    ranges are read from the database/system configuration and used instead of
+    the broad defaults (overridden further by ``param_ranges`` if supplied).
     """
     Xs, Ys, Ps = [], [], []
     A_ship = np.zeros((4, 4), dtype=np.float32)
@@ -366,7 +441,19 @@ def generate_sim_training_windows(
         "max_inbound_per_link": (50, 300),
         "max_order": (50, 300),
     }
-    ranges = param_ranges or default_ranges
+
+    # Replace defaults with ranges from config if provided
+    if supply_chain_config_id is not None:
+        cfg_ranges = _load_param_ranges_from_config(
+            supply_chain_config_id, db_url=db_url
+        )
+    else:
+        cfg_ranges = {}
+
+    ranges = default_ranges.copy()
+    ranges.update(cfg_ranges)
+    if param_ranges:
+        ranges.update(param_ranges)
 
     for _ in range(num_runs):
         sim_params = _sample_params_uniform(params, ranges) if randomize else params
