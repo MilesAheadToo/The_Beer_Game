@@ -21,6 +21,7 @@ import SystemConfig from "./pages/SystemConfig.jsx";
 import Unauthorized from "./pages/Unauthorized";
 import SupplyChainConfigList from "./components/supply-chain-config/SupplyChainConfigList";
 import SupplyChainConfigForm from "./components/supply-chain-config/SupplyChainConfigForm";
+import Players from "./pages/Players.jsx";
 
 window.onerror = function (message, source, lineno, colno, error) {
   console.error("Global error:", { message, source, lineno, colno, error });
@@ -194,6 +195,19 @@ const AppContent = () => {
                     <Navbar />
                     <Box sx={(theme) => theme.mixins.toolbar} />
                     <SystemConfig />
+                  </>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/players"
+              element={
+                <ProtectedRoute allowedRoles={["admin"]}>
+                  <>
+                    <Navbar />
+                    <Box sx={(theme) => theme.mixins.toolbar} />
+                    <Players />
                   </>
                 </ProtectedRoute>
               }

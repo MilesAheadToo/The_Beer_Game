@@ -40,6 +40,28 @@ class MixedGameService:
         )
         self.db.add(game)
         self.db.flush()
+
+        # Persist creator/metadata into columns if present in schema (fallback-safe via raw SQL)
+        try:
+            from sqlalchemy import text
+            dp = json.dumps(game_data.demand_pattern.dict()) if getattr(game_data, 'demand_pattern', None) else None
+            desc = getattr(game_data, 'description', None)
+            is_public = getattr(game_data, 'is_public', True)
+            self.db.execute(
+                text(
+                    "UPDATE games SET description = :desc, is_public = :is_public, demand_pattern = :dp, created_by = :creator WHERE id = :id"
+                ),
+                {
+                    "desc": desc,
+                    "is_public": bool(is_public),
+                    "dp": dp,
+                    "creator": created_by if created_by is not None else None,
+                    "id": game.id,
+                },
+            )
+        except Exception as _e:
+            # Non-fatal: older schemas may not have these columns
+            pass
         
         # Create players based on assignments
         # Validate node policies against system ranges (if provided/persisted)

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import mixedGameApi from '../services/api';
 import { toast } from 'react-toastify';
 
 const Login = () => {
@@ -14,15 +15,39 @@ const Login = () => {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   
-  const { login, isAuthenticated, loading: authLoading } = useAuth();
+  const { login, isAuthenticated, loading: authLoading, user } = useAuth();
   
   // Redirect if already authenticated
   useEffect(() => {
-    if (isAuthenticated) {
-      const redirectTo = searchParams.get('redirect') || '/';
-      navigate(redirectTo, { replace: true });
-    }
-  }, [isAuthenticated, navigate, searchParams]);
+    const maybeRedirect = async () => {
+      if (!isAuthenticated) return;
+      const redirectTo = searchParams.get('redirect');
+
+      // If admin, honor redirect or go to games
+      const isAdmin = user?.is_superuser || (Array.isArray(user?.roles) && user.roles.includes('admin'));
+      if (isAdmin) {
+        navigate(redirectTo || '/', { replace: true });
+        return;
+      }
+
+      // For non-admins: try to find assigned game and go straight to its board
+      try {
+        const games = await mixedGameApi.getGames();
+        const assigned = games.find(g => Array.isArray(g.players) && g.players.some(p => p.user_id === user?.id));
+        if (assigned) {
+          navigate(`/games/${assigned.id}` , { replace: true });
+          return;
+        }
+      } catch (e) {
+        // Fall through to default navigation
+      }
+
+      // Default: honor redirect or go to games list
+      navigate(redirectTo || '/games', { replace: true });
+    };
+
+    maybeRedirect();
+  }, [isAuthenticated, navigate, searchParams, user]);
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -67,13 +92,27 @@ const Login = () => {
     }
     
     try {
-      const { success, error } = await login({
+      const { success, error, user: loggedInUser } = await login({
         username: formData.email, // Backend expects 'username' but we're using email as username
         password: formData.password,
       });
       
       if (success) {
-        const redirectTo = searchParams.get('redirect') || '/';
+        // After successful login: if non-admin, try to jump directly to their assigned game
+        const isAdmin = loggedInUser?.is_superuser || (Array.isArray(loggedInUser?.roles) && loggedInUser.roles.includes('admin'));
+        if (!isAdmin) {
+          try {
+            const games = await mixedGameApi.getGames();
+            const assigned = games.find(g => Array.isArray(g.players) && g.players.some(p => p.user_id === loggedInUser?.id));
+            if (assigned) {
+              navigate(`/games/${assigned.id}`, { replace: true });
+              return;
+            }
+          } catch (e) {
+            // ignore and fall back
+          }
+        }
+        const redirectTo = searchParams.get('redirect') || '/games';
         navigate(redirectTo, { replace: true });
       } else if (error) {
         toast.error(error);

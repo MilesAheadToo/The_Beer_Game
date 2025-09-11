@@ -70,7 +70,16 @@ def create_config(
     current_user: models.User = Depends(deps.get_current_active_superuser),
 ):
     """Create a new supply chain configuration."""
-    return crud.supply_chain_config.create(db, obj_in=config_in)
+    cfg = crud.supply_chain_config.create(db, obj_in=config_in)
+    # Attach creator if column exists
+    try:
+        cfg.created_by = current_user.id
+        db.add(cfg)
+        db.commit()
+        db.refresh(cfg)
+    except Exception:
+        pass
+    return cfg
 
 @router.get("/{config_id}", response_model=schemas.SupplyChainConfig)
 def read_config(

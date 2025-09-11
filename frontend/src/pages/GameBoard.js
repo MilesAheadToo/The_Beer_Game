@@ -30,7 +30,8 @@ import {
   ModalFooter,
   ModalBody,
   ModalCloseButton,
-  useDisclosure
+  useDisclosure,
+  Select as ChakraSelect
 } from '@chakra-ui/react';
 import { useWebSocket } from '../contexts/WebSocketContext';
 import { useAuth } from '../contexts/AuthContext';
@@ -51,6 +52,7 @@ const GameBoard = () => {
   const [playerId, setPlayerId] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isPlayerTurn, setIsPlayerTurn] = useState(false);
+  const [myGames, setMyGames] = useState([]);
   
   const { isOpen, onClose } = useDisclosure();
   const { gameStatus } = useWebSocket();
@@ -82,6 +84,19 @@ const GameBoard = () => {
     
     fetchGameState();
   }, [gameId, toast]);
+
+  // Load list of games created by this admin to allow quick switch
+  useEffect(() => {
+    (async () => {
+      try {
+        const games = await mixedGameApi.getGames();
+        const mine = (games || []).filter(g => g.created_by === user?.id);
+        setMyGames(mine);
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, [user?.id]);
   
   // Fetch game details on component mount
   useEffect(() => {
@@ -173,14 +188,27 @@ const GameBoard = () => {
         ) : (
           <VStack spacing={6} align="stretch">
             {/* Game status bar with round timer */}
-            <HStack spacing={4} align="stretch">
-              {/* Game info card */}
-              <Box flex={1} p={4} bg={cardBg} borderRadius="lg" borderWidth="1px" borderColor={borderColor}>
-                <VStack align="start" spacing={4}>
-                  <VStack align="start" spacing={0}>
-                    <Text fontSize="sm" color="gray.500">Game</Text>
-                    <Text fontSize="lg" fontWeight="bold">{gameDetails?.name || 'Untitled Game'}</Text>
-                  </VStack>
+              <HStack spacing={4} align="stretch">
+                {/* Game info card */}
+                <Box flex={1} p={4} bg={cardBg} borderRadius="lg" borderWidth="1px" borderColor={borderColor}>
+                  <VStack align="start" spacing={4}>
+                    <VStack align="start" spacing={0}>
+                      <Text fontSize="sm" color="gray.500">Game</Text>
+                      <Text fontSize="lg" fontWeight="bold">{gameDetails?.name || 'Untitled Game'}</Text>
+                    </VStack>
+                    {myGames.length > 0 && (
+                      <ChakraSelect
+                        placeholder="Switch to another of my games"
+                        size="sm"
+                        value={String(gameId)}
+                        onChange={(e) => navigate(`/games/${e.target.value}`)}
+                        maxW="sm"
+                      >
+                        {myGames.map((g) => (
+                          <option key={g.id} value={g.id}>{g.name}</option>
+                        ))}
+                      </ChakraSelect>
+                    )}
                   
                   <HStack spacing={6}>
                     <VStack align="start" spacing={0}>

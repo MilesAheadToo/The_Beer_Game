@@ -28,6 +28,11 @@ class Game(Base):
     status: Mapped[GameStatus] = mapped_column(SQLEnum(GameStatus), default=GameStatus.CREATED)
     current_round: Mapped[int] = mapped_column(Integer, default=0)
     max_rounds: Mapped[int] = mapped_column(Integer, default=52)
+    # Optional metadata/ownership
+    created_by: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False)
+    description: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    demand_pattern: Mapped[Optional[dict]] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)

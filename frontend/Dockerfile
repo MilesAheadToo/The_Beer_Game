@@ -13,6 +13,9 @@ RUN npm install -g typescript
 # Install all dependencies including peer dependencies
 RUN npm install --legacy-peer-deps
 
+# Install additional required dependencies
+RUN npm install formik yup @hookform/resolvers react-hook-form
+
 # Copy TypeScript config
 COPY tsconfig.json ./
 

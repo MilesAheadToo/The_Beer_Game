@@ -17,6 +17,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             'GET': {
                 '/api/v1/auth/login',
                 '/api/v1/auth/refresh',
+                '/api/v1/auth/csrf-token',
                 '/api/v1/auth/me',
                 '/api/v1/docs',
                 '/api/v1/openapi.json',
@@ -25,6 +26,7 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             'POST': {
                 '/api/v1/auth/login',
                 '/api/v1/auth/logout',
+                '/api/v1/auth/refresh-token',
             },
             'OPTIONS': {'*'},  # Always allow OPTIONS for CORS preflight
         }

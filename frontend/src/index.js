@@ -7,6 +7,7 @@ import { ThemeProvider } from "@mui/material/styles";
 import CssBaseline from "@mui/material/CssBaseline";
 import theme from "./theme/daybreakTheme";
 import { SystemConfigProvider } from "./contexts/SystemConfigContext.jsx";
+import { HelpProvider } from "./contexts/HelpContext.jsx";
 import "./index.css";
 import App from "./App";
 import { AuthProvider } from "./contexts/AuthContext";
@@ -38,7 +39,9 @@ init()
             <CssBaseline />
             <AuthProvider>
               <SystemConfigProvider>
-                <App />
+                <HelpProvider>
+                  <App />
+                </HelpProvider>
               </SystemConfigProvider>
             </AuthProvider>
           </ThemeProvider>

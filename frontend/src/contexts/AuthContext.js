@@ -149,15 +149,22 @@ export function AuthProvider({ children }) {
       setError(null);
       
       // This will automatically handle CSRF token and cookies
-      const userData = await mixedGameApi.login(credentials);
+      const result = await mixedGameApi.login(credentials);
       
-      setUser(userData);
-      setIsAuthenticated(true);
+      // API returns shape { success, user } on success
+      if (result?.success) {
+        const nextUser = result.user;
+        setUser(nextUser);
+        setIsAuthenticated(true);
+        
+        // Reset timers after successful login
+        resetTimers();
+        return { success: true, user: nextUser };
+      }
       
-      // Reset timers after successful login
-      resetTimers();
-      
-      return { success: true };
+      const message = result?.error || 'Login failed. Please check your credentials.';
+      setError(message);
+      return { success: false, error: message };
     } catch (error) {
       const message = error.response?.data?.detail || 'Login failed. Please check your credentials.';
       setError(message);

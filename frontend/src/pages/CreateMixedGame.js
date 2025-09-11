@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Box, 
@@ -37,6 +37,7 @@ import {
   AlertDescription
 } from '@chakra-ui/react';
 import PageLayout from '../components/PageLayout';
+import { getAllConfigs } from '../services/supplyChainConfigService';
 import PricingConfigForm from '../components/PricingConfigForm';
 import { api, mixedGameApi } from '../services/api';
 import { getModelStatus } from '../services/modelService';
@@ -298,6 +299,7 @@ const CreateMixedGame = () => {
     }))
   );
   const [isLoading, setIsLoading] = useState(false);
+  const [configs, setConfigs] = useState([]);
   const navigate = useNavigate();
   const toast = useToast();
 
@@ -323,6 +325,18 @@ const CreateMixedGame = () => {
 
     fetchUsers();
   }, [toast]);
+
+  // Load available saved Game Configurations (core game setup)
+  useEffect(() => {
+    (async () => {
+      try {
+        const cfgs = await getAllConfigs();
+        if (Array.isArray(cfgs)) setConfigs(cfgs);
+      } catch (e) {
+        // non-blocking
+      }
+    })();
+  }, []);
 
   // Load Daybreak GNN model status
   useEffect(() => {
@@ -558,6 +572,25 @@ const CreateMixedGame = () => {
 
   return (
     <PageLayout title="Mixed Game Definition">
+      {/* Quick links to saved Game Configurations */}
+      {configs?.length > 0 && (
+        <Box mb={4}>
+          <Alert status="info" borderRadius="md" mb={3}>
+            <AlertIcon />
+            <Box>
+              <AlertTitle mr={2}>Saved Game Configurations</AlertTitle>
+              <AlertDescription fontSize="sm">Use a configuration to prefill this form.</AlertDescription>
+            </Box>
+          </Alert>
+          <HStack spacing={2} wrap="wrap">
+            {configs.map((c) => (
+              <Button as={Link} key={c.id} to={`/games/new-from-config/${c.id}`} size="sm" variant="outline">
+                Use: {c.name}
+              </Button>
+            ))}
+          </HStack>
+        </Box>
+      )}
       {modelStatus && !modelStatus.is_trained && (
         <Alert status="warning" variant="left-accent" mb={6} borderRadius="md">
           <AlertIcon />

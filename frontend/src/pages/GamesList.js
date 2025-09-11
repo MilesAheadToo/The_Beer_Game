@@ -254,7 +254,7 @@ const GamesList = () => {
           <Button
             variant="outlined"
             startIcon={<Settings />}
-            onClick={() => navigate('/admin/config')}
+            onClick={() => navigate('/system-config')}
             color="primary"
           >
             System Configuration
@@ -296,7 +296,7 @@ const GamesList = () => {
         <Button
           variant="outlined"
           startIcon={<Settings />}
-          onClick={() => navigate('/admin/config')}
+          onClick={() => navigate('/system-config')}
           color="primary"
         >
           System Configuration

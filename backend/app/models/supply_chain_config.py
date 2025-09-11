@@ -33,6 +33,7 @@ class SupplyChainConfig(Base):
     is_active = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    created_by = Column(Integer, ForeignKey('users.id'), nullable=True)
     
     # Relationships
     items = relationship("Item", back_populates="config", cascade="all, delete-orphan")

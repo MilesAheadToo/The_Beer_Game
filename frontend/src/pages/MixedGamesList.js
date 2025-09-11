@@ -318,12 +318,14 @@ const MixedGamesList = () => {
           </Box>
           <Box flex="1">
             <AlertTitle>
-              {modelStatus.is_trained ? 'GNN Model Trained' : 'GNN Model Not Trained'}
+              {modelStatus.is_trained 
+                ? 'GNN Model Trained' 
+                : 'The Daybreak Agent has not been trained yet.'}
             </AlertTitle>
             <AlertDescription fontSize="sm">
               {modelStatus.is_trained 
                 ? `Model was last trained on ${new Date(modelStatus.last_modified).toLocaleString()}`
-                : 'The GNN model needs to be trained before AI agents can be used.'}
+                : 'You can still select base Agents or LLM Agents.'}
               {modelStatus.is_trained && (
                 <Text fontSize="xs" mt={1}>
                   File: {modelStatus.file_size_mb?.toFixed(2)}MB
@@ -343,25 +345,32 @@ const MixedGamesList = () => {
             Manage and join mixed human-AI games
           </Text>
         </VStack>
-        <Button 
-          as={Link} 
-          to="/games/new" 
-          colorScheme="blue"
-          leftIcon={<AddIcon />}
-          size="md"
-          height="44px"
-          px={6}
-          textTransform="none"
-          fontWeight="500"
-          _hover={{
-            transform: 'translateY(-1px)',
-          }}
-          _active={{
-            transform: 'none'
-          }}
-        >
-          Create New Game
-        </Button>
+        <HStack spacing={3}>
+          <Button as={Link} to="/system-config" variant="outline" colorScheme="gray">
+            Core Configuration
+          </Button>
+          <Button as={Link} to="/supply-chain-config" variant="outline" colorScheme="gray">
+            Game Configuration
+          </Button>
+          <Button as={Link} to="/players" variant="outline" colorScheme="gray">
+            Players
+          </Button>
+          <Button 
+            as={Link} 
+            to="/games/new" 
+            colorScheme="blue"
+            leftIcon={<AddIcon />}
+            size="md"
+            height="44px"
+            px={6}
+            textTransform="none"
+            fontWeight="500"
+            _hover={{ transform: 'translateY(-1px)' }}
+            _active={{ transform: 'none' }}
+          >
+            Create New Game
+          </Button>
+        </HStack>
       </Flex>
 
       <Box 

@@ -18,14 +18,14 @@ export const api = http;
 
 // Request interceptor: handle CSRF token and auth headers
 http.interceptors.request.use(async (config) => {
-  // Skip for token refresh and CSRF endpoints to avoid infinite loops
-  const isAuthRequest = ['/auth/login', '/auth/refresh-token', '/auth/csrf-token'].some(path => 
+  // Skip only for login and the token-fetch endpoint to avoid loops
+  const isAuthRequest = ['/auth/login', '/auth/csrf-token'].some(path => 
     config.url?.includes(path)
   );
   
   if (!isAuthRequest) {
     // Get CSRF token from cookie or fetch a new one
-    const csrfToken = getCookie('csrftoken') || await fetchCsrfToken();
+    const csrfToken = getCookie('csrf_token') || await fetchCsrfToken();
     if (csrfToken) {
       config.headers['X-CSRF-Token'] = csrfToken;
     }
@@ -175,6 +175,16 @@ export const mixedGameApi = {
   // Classic game endpoints (state, details, orders)
   async getGame(gameId) {
     const { data } = await http.get(`/games/${gameId}`);
+    return data;
+  },
+
+  // Players management (per game)
+  async getPlayers(gameId) {
+    const { data } = await http.get(`/games/${gameId}/players`);
+    return data;
+  },
+  async addPlayer(gameId, player) {
+    const { data } = await http.post(`/games/${gameId}/players`, player);
     return data;
   },
 

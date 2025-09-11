@@ -15,6 +15,7 @@ from app.core.security import (
     clear_auth_cookies,
     get_current_user,
     get_current_active_user,
+    set_csrf_cookie,
 )
 from app.db.session import get_db
 from app.models.user import User, UserCreate, UserInDB, UserPublic, UserUpdate, UserBase, UserPasswordChange
@@ -85,6 +86,8 @@ async def login(
     )
     # Also set access token cookie so subsequent requests authenticate without JS-managed headers
     set_auth_cookies(response, tokens.access_token, token_type="bearer")
+    # Ensure CSRF cookie is present after login (used by frontend for POSTs including refresh-token)
+    set_csrf_cookie(response)
     
     # Return access token and user info
     return TokenResponse(
@@ -92,6 +95,15 @@ async def login(
         token_type="bearer",
         user=UserPublic.from_orm(user)
     )
+
+@router.get("/csrf-token")
+async def csrf_token(response: Response):
+    """Issue a CSRF token and set it as a cookie.
+
+    Frontend reads the cookie and also gets the value in the JSON payload.
+    """
+    token = set_csrf_cookie(response)
+    return {"csrf_token": token}
 
 @router.post("/register", response_model=UserPublic, status_code=status.HTTP_201_CREATED)
 async def register(

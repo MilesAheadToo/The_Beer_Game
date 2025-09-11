@@ -272,6 +272,26 @@ const AdminDashboard = () => {
     }
   };
 
+  const { user } = useAuth();
+  // Games created by this admin for selection
+  const [myGames, setMyGames] = useState([]);
+  const location = useLocation();
+  const navigate = useNavigate();
+  const params = new URLSearchParams(location.search);
+  const selectedGameId = params.get('gameId') || '';
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const games = await mixedGameApi.getGames();
+        const mine = (games || []).filter(g => g.created_by === user?.id);
+        setMyGames(mine);
+      } catch (e) {
+        // ignore
+      }
+    })();
+  }, [user?.id]);
+
   if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 p-8">
@@ -304,6 +324,20 @@ const AdminDashboard = () => {
             <div className="flex justify-between items-center">
               <h1 className="text-2xl font-bold text-gray-900">Admin Dashboard</h1>
               <div className="flex space-x-3">
+                {/* Game selector (only games created by this admin) */}
+                {myGames.length > 0 && (
+                  <select
+                    className="block pl-3 pr-10 py-2 text-sm border-gray-300 rounded-md"
+                    value={selectedGameId}
+                    onChange={(e) => navigate(`/admin?gameId=${e.target.value}`)}
+                    title="Select a game to view context-aware dashboards"
+                  >
+                    <option value="">Select Game…</option>
+                    {myGames.map((g) => (
+                      <option key={g.id} value={g.id}>{g.name}</option>
+                    ))}
+                  </select>
+                )}
                 <button type="button" onClick={() => navigate('/users')} className="inline-flex items-center px-4 py-2 text-sm rounded-md text-white bg-indigo-600">
                   <UsersIcon className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
                   Users
@@ -545,4 +579,3 @@ const AdminDashboard = () => {
 };
 
 export default AdminDashboard;
-

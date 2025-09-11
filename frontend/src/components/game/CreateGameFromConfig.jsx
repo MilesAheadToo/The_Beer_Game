@@ -107,13 +107,12 @@ const CreateGameFromConfig = () => {
             { role: 'manufacturer', player_type: 'ai' },
           ]
         });
+        enqueueSnackbar('Game created successfully!', { variant: 'success' });
+        navigate(`/games/${newGame.id}`);
         return newGame;
       } else {
         throw new Error('Failed to create game configuration');
       }
-      
-      enqueueSnackbar('Game created successfully!', { variant: 'success' });
-      navigate(`/games/${newGame.id}`);
     } catch (error) {
       console.error('Error creating game:', error);
       enqueueSnackbar(
