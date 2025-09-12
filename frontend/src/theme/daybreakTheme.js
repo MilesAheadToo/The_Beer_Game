@@ -46,8 +46,8 @@ const theme = createTheme({
       styleOverrides: {
         root: {
           borderRadius: 9999,
-          paddingInline: 20,
-          paddingBlock: 10,
+          paddingInline: 24,
+          paddingBlock: 12,
           boxShadow:
             "0 1px 1px rgba(0,0,0,.04), 0 8px 16px -8px rgba(22,163,74,.35)",
         },

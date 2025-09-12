@@ -1,24 +1,38 @@
 // /frontend/src/config/api.ts
-// Single source of truth for the API origin + base path.
+// Single source of truth for the API base URL used by axios.
 
-// Default values for development
+// Defaults suitable for local development (backend on 8000)
 const DEFAULT_ORIGIN = 'http://localhost:8000';
 const DEFAULT_BASE_PATH = '/api/v1';
 
-// Get environment variables with Create React App prefix
-const getEnvVar = (key: string, fallback: string = ''): string => {
-  // In Create React App, environment variables are available under process.env.REACT_APP_*
-  const value = process.env[`REACT_APP_${key}`];
-  return value !== undefined ? value : fallback;
+// Helper: safely read env for CRA and Vite
+const readEnv = (key: string): string | undefined => {
+  // CRA style
+  if (typeof process !== 'undefined' && process.env) {
+    const cra = process.env[`REACT_APP_${key}`];
+    if (cra !== undefined) return cra;
+  }
+  // Vite style
+  if (typeof import.meta !== 'undefined' && (import.meta as any).env) {
+    const vite = (import.meta as any).env[`VITE_${key}`];
+    if (vite !== undefined) return vite;
+  }
+  return undefined;
 };
 
-// Get the origin and base path from environment variables or use defaults
-const rawOrigin = getEnvVar('API_ORIGIN', DEFAULT_ORIGIN);
-const rawBasePath = getEnvVar('API_BASE_PATH', DEFAULT_BASE_PATH);
+// Prefer explicit BASE_URL if provided (absolute or relative)
+const explicitBaseUrl = readEnv('API_BASE_URL');
 
-// Ensure the origin doesn't end with a slash and base path starts with one
-export const API_ORIGIN = rawOrigin.replace(/\/+$/, '');
-export const API_BASE_PATH = rawBasePath.startsWith('/') ? rawBasePath : `/${rawBasePath}`;
+// Otherwise, allow providing ORIGIN and BASE_PATH separately
+const origin = (readEnv('API_ORIGIN') || DEFAULT_ORIGIN).replace(/\/+$/, '');
+const basePathRaw = readEnv('API_BASE_PATH') || DEFAULT_BASE_PATH;
+const basePath = basePathRaw.startsWith('/') ? basePathRaw : `/${basePathRaw}`;
 
-// For Create React App, we can use relative URLs when the API is on the same origin
-export const API_BASE_URL = API_BASE_PATH;
+// Export final base URL
+// - If explicitBaseUrl is set, use it as-is (supports relative '/api/v1' or absolute 'http://host:port/api/v1')
+// - Else, construct from origin + basePath (defaults to http://localhost:8000/api/v1)
+export const API_BASE_URL: string = explicitBaseUrl ?? `${origin}${basePath}`;
+
+// Convenience named exports (optional)
+export const API_ORIGIN: string = origin;
+export const API_BASE_PATH: string = basePath;

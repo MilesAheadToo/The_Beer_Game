@@ -25,8 +25,10 @@ import {
   MenuItem,
   Snackbar,
   Alert,
+  Divider,
+  Stack,
 } from '@mui/material';
-import { PlayArrow, Edit, Delete, Add, Settings } from '@mui/icons-material';
+import { PlayArrow, Edit, Delete, Add, Settings, FileDownloadOutlined } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import gameApi from '../services/gameApi';
 import { Alert as ChakraAlert, AlertTitle, AlertDescription, AlertIcon, Box as ChakraBox } from '@chakra-ui/react';
@@ -121,6 +123,48 @@ const GamesList = () => {
     fetchGames();
   }, [fetchGames]);
 
+  // Simple export to CSV for the current list
+  const handleExport = () => {
+    if (!Array.isArray(games) || games.length === 0) return;
+    const headers = [
+      'id','name','status','current_round','max_rounds','demand_pattern','core_config','created_at'
+    ];
+    const rows = games.map(g => {
+      const dp = g?.demand_pattern ? JSON.stringify(g.demand_pattern) : '';
+      const cc = g?.core_config || g?.system_config || g?.config || '';
+      const ccStr = typeof cc === 'string' ? cc : (cc ? JSON.stringify(cc) : '');
+      return [g.id, g.name, g.status, g.current_round, g.max_rounds, dp, ccStr, g.created_at];
+    });
+    const csv = [headers.join(','), ...rows.map(r => r.map(val => `"${String(val ?? '').replace(/"/g,'""')}"`).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'games.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  // Render a compact summary of the core/system config
+  const renderCoreConfig = (game) => {
+    const cc = game?.core_config || game?.system_config || game?.config;
+    if (!cc) {
+      return (
+        <Tooltip title="This game uses current system defaults. Configure in Core Configuration.">
+          <Chip label="Defaults" size="small" variant="outlined" color="default" />
+        </Tooltip>
+      );
+    }
+    // Try to show a concise label (name or version), with full JSON in tooltip
+    const label = cc.name || cc.version || cc.id || 'Custom';
+    const tooltip = typeof cc === 'string' ? cc : JSON.stringify(cc, null, 2);
+    return (
+      <Tooltip title={<pre style={{ margin: 0 }}>{tooltip}</pre>}>
+        <Chip label={String(label)} size="small" color="primary" variant="outlined" />
+      </Tooltip>
+    );
+  };
+
   // Handle dialog open/close
   const handleOpenDialog = (game = null) => {
     if (game) {
@@ -200,9 +244,14 @@ const GamesList = () => {
 
   // Handle game deletion
   const handleDeleteGame = async (gameId) => {
-    if (window.confirm('Are you sure you want to delete this game?')) {
-      // Delete endpoint is not available in the backend yet
-      showSnackbar('Game deletion is disabled in this build.', 'info');
+    if (!window.confirm('Are you sure you want to delete this game? This action cannot be undone.')) return;
+    try {
+      await gameApi.deleteGame(gameId);
+      showSnackbar('Game deleted', 'success');
+      fetchGames();
+    } catch (err) {
+      console.error('Delete failed', err);
+      showSnackbar(err?.response?.data?.detail || 'Failed to delete game', 'error');
     }
   };
 
@@ -249,7 +298,7 @@ const GamesList = () => {
   if (error) {
     return (
       <Box sx={{ p: 3 }}>
-        {/* Admin Navigation Buttons */}
+        {/* Quick Navigation Buttons (error state) */}
         <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'flex-end' }}>
           <Button
             variant="outlined"
@@ -257,7 +306,19 @@ const GamesList = () => {
             onClick={() => navigate('/system-config')}
             color="primary"
           >
-            System Configuration
+            Core Configuration
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() => navigate('/supply-chain-config')}
+          >
+            Game Configuration
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() => navigate('/players')}
+          >
+            Players
           </Button>
           <Button
             variant="outlined"
@@ -265,7 +326,7 @@ const GamesList = () => {
             onClick={() => navigate('/admin/training')}
             color="secondary"
           >
-            Training Configuration
+            Training
           </Button>
         </Box>
 
@@ -291,25 +352,31 @@ const GamesList = () => {
 
   return (
     <Box sx={{ p: 3 }}>
-      {/* Admin Navigation Buttons */}
-      <Box sx={{ display: 'flex', gap: 2, mb: 3, justifyContent: 'flex-end' }}>
-        <Button
-          variant="outlined"
-          startIcon={<Settings />}
-          onClick={() => navigate('/system-config')}
-          color="primary"
-        >
-          System Configuration
-        </Button>
-        <Button
-          variant="outlined"
-          startIcon={<Settings />}
-          onClick={() => navigate('/admin/training')}
-          color="secondary"
-        >
-          Training Configuration
-        </Button>
+      {/* Header actions matching Daybreak style */}
+      <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: '#24c38b' }} />
+          <Typography variant="h6" sx={{ fontWeight: 700 }}>Games</Typography>
+        </Stack>
+        <Stack direction="row" spacing={1}>
+          <Button variant="outlined" startIcon={<Settings />} onClick={() => navigate('/system-config')}>
+            Core Configuration
+          </Button>
+          <Button variant="outlined" onClick={() => navigate('/supply-chain-config')}>
+            Game Configuration
+          </Button>
+          <Button variant="outlined" onClick={() => navigate('/players')}>
+            Players
+          </Button>
+          <Button variant="outlined" onClick={() => navigate('/admin/training')}>
+            Training
+          </Button>
+          <IconButton onClick={handleExport} title="Export">
+            <FileDownloadOutlined />
+          </IconButton>
+        </Stack>
       </Box>
+      <Divider sx={{ mb: 2 }} />
 
       {/* Daybreak Agent Not Trained Alert */}
       {!loadingModelStatus && modelStatus && !modelStatus.is_trained && (
@@ -345,6 +412,7 @@ const GamesList = () => {
               <TableCell>Current Round</TableCell>
               <TableCell>Max Rounds</TableCell>
               <TableCell>Demand Pattern</TableCell>
+              <TableCell>Core Config</TableCell>
               <TableCell>Created At</TableCell>
               <TableCell>Actions</TableCell>
             </TableRow>
@@ -352,7 +420,7 @@ const GamesList = () => {
           <TableBody>
             {games.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} align="center">
+                <TableCell colSpan={8} align="center">
                   No games found. Create a new game to get started.
                 </TableCell>
               </TableRow>
@@ -381,40 +449,43 @@ const GamesList = () => {
                     </Typography>
                   </TableCell>
                   <TableCell>
+                    {renderCoreConfig(game)}
+                  </TableCell>
+                  <TableCell>
                     <Typography noWrap maxWidth={220} title={formatDate(game.created_at)}>
                       {formatDate(game.created_at)}
                     </Typography>
                   </TableCell>
                   <TableCell>
                     <Box display="flex" gap={1}>
-                      <Tooltip title="Start Game">
-                        <IconButton
-                          size="small"
-                          color="primary"
-                          onClick={() => handleStartGame(game.id)}
-                          disabled={game.status !== 'created'}
-                        >
-                          <PlayArrow />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Edit">
-                        <IconButton
-                          size="small"
-                          color="primary"
-                          onClick={() => handleOpenDialog(game)}
-                        >
-                          <Edit />
-                        </IconButton>
-                      </Tooltip>
-                      <Tooltip title="Delete">
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => handleDeleteGame(game.id)}
-                        >
-                          <Delete />
-                        </IconButton>
-                      </Tooltip>
+                      <Button
+                        size="small"
+                        variant="contained"
+                        color="primary"
+                        startIcon={<PlayArrow />}
+                        onClick={() => handleStartGame(game.id)}
+                        disabled={String(game.status).toLowerCase() !== 'created'}
+                      >
+                        Start
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="primary"
+                        startIcon={<Edit />}
+                        onClick={() => handleOpenDialog(game)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="error"
+                        startIcon={<Delete />}
+                        onClick={() => handleDeleteGame(game.id)}
+                      >
+                        Delete
+                      </Button>
                     </Box>
                   </TableCell>
                 </TableRow>

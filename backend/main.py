@@ -380,6 +380,7 @@ class Range(BaseModel):
 
 
 class SystemConfigModel(BaseModel):
+    name: str = Field(default="Default System Config")
     info_delay: Range = Field(default=Range(min=0, max=8))
     ship_delay: Range = Field(default=Range(min=0, max=8))
     init_inventory: Range = Field(default=Range(min=0, max=1000))
@@ -389,7 +390,6 @@ class SystemConfigModel(BaseModel):
     max_order: Range = Field(default=Range(min=10, max=2000))
     price: Range = Field(default=Range(min=0, max=10000))
     standard_cost: Range = Field(default=Range(min=0, max=10000))
-    variable_cost: Range = Field(default=Range(min=0, max=10000))
     min_order_qty: Range = Field(default=Range(min=0, max=1000))
 
 

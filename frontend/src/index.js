@@ -11,21 +11,48 @@ import { HelpProvider } from "./contexts/HelpContext.jsx";
 import "./index.css";
 import App from "./App";
 import { AuthProvider } from "./contexts/AuthContext";
-import mixedGameApi from "./services/api";
+import mixedGameApi, { api as http } from "./services/api";
 import { API_BASE_URL } from "./config/api.ts";
 
-async function init() {
-  console.log("Attempting to connect to API at:", `${API_BASE_URL}/health`);
+async function probe(base, path = "/health") {
   try {
-    const data = await mixedGameApi.health(); // -> GET http://localhost:8000/api/v1/health
+    const res = await fetch(`${base.replace(/\/$/, "")}${path}`, { credentials: "include" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+async function detectApiBase() {
+  const candidates = [
+    API_BASE_URL,
+    "/api/v1",
+    "/api",
+    "http://localhost:8000/api/v1",
+  ].filter(Boolean);
+
+  for (const c of candidates) {
+    const ok = await probe(c, "/health");
+    if (ok) return c;
+  }
+  throw new Error("No reachable API base URL detected");
+}
+
+async function init() {
+  try {
+    const resolvedBase = await detectApiBase();
+    http.defaults.baseURL = resolvedBase;
+    console.log("API base resolved:", resolvedBase);
+    const data = await mixedGameApi.health();
     console.log("API health:", data);
     return true;
   } catch (err) {
     const status = err?.response?.status;
-    const text = err?.response?.statusText;
+    const text = err?.response?.statusText || err?.message;
     const payload = err?.response?.data;
-    console.error("API connection test failed:", { status, text, payload });
-    throw new Error(`API connection failed: HTTP error! status: ${status} - ${text || "Unknown"}`);
+    console.error("API connection test failed:", { status, text, payload, envBase: API_BASE_URL, resolvedBase: http?.defaults?.baseURL });
+    throw new Error(`API connection failed: ${text || "Unknown"}`);
   }
 }
 
@@ -56,6 +83,6 @@ init()
         <h1 style="margin:0 0 8px 0;">Error</h1>
         <p style="margin:0 0 16px 0;">Initialization failed: ${e.message}</p>
         <p style="color:#666;margin:0;">Current Step:<br/><strong>Initializing...</strong></p>
-        <p style="margin-top:16px;color:#888;">Tip: ensure backend is running at ${API_BASE_URL}</p>
+        <p style="margin-top:16px;color:#888;">Tip: backend should be reachable at /api, /api/v1, or http://localhost:8000/api/v1</p>
       </div>`;
   });

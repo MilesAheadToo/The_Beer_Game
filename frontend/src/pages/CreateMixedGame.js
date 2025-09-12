@@ -592,8 +592,8 @@ const CreateMixedGame = () => {
         </Box>
       )}
       {modelStatus && !modelStatus.is_trained && (
-        <Alert status="warning" variant="left-accent" mb={6} borderRadius="md">
-          <AlertIcon />
+        <Alert status="error" variant="left-accent" mb={6} borderRadius="md">
+          <AlertIcon boxSize="16px" color="red.500" />
           <Box>
             <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
             <AlertDescription fontSize="sm">

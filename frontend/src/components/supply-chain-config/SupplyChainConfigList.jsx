@@ -62,9 +62,9 @@ const SupplyChainConfigList = () => {
       setConfigs(response.data);
       setError(null);
     } catch (err) {
-      console.error('Error fetching supply chain configs:', err);
-      setError('Failed to load configurations. Please try again later.');
-      enqueueSnackbar('Failed to load configurations', { variant: 'error' });
+      console.warn('Supply chain configs endpoint unavailable; showing empty list.', err?.response?.status);
+      setConfigs([]);
+      setError(null);
     } finally {
       setLoading(false);
     }

@@ -152,6 +152,10 @@ class GenerateDataRequest(BaseModel):
     distribution: Optional[str] = "uniform"  # 'uniform' or 'normal'
     normal_means: Optional[Dict[str, float]] = None
     normal_stds: Optional[Dict[str, float]] = None
+    # New: SimPy tuning
+    use_simpy: Optional[bool] = None
+    sim_alpha: Optional[float] = None
+    sim_wip_k: Optional[float] = None
 
 @router.post("/model/generate-data", response_model=Dict[str, Any])
 async def generate_data(req: GenerateDataRequest):
@@ -181,6 +185,9 @@ async def generate_data(req: GenerateDataRequest):
             params=BeerGameParams(),
             param_ranges=ranges,
             randomize=True,
+            use_simpy=req.use_simpy,
+            sim_alpha=float(req.sim_alpha) if req.sim_alpha is not None else 0.3,
+            sim_wip_k=float(req.sim_wip_k) if req.sim_wip_k is not None else 1.0,
         )
     out_dir = Path("training_jobs"); out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"dataset_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.npz"

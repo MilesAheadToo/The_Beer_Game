@@ -275,8 +275,6 @@ const AdminDashboard = () => {
   const { user } = useAuth();
   // Games created by this admin for selection
   const [myGames, setMyGames] = useState([]);
-  const location = useLocation();
-  const navigate = useNavigate();
   const params = new URLSearchParams(location.search);
   const selectedGameId = params.get('gameId') || '';
 

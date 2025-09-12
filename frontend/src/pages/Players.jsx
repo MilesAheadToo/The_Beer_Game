@@ -1,8 +1,11 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Box, Button, Card, CardBody, CardHeader, FormControl, FormLabel, Grid, Heading, HStack, Input, Select, Spinner, Text, useToast, VStack } from '@chakra-ui/react';
+import { AddIcon } from '@chakra-ui/icons';
 import { Link } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 import mixedGameApi, { api } from '../services/api';
+import gameApi from '../services/gameApi';
+import { getAllConfigs as getAllSupplyConfigs } from '../services/supplyChainConfigService';
 
 const roleOptions = [
   { value: 'retailer', label: 'Retailer' },
@@ -14,6 +17,8 @@ const roleOptions = [
 const PlayersPage = () => {
   const toast = useToast();
   const [games, setGames] = useState([]);
+  const [coreConfigs, setCoreConfigs] = useState([]);
+  const [selectedCoreConfigId, setSelectedCoreConfigId] = useState('');
   const [users, setUsers] = useState([]);
   const [selectedGameId, setSelectedGameId] = useState('');
   const [loading, setLoading] = useState(true);
@@ -22,7 +27,8 @@ const PlayersPage = () => {
   const [form, setForm] = useState({
     name: '',
     role: 'retailer',
-    type: 'human',
+    type: 'agent',
+    agent_type: 'LLM_BALANCED',
     user_id: '',
   });
 
@@ -42,13 +48,23 @@ const PlayersPage = () => {
   useEffect(() => {
     (async () => {
       try {
-        const [gamesData, usersRes] = await Promise.all([
-          mixedGameApi.getGames(),
+        const [gamesData, usersRes, cfgs] = await Promise.all([
+          gameApi.getGames(),
           api.get('/auth/users/'),
+          (async () => {
+            try {
+              const list = await getAllSupplyConfigs();
+              return Array.isArray(list) ? list : [];
+            } catch {
+              return [];
+            }
+          })()
         ]);
         setGames(gamesData);
         setUsers(usersRes.data || []);
-        if (gamesData?.length) {
+        setCoreConfigs(cfgs);
+        if (cfgs?.length) setSelectedCoreConfigId(String(cfgs[0].id));
+        if (Array.isArray(gamesData) && gamesData.length) {
           setSelectedGameId(String(gamesData[0].id));
         }
       } catch (e) {
@@ -66,9 +82,11 @@ const PlayersPage = () => {
     if (!selectedGameId) return;
     try {
       const payload = {
-        name: form.name || `${form.role} (${form.type === 'human' ? 'Human' : 'AI'})`,
+        name: form.name || `${form.role} (${form.type === 'human' ? 'Human' : 'Agent'})`,
         role: form.role,
         is_ai: form.type !== 'human',
+        player_type: form.type === 'human' ? 'human' : 'agent',
+        agent_type: form.type !== 'human' ? form.agent_type : undefined,
         user_id: form.type === 'human' ? Number(form.user_id) || null : null,
       };
       await mixedGameApi.addPlayer(Number(selectedGameId), payload);
@@ -79,6 +97,26 @@ const PlayersPage = () => {
       console.error(e);
       const msg = e?.response?.data?.detail || 'Failed to add player';
       toast({ title: 'Error', description: msg, status: 'error' });
+    }
+  };
+  
+  // Quick create a minimal game if none exist
+  const quickCreateGame = async () => {
+    try {
+      const payload = {
+        name: `Quick Game ${new Date().toLocaleString()}`,
+        max_rounds: 20,
+        demand_pattern: { type: 'classic', params: { stable_period: 5, step_increase: 4 } },
+      };
+      const newGame = await gameApi.createGame(payload);
+      toast({ title: 'Game created', status: 'success' });
+      setGames((prev) => (Array.isArray(prev) ? [...prev, newGame] : [newGame]));
+      const id = String(newGame.id);
+      setSelectedGameId(id);
+      fetchPlayers(id);
+    } catch (e) {
+      console.error('Quick create failed', e);
+      toast({ title: 'Failed to create game', description: e?.response?.data?.detail || e.message, status: 'error' });
     }
   };
 
@@ -103,10 +141,24 @@ const PlayersPage = () => {
         <CardHeader>
           <HStack spacing={4}>
             <FormControl maxW="xs">
-              <FormLabel>Game</FormLabel>
-              <Select value={selectedGameId} onChange={(e) => setSelectedGameId(e.target.value)}>
-                {games.map(g => (<option key={g.id} value={g.id}>{g.name}</option>))}
+              <FormLabel>Core Configuration</FormLabel>
+              <Select value={selectedCoreConfigId} onChange={(e) => setSelectedCoreConfigId(e.target.value)}>
+                {coreConfigs.length === 0 && (<option value="">System Defaults</option>)}
+                {coreConfigs.map(c => (<option key={c.id} value={c.id}>{c.name}</option>))}
               </Select>
+            </FormControl>
+            <FormControl maxW="xs">
+              <FormLabel>Game</FormLabel>
+              {games.length > 0 ? (
+                <Select value={selectedGameId} onChange={(e) => setSelectedGameId(e.target.value)}>
+                  {games.map(g => (<option key={g.id} value={g.id}>{g.name}</option>))}
+                </Select>
+              ) : (
+                <HStack>
+                  <Text color="gray.500">No games found.</Text>
+                  <Button leftIcon={<AddIcon />} onClick={quickCreateGame} variant="outline" className="db-btn">Create Game</Button>
+                </HStack>
+              )}
             </FormControl>
           </HStack>
         </CardHeader>
@@ -124,10 +176,23 @@ const PlayersPage = () => {
                 <FormControl>
                   <FormLabel>Type</FormLabel>
                   <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                    <option value="agent">Agent</option>
                     <option value="human">Human</option>
-                    <option value="ai">AI</option>
                   </Select>
                 </FormControl>
+                {form.type === 'agent' && (
+                  <FormControl>
+                    <FormLabel>Agent Type</FormLabel>
+                    <Select value={form.agent_type} onChange={(e) => setForm({ ...form, agent_type: e.target.value })}>
+                      <option value="DAYBREAK">Daybreak (GNN)</option>
+                      <option value="LLM_BALANCED">LLM - Balanced</option>
+                      <option value="LLM_CONSERVATIVE">LLM - Conservative</option>
+                      <option value="LLM_AGGRESSIVE">LLM - Aggressive</option>
+                      <option value="NAIVE">Heuristic - Naive</option>
+                      <option value="BULLWHIP">Heuristic - Bullwhip</option>
+                    </Select>
+                  </FormControl>
+                )}
                 {form.type === 'human' && (
                   <FormControl>
                     <FormLabel>User</FormLabel>
@@ -170,4 +235,3 @@ const PlayersPage = () => {
 };
 
 export default PlayersPage;
-

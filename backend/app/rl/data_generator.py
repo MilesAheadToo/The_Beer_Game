@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
+import os as _os
+try:
+    import simpy  # type: ignore
+except Exception:
+    simpy = None
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
@@ -314,6 +319,113 @@ def simulate_beer_game(
         }
     return out
 
+
+def simulate_beer_game_simpy(
+    T: int,
+    params: BeerGameParams,
+    demand_fn=SimDemand(),
+    alpha: float = 0.3,
+    wip_k: float = 1.0,
+) -> Dict[str, Dict[str, List[int]]]:
+    """
+    SimPy-backed week-stepped Beer Game with a smoother ordering policy to reduce bullwhip.
+    Default demand pattern is classic Beer Game: flat base, then a step up that stays flat.
+    """
+    if simpy is None:
+        # If SimPy isn't available, fall back to the discrete simulator
+        return simulate_beer_game(T=T, params=params, demand_fn=demand_fn)
+
+    env = simpy.Environment()
+
+    roles = list(NODES)
+    inv = {r: [params.init_inventory] for r in roles}
+    back = {r: [0] for r in roles}
+    in_ord = {r: [0] for r in roles}
+    in_ship = {r: [0] for r in roles}
+    on_ord = {r: [0] for r in roles}
+    placed = {r: [] for r in roles}
+
+    info_pipes = {r: [0] * params.info_delay for r in roles}
+    ship_pipes = {r: [0] * params.ship_delay for r in roles}
+    # Simple per-role demand/throughput forecast to dampen swings
+    forecast = {r: float(params.init_inventory) / max(1, params.ship_delay + 1) for r in roles}
+
+    def clip_ship(x: int) -> int:
+        return int(min(max(0, x), params.max_inbound_per_link))
+
+    def step():
+        # External demand hits retailer
+        in_ord["retailer"].append(demand_fn(len(placed["retailer"])) )
+
+        # Orders propagate upstream (info delay)
+        for dn, up in ORDER_EDGES:
+            src_role = NODES[dn]
+            dst_role = NODES[up]
+            outgoing = placed[src_role][-1] if placed[src_role] else 0
+            pipe = info_pipes[dst_role]
+            arriving = pipe.pop(0) if pipe else 0
+            pipe.append(outgoing)
+            in_ord[dst_role].append(arriving)
+
+        # Shipments propagate downstream (shipping delay)
+        for up, dn in SHIPMENT_EDGES:
+            src_role = NODES[up]
+            dst_role = NODES[dn]
+            demand_here = in_ord[dst_role][-1] + back[dst_role][-1]
+            outgoing = clip_ship(min(inv[src_role][-1], demand_here))
+            pipe = ship_pipes[dst_role]
+            arriving = pipe.pop(0) if pipe else 0
+            pipe.append(outgoing)
+            in_ship[dst_role].append(arriving)
+
+        # Update inventory/backlog after shipments
+        for r in roles:
+            inv_r = inv[r][-1]
+            incoming = in_ship[r][-1]
+            demand = in_ord[r][-1] + back[r][-1]
+            shipped = min(inv_r + incoming, demand)
+            new_inv = max(0, inv_r + incoming - shipped)
+            new_back = max(0, demand - (inv_r + incoming))
+            inv[r].append(new_inv)
+            back[r].append(new_back)
+
+        # Smoother order policy (order-up-to with forecast + WIP correction)
+        for r in roles:
+            obs = float(in_ord[r][-1])
+            forecast[r] = alpha * obs + (1.0 - alpha) * forecast[r]
+            target_inv = params.init_inventory + params.ship_delay * 2
+            order_up_to = target_inv + forecast[r] * params.ship_delay
+            current_wip = inv[r][-1] + on_ord[r][-1]
+            desired = max(0.0, order_up_to - current_wip + back[r][-1])
+            raw_order = int(np.clip(wip_k * desired, 0, params.max_order))
+            act_idx = order_units_to_action_idx(raw_order)
+            order_units = action_idx_to_order_units(act_idx)
+            placed[r].append(order_units)
+            on_ord[r].append(max(0, on_ord[r][-1] + order_units - in_ship[r][-1]))
+
+    def weekly(env):
+        for _ in range(T):
+            step()
+            yield env.timeout(1)
+
+    env.process(weekly(env))
+    env.run()
+
+    def trim(series: List[int]) -> List[int]:
+        return series[1:] if len(series) and len(series[1:]) == T else series[:T]
+
+    out = {}
+    for r in roles:
+        out[r] = {
+            "inventory": trim(inv[r]),
+            "backlog": trim(back[r]),
+            "incoming_orders": trim(in_ord[r]),
+            "incoming_shipments": trim(in_ship[r]),
+            "on_order": trim(on_ord[r]),
+            "placed_order": placed[r][:T],
+        }
+    return out
+
 def _sample_params_uniform(base: BeerGameParams, ranges: Optional[Dict[str, Tuple[float, float]]] = None) -> BeerGameParams:
     """Sample BeerGameParams uniformly within provided ranges (inclusive)."""
     rng = ranges or {}
@@ -413,6 +525,9 @@ def generate_sim_training_windows(
     randomize: bool = True,
     supply_chain_config_id: Optional[int] = None,
     db_url: Optional[str] = None,
+    use_simpy: Optional[bool] = None,
+    sim_alpha: float = 0.3,
+    sim_wip_k: float = 1.0,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Create imitation-learning windows from the simulator.
@@ -455,9 +570,18 @@ def generate_sim_training_windows(
     if param_ranges:
         ranges.update(param_ranges)
 
+    # Decide simulator backend; default to SimPy unless USE_SIMPY="0"
+    if use_simpy is None:
+        use_simpy = (_os.getenv("USE_SIMPY", "1") != "0")
+
     for _ in range(num_runs):
         sim_params = _sample_params_uniform(params, ranges) if randomize else params
-        trace = simulate_beer_game(T=T, params=sim_params)
+        demand = SimDemand()  # flat, then step up (classic Beer Game)
+        trace = (
+            simulate_beer_game_simpy(T=T, params=sim_params, demand_fn=demand, alpha=sim_alpha, wip_k=sim_wip_k)
+            if use_simpy else
+            simulate_beer_game(T=T, params=sim_params, demand_fn=demand)
+        )
         # slide windows
         for start in range(0, T - (window + horizon) + 1):
             X = np.zeros((window, 4, len(NODE_FEATURES)), dtype=np.float32)

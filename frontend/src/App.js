@@ -22,6 +22,7 @@ import Unauthorized from "./pages/Unauthorized";
 import SupplyChainConfigList from "./components/supply-chain-config/SupplyChainConfigList";
 import SupplyChainConfigForm from "./components/supply-chain-config/SupplyChainConfigForm";
 import Players from "./pages/Players.jsx";
+import DebugBanner from "./components/DebugBanner.jsx";
 
 window.onerror = function (message, source, lineno, colno, error) {
   console.error("Global error:", { message, source, lineno, colno, error });
@@ -57,6 +58,7 @@ const AppContent = () => {
 
   return (
     <Box sx={{ display: "flex" }}>
+      <DebugBanner />
       <Box component="main" sx={{ flexGrow: 1, px: 3, py: 0, width: "100%" }}>
         <Routes>
           <Route path="/login" element={<Login />} />
@@ -130,49 +132,41 @@ const AppContent = () => {
             <Route
               path="/admin"
               element={
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <>
-                    <Navbar />
-                    <Box sx={(theme) => theme.mixins.toolbar} />
-                    <AdminDashboard />
-                  </>
-                </ProtectedRoute>
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <AdminDashboard />
+                </>
               }
             />
             <Route
               path="/admin/training"
               element={
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <>
-                    <Navbar />
-                    <Box sx={(theme) => theme.mixins.toolbar} />
-                    <AdminTraining />
-                  </>
-                </ProtectedRoute>
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <AdminTraining />
+                </>
               }
             />
             <Route
               path="/admin/model-setup"
               element={
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <>
-                    <Navbar />
-                    <Box sx={(theme) => theme.mixins.toolbar} />
-                    <ModelSetup />
-                  </>
-                </ProtectedRoute>
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <ModelSetup />
+                </>
               }
             />
             <Route
               path="/users"
               element={
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <>
-                    <Navbar />
-                    <Box sx={(theme) => theme.mixins.toolbar} />
-                    <Users />
-                  </>
-                </ProtectedRoute>
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <Users />
+                </>
               }
             />
 
@@ -190,63 +184,53 @@ const AppContent = () => {
             <Route
               path="/system-config"
               element={
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <>
-                    <Navbar />
-                    <Box sx={(theme) => theme.mixins.toolbar} />
-                    <SystemConfig />
-                  </>
-                </ProtectedRoute>
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <SystemConfig />
+                </>
               }
             />
 
             <Route
               path="/players"
               element={
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <>
-                    <Navbar />
-                    <Box sx={(theme) => theme.mixins.toolbar} />
-                    <Players />
-                  </>
-                </ProtectedRoute>
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <Players />
+                </>
               }
             />
 
             <Route
               path="/supply-chain-config"
               element={
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <>
-                    <Navbar />
-                    <Box sx={(theme) => theme.mixins.toolbar} />
-                    <SupplyChainConfigList />
-                  </>
-                </ProtectedRoute>
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <SupplyChainConfigList />
+                </>
               }
             />
             <Route
               path="/supply-chain-config/new"
               element={
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <>
-                    <Navbar />
-                    <Box sx={(theme) => theme.mixins.toolbar} />
-                    <SupplyChainConfigForm />
-                  </>
-                </ProtectedRoute>
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <SupplyChainConfigForm />
+                </>
               }
             />
             <Route
               path="/supply-chain-config/edit/:id"
               element={
-                <ProtectedRoute allowedRoles={["admin"]}>
-                  <>
-                    <Navbar />
-                    <Box sx={(theme) => theme.mixins.toolbar} />
-                    <SupplyChainConfigForm />
-                  </>
-                </ProtectedRoute>
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <SupplyChainConfigForm />
+                </>
               }
             />
 

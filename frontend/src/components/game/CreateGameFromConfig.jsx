@@ -20,6 +20,9 @@ import {
   createGameFromConfig as createGameFromConfigService,
   getAllConfigs as getAllConfigsService
 } from '../../services/supplyChainConfigService';
+import { getModelStatus } from '../../services/modelService';
+import Alert from '@mui/material/Alert';
+import AlertTitle from '@mui/material/AlertTitle';
 import * as gameService from '../../services/gameService';
 
 const CreateGameFromConfig = () => {
@@ -36,6 +39,7 @@ const CreateGameFromConfig = () => {
     max_rounds: 52,
     is_public: true
   });
+  const [modelStatus, setModelStatus] = useState(null);
 
   // Load supply chain configurations
   useEffect(() => {
@@ -53,6 +57,18 @@ const CreateGameFromConfig = () => {
 
     fetchConfigs();
   }, [enqueueSnackbar]);
+
+  // Load Daybreak GNN model status
+  useEffect(() => {
+    (async () => {
+      try {
+        const status = await getModelStatus();
+        setModelStatus(status);
+      } catch (e) {
+        // non-blocking
+      }
+    })();
+  }, []);
 
   // Update game data when a config is selected
   useEffect(() => {
@@ -134,6 +150,12 @@ const CreateGameFromConfig = () => {
 
   return (
     <Box maxWidth="md" mx="auto" p={2}>
+      {modelStatus && !modelStatus.is_trained && (
+        <Alert severity="error" sx={{ mb: 2 }}>
+          <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
+          The Daybreak agent has not yet been trained, so it cannot be used until training completes. You may still select Basic (heuristics) or LLM agents.
+        </Alert>
+      )}
       <Card>
         <CardHeader 
           title="Create Game from Supply Chain Configuration" 

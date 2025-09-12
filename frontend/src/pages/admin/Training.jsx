@@ -14,6 +14,10 @@ export default function Training() {
   const [dbUrl, setDbUrl] = useState('');
   const [job, setJob] = useState(null);
   const [jobStatus, setJobStatus] = useState(null);
+  // Simulation settings
+  const [useSimpy, setUseSimpy] = useState(true);
+  const [simAlpha, setSimAlpha] = useState(0.3);
+  const [simWipK, setSimWipK] = useState(1.0);
   const [ranges, setRanges] = useState({
     info_delay: [0, 6], ship_delay: [0, 6], init_inventory: [4, 60],
     holding_cost: [0.1, 2.0], backlog_cost: [0.2, 4.0], max_inbound_per_link: [50, 300], max_order: [50, 300]
@@ -54,7 +58,16 @@ export default function Training() {
   const generate = async () => {
     try {
       const param_ranges = Object.fromEntries(Object.entries(ranges).map(([k,v]) => [k, [Number(v[0]), Number(v[1])]]));
-      const data = await mixedGameApi.generateData({ num_runs: 64, T: 64, window: windowSize, horizon, param_ranges });
+      const data = await mixedGameApi.generateData({
+        num_runs: 64,
+        T: 64,
+        window: windowSize,
+        horizon,
+        param_ranges,
+        use_simpy: useSimpy,
+        sim_alpha: simAlpha,
+        sim_wip_k: simWipK,
+      });
       toast({ title: 'Dataset generated', description: data.path, status: 'success', duration: 4000, isClosable: true });
     } catch (e) {
       toast({ title: 'Failed to generate dataset', description: e?.response?.data?.detail || e.message, status: 'error', duration: 5000, isClosable: true });
@@ -106,6 +119,28 @@ export default function Training() {
           )}
         </Grid>
       <Box mt={6}>
+          <Text fontWeight="semibold" mb={2}>Simulation Settings</Text>
+          <Grid templateColumns={{ base: '1fr', md: 'repeat(3, 1fr)' }} gap={4} mb={4}>
+            <FormControl>
+              <FormLabel>Use SimPy</FormLabel>
+              <Select value={useSimpy ? '1' : '0'} onChange={(e)=> setUseSimpy(e.target.value === '1')}>
+                <option value='1'>Yes (default)</option>
+                <option value='0'>No (discrete simulator)</option>
+              </Select>
+            </FormControl>
+            <FormControl>
+              <FormLabel>Smoothing Alpha</FormLabel>
+              <NumberInput min={0} max={1} step={0.05} value={simAlpha} onChange={(v)=> setSimAlpha(parseFloat(v)||0)}>
+                <NumberInputField />
+              </NumberInput>
+            </FormControl>
+            <FormControl>
+              <FormLabel>WIP Gain</FormLabel>
+              <NumberInput min={0} max={5} step={0.1} value={simWipK} onChange={(v)=> setSimWipK(parseFloat(v)||0)}>
+                <NumberInputField />
+              </NumberInput>
+            </FormControl>
+          </Grid>
           <Text fontWeight="semibold" mb={2}>Generate Dataset (Simulator)</Text>
           <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={4}>
             {Object.entries(ranges).map(([k,v]) => (

@@ -105,6 +105,22 @@ table tbody tr:hover {
   box-shadow: var(--shadow-sm);
 }
 
+/* Delineate buttons more clearly across the app */
+/* Applies to Chakra buttons and plain buttons; MUI handled via theme */
+.chakra-button,
+button.db-btn {
+  border-radius: 9999px !important; /* pill */
+  background-color: rgba(36,195,139,0.12) !important; /* pale green */
+  color: #0F172A !important;
+  border: 1px solid rgba(36,195,139,0.35) !important;
+  padding: 10px 18px !important; /* add breathing room */
+  min-width: 110px !important;
+}
+.chakra-button:hover,
+button.db-btn:hover {
+  background-color: rgba(36,195,139,0.2) !important;
+}
+
 /* Chakra Card normalization to match Figma surface */
 .chakra-card {
   background: var(--surface);
