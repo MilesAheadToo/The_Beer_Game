@@ -1,7 +1,28 @@
 import React, { useEffect, useState } from 'react';
 import PageLayout from '../components/PageLayout';
-import { mixedGameApi } from '../services/api';
-import { Box, Grid, FormControl, FormLabel, NumberInput, NumberInputField, NumberInputStepper, NumberIncrementStepper, NumberDecrementStepper, Button, Text, Table, Thead, Tbody, Tr, Th, Td, Input, Select, Flex } from '@chakra-ui/react';
+import { mixedGameApi, api } from '../services/api';
+import { getItems, getNodes, getLanes } from '../services/supplyChainConfigService';
+import {
+  Box,
+  Grid,
+  FormControl,
+  FormLabel,
+  NumberInput,
+  NumberInputField,
+  NumberInputStepper,
+  NumberIncrementStepper,
+  NumberDecrementStepper,
+  Button,
+  Text,
+  Table,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
+  Select,
+} from '@chakra-ui/react';
+import { useNavigate } from 'react-router-dom';
 
 const DEFAULTS = {
   info_delay: { min: 0, max: 8 },
@@ -28,36 +49,68 @@ export default function SystemConfig() {
   const [saved, setSaved] = useState(false);
   const [name, setName] = useState('Undefined');
   const [configs, setConfigs] = useState([]);
-
+  const [selectedId, setSelectedId] = useState(null);
+  const [counts, setCounts] = useState({ items: 0, nodes: 0, lanes: 0 });
+  const navigate = useNavigate();
   useEffect(() => {
     (async () => {
+      let cfgName;
       try {
         const data = await mixedGameApi.getSystemConfig();
-        const { variable_cost, name: cfgName, ...rest } = data || {};
-        setName(cfgName || 'Undefined');
+        const { variable_cost, name: cfgNameLocal, ...rest } = data || {};
+        cfgName = cfgNameLocal;
+        setName(cfgNameLocal || 'Undefined');
         setRanges({ ...DEFAULTS, ...rest });
       } catch {
         const raw = localStorage.getItem('systemConfigRanges');
         if (raw) {
           try {
             const parsed = JSON.parse(raw);
+            cfgName = parsed?.name;
             setName(parsed?.name || 'Undefined');
             const { variable_cost, name: _n, ...rest } = parsed || {};
             setRanges({ ...DEFAULTS, ...rest });
           } catch {}
         }
       }
-
+  
       try {
-        const cfgs = await mixedGameApi.getSupplyChainConfigs();
-        setConfigs(cfgs || []);
-        if (cfgs && cfgs.length > 0) {
-          setName(cfgs[0].name);
+        const res = await api.get('/api/v1/supply-chain-config');
+        const list = res.data || [];
+        setConfigs(list);
+        const match = list.find((cfg) => cfg.name === cfgName);
+        if (match) {
+          setSelectedId(match.id);
         }
       } catch {
         setConfigs([]);
-      }    })();
+      }
+    })();
   }, []);
+
+  useEffect(() => {
+    if (selectedId) {
+      fetchCounts(selectedId);
+    } else {
+      setCounts({ items: 0, nodes: 0, lanes: 0 });
+    }
+  }, [selectedId]);
+  const fetchCounts = async (configId) => {
+    try {
+      const [items, nodes, lanes] = await Promise.all([
+        getItems(configId),
+        getNodes(configId),
+        getLanes(configId),
+      ]);
+      setCounts({
+        items: items.length,
+        nodes: nodes.length,
+        lanes: lanes.length,
+      });
+    } catch {
+      setCounts({ items: 0, nodes: 0, lanes: 0 });
+    }
+  };
 
   const update = (key, field, val) => {
     setRanges((prev) => ({ ...prev, [key]: { ...prev[key], [field]: Number(val) || 0 } }));
@@ -78,17 +131,28 @@ export default function SystemConfig() {
       <Box className="card-surface pad-6">
         <Text color="gray.600" mb={4}>Set allowable ranges for configuration variables. These will prefill the Mixed Game Definition page.</Text>
 
-        <FormControl mb={4} maxW="lg">
-        <FormLabel>Configuration</FormLabel>
-          <Flex align="center">
-            <Select value={name} onChange={(e)=> setName(e.target.value)} maxW="sm">
-              {configs.map((c) => (
-                <option key={c.id} value={c.name}>{c.name}</option>
+        <Grid templateColumns="1fr auto" gap={4} mb={4} maxW="lg" alignItems="end">
+          <FormControl>
+            <FormLabel>Configuration Name ({configs.length})</FormLabel>
+            <Select
+              value={selectedId ?? ''}
+              onChange={(e) => {
+                const id = Number(e.target.value);
+                setSelectedId(id);
+                const cfg = configs.find((c) => c.id === id);
+                setName(cfg?.name || 'Undefined');
+              }}
+              placeholder="Select configuration"
+            >
+              {configs.map((cfg) => (
+                <option key={cfg.id} value={cfg.id}>
+                  {cfg.name}
+                </option>
               ))}
             </Select>
-            <Text ml={4}>{configs.length} configurations defined</Text>
-          </Flex>
-        </FormControl>
+          </FormControl>
+          <Button colorScheme="blue" onClick={() => navigate('/supply-chain-config/new')}>New</Button>
+        </Grid>
         <Table variant='simple' size='sm'>
           <Thead>
             <Tr>
@@ -125,6 +189,20 @@ export default function SystemConfig() {
             ))}
           </Tbody>
         </Table>
+        <Box mt={6}>
+          <Text fontWeight="semibold" mb={2}>Definitions</Text>
+          <Text fontSize="sm">Items: {counts.items}</Text>
+          <Text fontSize="sm">Nodes: {counts.nodes}</Text>
+          <Text fontSize="sm">Lanes: {counts.lanes}</Text>
+          <Button
+            mt={2}
+            colorScheme="teal"
+            onClick={() => navigate(`/supply-chain-config/edit/${selectedId}`)}
+            isDisabled={!selectedId || name === 'Undefined'}
+          >
+            Define Items, Nodes, Lanes
+          </Button>
+        </Box>
         <Box mt={6} textAlign="right">
           <Button colorScheme="blue" onClick={save}>Save Ranges</Button>
           {saved && <Text as="span" ml={3} color="green.600">Saved</Text>}
