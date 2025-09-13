@@ -41,7 +41,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       args:
-        - GPU_ENABLED=false
+        - FORCE_GPU=0
     container_name: the_beer_game_backend
     restart: unless-stopped
     environment:

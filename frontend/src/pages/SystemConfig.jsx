@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import PageLayout from '../components/PageLayout';
 import { mixedGameApi } from '../services/api';
-import { Box, Grid, FormControl, FormLabel, NumberInput, NumberInputField, NumberInputStepper, NumberIncrementStepper, NumberDecrementStepper, Button, Text, Table, Thead, Tbody, Tr, Th, Td, Input } from '@chakra-ui/react';
+import { Box, Grid, FormControl, FormLabel, NumberInput, NumberInputField, NumberInputStepper, NumberIncrementStepper, NumberDecrementStepper, Button, Text, Table, Thead, Tbody, Tr, Th, Td, Input, Select, Flex } from '@chakra-ui/react';
 
 const DEFAULTS = {
   info_delay: { min: 0, max: 8 },
@@ -27,6 +27,7 @@ export default function SystemConfig() {
   const [ranges, setRanges] = useState(DEFAULTS);
   const [saved, setSaved] = useState(false);
   const [name, setName] = useState('Undefined');
+  const [configs, setConfigs] = useState([]);
 
   useEffect(() => {
     (async () => {
@@ -46,7 +47,16 @@ export default function SystemConfig() {
           } catch {}
         }
       }
-    })();
+
+      try {
+        const cfgs = await mixedGameApi.getSupplyChainConfigs();
+        setConfigs(cfgs || []);
+        if (cfgs && cfgs.length > 0) {
+          setName(cfgs[0].name);
+        }
+      } catch {
+        setConfigs([]);
+      }    })();
   }, []);
 
   const update = (key, field, val) => {
@@ -69,8 +79,15 @@ export default function SystemConfig() {
         <Text color="gray.600" mb={4}>Set allowable ranges for configuration variables. These will prefill the Mixed Game Definition page.</Text>
 
         <FormControl mb={4} maxW="lg">
-          <FormLabel>Configuration Name</FormLabel>
-          <Input value={name} onChange={(e)=> setName(e.target.value)} placeholder="Undefined" />
+        <FormLabel>Configuration</FormLabel>
+          <Flex align="center">
+            <Select value={name} onChange={(e)=> setName(e.target.value)} maxW="sm">
+              {configs.map((c) => (
+                <option key={c.id} value={c.name}>{c.name}</option>
+              ))}
+            </Select>
+            <Text ml={4}>{configs.length} configurations defined</Text>
+          </Flex>
         </FormControl>
         <Table variant='simple' size='sm'>
           <Thead>

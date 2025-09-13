@@ -26,6 +26,18 @@ from app.repositories.users import (
 )
 from app.services.auth_service import AuthService, get_auth_service
 from app.schemas.mfa import MFAVerifyRequest
+from app.models.supply_chain_config import (
+    SupplyChainConfig,
+    Item,
+    Node,
+    Lane,
+    ItemNodeConfig,
+    MarketDemand,
+    NodeType,
+)
+from app.models.game import Game
+from app.models.agent_config import AgentConfig
+from app.services.supply_chain_config_service import SupplyChainConfigService
 
 router = APIRouter()
 
@@ -47,12 +59,119 @@ class RegisterRequest(UserCreate):
     """Request model for registration endpoint."""
     pass
 
+
+def ensure_default_setup(db: Session, user: User) -> None:
+    """Create a default configuration and game for new admins."""
+    if not getattr(user, "is_superuser", False):
+        return
+    existing = (
+        db.query(SupplyChainConfig)
+        .filter(SupplyChainConfig.created_by == user.id)
+        .count()
+    )
+    if existing:
+        return
+
+    # Create base configuration
+    config = SupplyChainConfig(
+        name="Default Beer Game",
+        is_active=True,
+        created_by=user.id,
+    )
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+
+    # Default item
+    item = Item(config_id=config.id, name="Case of Beers")
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+
+    # Nodes
+    retailer = Node(config_id=config.id, name="Retailer", type=NodeType.RETAILER)
+    distributor = Node(config_id=config.id, name="Distributor", type=NodeType.DISTRIBUTOR)
+    manufacturer = Node(config_id=config.id, name="Manufacturer", type=NodeType.MANUFACTURER)
+    supplier = Node(config_id=config.id, name="Supplier", type=NodeType.SUPPLIER)
+    db.add_all([retailer, distributor, manufacturer, supplier])
+    db.commit()
+    db.refresh(retailer)
+    db.refresh(distributor)
+    db.refresh(manufacturer)
+    db.refresh(supplier)
+
+    # Lanes with high capacity
+    cap = 9999
+    lanes = [
+        Lane(
+            config_id=config.id,
+            upstream_node_id=supplier.id,
+            downstream_node_id=manufacturer.id,
+            capacity=cap,
+        ),
+        Lane(
+            config_id=config.id,
+            upstream_node_id=manufacturer.id,
+            downstream_node_id=distributor.id,
+            capacity=cap,
+        ),
+        Lane(
+            config_id=config.id,
+            upstream_node_id=distributor.id,
+            downstream_node_id=retailer.id,
+            capacity=cap,
+        ),
+    ]
+    db.add_all(lanes)
+    db.commit()
+
+    # Item-node configs
+    for node in [retailer, distributor, manufacturer, supplier]:
+        db.add(ItemNodeConfig(item_id=item.id, node_id=node.id))
+    db.commit()
+
+    # Market demand for retailer
+    db.add(
+        MarketDemand(
+            config_id=config.id, item_id=item.id, retailer_id=retailer.id
+        )
+    )
+    db.commit()
+
+    # Create default game from configuration
+    service = SupplyChainConfigService(db)
+    game_cfg = service.create_game_from_config(
+        config.id, {"name": "The Beer Game"}
+    )
+    game = Game(
+        name=game_cfg["name"],
+        max_rounds=game_cfg.get("max_rounds", 52),
+        config=game_cfg,
+        created_by=user.id,
+        role_assignments={},
+    )
+    db.add(game)
+    db.commit()
+    db.refresh(game)
+
+    roles = ["retailer", "distributor", "manufacturer", "supplier"]
+    assignments = {}
+    for role in roles:
+        ac = AgentConfig(game_id=game.id, role=role, agent_type="bullwhip", config={})
+        db.add(ac)
+        db.flush()
+        assignments[role] = {"is_ai": True, "agent_config_id": ac.id, "user_id": None}
+    game.role_assignments = assignments
+    db.add(game)
+    db.commit()
+
 @router.post("/login", response_model=Token)
 async def login(
     request: Request,
     response: Response,
     form_data: OAuth2PasswordRequestForm = Depends(),
-    auth_service: AuthService = Depends(get_auth_service)
+    auth_service: AuthService = Depends(get_auth_service),
+    db: Session = Depends(get_db),
 ) -> Any:
     """
     OAuth2 compatible token login, get an access token for future requests.
@@ -74,6 +193,12 @@ async def login(
     
     # Generate tokens
     tokens = await auth_service.create_tokens(user)
+
+    # Ensure default configuration and game exist for new admins
+    try:
+        ensure_default_setup(db, user)
+    except Exception:
+        pass
     
     # Set cookies: refresh (httpOnly) and access token (for header-less auth)
     response.set_cookie(

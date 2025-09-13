@@ -684,7 +684,7 @@ def _seed_games() -> None:
 
 @api.get("/mixed-games/")
 async def list_mixed_games(user: Dict[str, Any] = Depends(get_current_user)):
-    """Return a minimal list of games for the MixedGamesList UI."""
+    """Return a minimal list of games for the GamesList UI."""
     _seed_games()
     with _GAMES_LOCK:
         return list(_GAMES.values())

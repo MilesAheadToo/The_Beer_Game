@@ -24,12 +24,13 @@ services:
     networks:
       - beer-game-network
 
-  # GPU-specific runtime configuration
+  # GPU-specific runtime configuration (only used when FORCE_GPU=1)
   backend:
     runtime: ${GPU_RUNTIME:-}
     environment:
       - NVIDIA_VISIBLE_DEVICES=${NVIDIA_VISIBLE_DEVICES:-all}
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - FORCE_GPU=${FORCE_GPU:-0}
 
 networks:
   beer-game-network:

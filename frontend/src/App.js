@@ -3,7 +3,7 @@ import { Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import { Box, CircularProgress } from "@mui/material";
 import Navbar from "./components/Navbar";
 import Dashboard from "./pages/Dashboard";
-import MixedGamesList from "./pages/MixedGamesList";
+import GamesList from "./pages/GamesList";
 import CreateMixedGame from "./pages/CreateMixedGame";
 import CreateGameFromConfig from "./components/game/CreateGameFromConfig";
 import GameBoard from "./pages/GameBoard";
@@ -82,7 +82,7 @@ const AppContent = () => {
                 <>
                   <Navbar />
                   <Box sx={(theme) => theme.mixins.toolbar} />
-                  <MixedGamesList />
+                  <GamesList />
                 </>
               }
             />

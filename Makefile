@@ -70,18 +70,18 @@ rebuild-frontend:
 
 rebuild-backend:
 	@echo "\n[+] Rebuilding backend image..."; \
-	echo "   Build type: $(if $(filter true,$(GPU_ENABLED)),GPU,CPU)"; \
+	echo "   Build type: $(if $(filter 1,$(FORCE_GPU)),GPU,CPU)"; \
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml build $(DOCKER_BUILD_ARGS) backend; \
 	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d backend; \
 	echo "\n[✓] Backend rebuilt and restarted."
 
 # GPU-specific targets
 gpu-up gpu-up-dev:
-	$(MAKE) $(subst gpu-,,$@) GPU_ENABLED=true
+	$(MAKE) $(subst gpu-,,$@) FORCE_GPU=1
 
 # CPU-specific targets
 cpu-up cpu-up-dev:
-	$(MAKE) $(subst cpu-,,$@) GPU_ENABLED=false
+	$(MAKE) $(subst cpu-,,$@) FORCE_GPU=0
 
 down:
 	@echo "\n[+] Stopping and removing containers and volumes..."; \
@@ -113,7 +113,7 @@ help:
 	echo ""; \
 	echo "Local Development (CPU/GPU):"; \
 	echo "  make up            - build/start HTTP proxy (8088), frontend, backend, db, seed (CPU by default)"; \
-	echo "  make up FORCE_GPU=1 - enable GPU support if available"; \
+	echo "  make up FORCE_GPU=1 - enable GPU support if available (set to 1 to enable)"; \
 	echo "  make up-dev        - same as up, with dev overrides"; \
 	echo "  make up-tls        - start with HTTPS (8443) using self-signed cert"; \
 	echo ""; \
@@ -143,7 +143,7 @@ help:
 	echo "  make remote-train  - train on remote server"; \
 	echo ""; \
 	echo "Environment Variables:"; \
-	echo "  GPU_ENABLED=true   - Enable GPU support (e.g., make up GPU_ENABLED=true)";
+	echo "  FORCE_GPU=1        - Enable GPU support (e.g., make up FORCE_GPU=1)";
 
 # Remote training wrappers (see scripts/remote_train.sh for full help)
 REMOTE        ?=

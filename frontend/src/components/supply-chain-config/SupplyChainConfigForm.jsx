@@ -64,7 +64,8 @@ import {
   DEFAULT_NODE,
   DEFAULT_LANE,
   DEFAULT_ITEM_NODE_CONFIG,
-  DEFAULT_MARKET_DEMAND
+  DEFAULT_MARKET_DEMAND,
+  CLASSIC_SUPPLYCHAIN
 } from '../../services/supplyChainConfigService';
 
 // Import sub-components
@@ -98,9 +99,9 @@ const SupplyChainConfigForm = () => {
   
   // Data state
   const [config, setConfig] = useState(DEFAULT_CONFIG);
-  const [items, setItems] = useState([]);
-  const [nodes, setNodes] = useState([]);
-  const [lanes, setLanes] = useState([]);
+  const [items, setItems] = useState(isEditMode ? [] : CLASSIC_SUPPLY_CHAIN.items);
+  const [nodes, setNodes] = useState(isEditMode ? [] : CLASSIC_SUPPLY_CHAIN.nodes);
+  const [lanes, setLanes] = useState(isEditMode ? [] : CLASSIC_SUPPLY_CHAIN.lanes);
   const [itemNodeConfigs, setItemNodeConfigs] = useState([]);
   const [marketDemands, setMarketDemands] = useState([]);
   

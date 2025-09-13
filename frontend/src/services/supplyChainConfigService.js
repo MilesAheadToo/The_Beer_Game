@@ -228,3 +228,47 @@ export const DEFAULT_MARKET_DEMAND = {
     trend: 0,
   },
 };
+
+// Classic preset used when creating a new configuration
+export const CLASSIC_SUPPLY_CHAIN = {
+  items: [
+    {
+      id: 1,
+      name: 'Item 1',
+      description: '',
+      unit_cost_range: { min: 0, max: 100 },
+    },
+  ],
+  nodes: [
+    { id: 1, name: 'Supplier 1', type: 'supplier', description: '' },
+    { id: 2, name: 'Manufacturer 1', type: 'manufacturer', description: '' },
+    { id: 3, name: 'Distributor 1', type: 'distributor', description: '' },
+    { id: 4, name: 'Retailer 1', type: 'retailer', description: '' },
+  ],
+  lanes: [
+    {
+      id: 1,
+      from_node_id: 1,
+      to_node_id: 2,
+      lead_time: 2,
+      capacity: 100,
+      cost_per_unit: 1.0,
+    },
+    {
+      id: 2,
+      from_node_id: 2,
+      to_node_id: 3,
+      lead_time: 2,
+      capacity: 100,
+      cost_per_unit: 1.0,
+    },
+    {
+      id: 3,
+      from_node_id: 3,
+      to_node_id: 4,
+      lead_time: 2,
+      capacity: 100,
+      cost_per_unit: 1.0,
+    },
+  ],
+};

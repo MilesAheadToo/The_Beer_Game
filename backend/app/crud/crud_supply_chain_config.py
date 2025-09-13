@@ -24,7 +24,19 @@ UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
 class CRUDSupplyChainConfig(CRUDBase[SupplyChainConfig, SupplyChainConfigCreate, SupplyChainConfigUpdate]):
     def get_active(self, db: Session) -> Optional[SupplyChainConfig]:
         return db.query(self.model).filter(self.model.is_active == True).first()
-    
+
+    def get_multi_by_creator(
+        self, db: Session, *, creator_id: int, skip: int = 0, limit: int = 100
+    ) -> List[SupplyChainConfig]:
+        """Return configs created by a specific user."""
+        return (
+            db.query(self.model)
+            .filter(self.model.created_by == creator_id)
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+            
     def create(self, db: Session, *, obj_in: SupplyChainConfigCreate) -> SupplyChainConfig:
         # Ensure only one active config
         if obj_in.is_active:

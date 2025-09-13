@@ -103,6 +103,10 @@ export const mixedGameApi = {
     const { data } = await http.put('/config/system', cfg);
     return data;
   },
+  async getSupplyChainConfigs() {
+    const { data } = await http.get('/supply-chain-config/');
+    return data;
+  },
 
   // Model configuration
   async getModelConfig() {
