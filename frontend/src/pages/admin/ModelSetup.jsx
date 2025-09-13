@@ -180,7 +180,7 @@ export default function ModelSetup() {
     }
     // lanes
     for (const [i, lane] of (cfg.lanes || []).entries()) {
-      if (!numberIn(ranges?.ship_delay, lane.lead_time)) errs.push(`Lane ${i+1}: lead_time`);
+      if (!numberIn(ranges?.order_leadtime, lane.lead_time)) errs.push(`Lane ${i+1}: lead_time`);
       if (lane.capacity != null && !numberIn(ranges?.max_inbound_per_link, Number(lane.capacity))) errs.push(`Lane ${i+1}: capacity`);
     }
     return errs;
@@ -325,8 +325,8 @@ export default function ModelSetup() {
               <TextField size="small" label="From" value={ln.from_site_id} onChange={(e) => setLane(i,'from_site_id', e.target.value)} />
               <TextField size="small" label="To" value={ln.to_site_id} onChange={(e) => setLane(i,'to_site_id', e.target.value)} />
               <TextField size="small" label="Item" value={ln.item_id} onChange={(e) => setLane(i,'item_id', e.target.value)} />
-              <TextField size="small" type="number" label={`Lead Time ${ranges?.ship_delay ? `[${ranges.ship_delay.min}-${ranges.ship_delay.max}]` : ''}`} value={ln.lead_time}
-                error={ranges?.ship_delay && !numberIn(ranges.ship_delay, Number(ln.lead_time))}
+              <TextField size="small" type="number" label={`Lead Time ${ranges?.order_leadtime ? `[${ranges.order_leadtime.min}-${ranges.order_leadtime.max}]` : ''}`} value={ln.lead_time}
+                error={ranges?.order_leadtime && !numberIn(ranges.order_leadtime, Number(ln.lead_time))}
                 onChange={(e) => setLane(i,'lead_time', e.target.valueAsNumber)} />
               <TextField size="small" type="number" label={`Capacity ${ranges?.max_inbound_per_link ? `[${ranges.max_inbound_per_link.min}-${ranges.max_inbound_per_link.max}]` : ''}`}
                 value={ln.capacity ?? ''}

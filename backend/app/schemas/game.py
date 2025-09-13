@@ -72,8 +72,8 @@ class PricingConfig(BaseModel):
     )
 
 class NodePolicy(BaseModel):
-    info_delay: int = Field(ge=0, le=52, default=2)
-    ship_delay: int = Field(ge=0, le=52, default=2)
+    supply_leadtime: int = Field(ge=0, le=52, default=2)
+    order_leadtime: int = Field(ge=0, le=52, default=2)
     init_inventory: int = Field(ge=0, default=12)
     price: float = Field(ge=0, default=0)
     standard_cost: float = Field(ge=0, default=0)

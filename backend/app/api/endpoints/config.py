@@ -16,8 +16,8 @@ class Range(BaseModel):
 
 
 class SystemConfigModel(BaseModel):
-  info_delay: Range = Field(default=Range(min=0, max=8))
-  ship_delay: Range = Field(default=Range(min=0, max=8))
+  supply_leadtime: Range = Field(default=Range(min=0, max=8))
+  order_leadtime: Range = Field(default=Range(min=0, max=8))
   init_inventory: Range = Field(default=Range(min=0, max=1000))
   holding_cost: Range = Field(default=Range(min=0, max=100))
   backlog_cost: Range = Field(default=Range(min=0, max=200))

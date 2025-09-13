@@ -77,8 +77,8 @@ class MixedGameService:
             if hi is not None and val > hi:
                 raise ValueError(f"{key} above maximum {hi}")
         for node, pol in (game_data.node_policies or {}).items():
-            _check_range('info_delay', pol.info_delay)
-            _check_range('ship_delay', pol.ship_delay)
+            _check_range('supply_leadtime', pol.supply_leadtime)
+            _check_range('order_leadtime', pol.order_leadtime)
             _check_range('init_inventory', pol.init_inventory)
             _check_range('price', pol.price)
             _check_range('standard_cost', pol.standard_cost)
@@ -150,7 +150,7 @@ class MixedGameService:
 
         if node_policies:
             for _, pol in node_policies.items():
-                for k in ['info_delay','ship_delay','init_inventory','price','standard_cost','variable_cost','min_order_qty']:
+                for k in ['supply_leadtime','order_leadtime','init_inventory','price','standard_cost','variable_cost','min_order_qty']:
                     if k in pol and pol[k] is not None:
                         _check_range(k, float(pol[k]))
             cfg['node_policies'] = node_policies
@@ -191,14 +191,14 @@ class MixedGameService:
         roles = ['retailer','wholesaler','distributor','manufacturer','factory']
         # allow different naming in node_policies
         if not node_policies:
-            node_policies = {r: {"info_delay": 2, "ship_delay": 2, "init_inventory": 12, "min_order_qty": 0} for r in roles}
+            node_policies = {r: {"supply_leadtime": 2, "order_leadtime": 2, "init_inventory": 12, "min_order_qty": 0} for r in roles}
         engine = {
             r: {
                 "inventory": int(node_policies.get(r, {}).get("init_inventory", 12)),
                 "backlog": 0,
                 "on_order": 0,
-                "info_queue": [0] * int(node_policies.get(r, {}).get("info_delay", 2)),
-                "ship_queue": [0] * int(node_policies.get(r, {}).get("ship_delay", 2)),
+                "info_queue": [0] * int(node_policies.get(r, {}).get("supply_leadtime", 2)),
+                "ship_queue": [0] * int(node_policies.get(r, {}).get("order_leadtime", 2)),
                 "last_order": 0,
                 "holding_cost": 0.0,
                 "backorder_cost": 0.0,
@@ -313,7 +313,7 @@ class MixedGameService:
             if r not in engine: continue
             st = engine[r]
             pol = node_policies.get(r, {})
-            target = int(pol.get('init_inventory', 12) + 2 * pol.get('ship_delay', 2))
+            target = int(pol.get('init_inventory', 12) + 2 * pol.get('order_leadtime', 2))
             desired = target + st['backlog'] - st['inventory'] - st['on_order']
             order = max(0, int(desired))
             moq = int(pol.get('min_order_qty', 0))
@@ -629,6 +629,6 @@ class MixedGameService:
         # Validate optional global policy if provided
         if getattr(game_data, 'global_policy', None):
             gp = game_data.global_policy
-            for k in ['info_delay','ship_delay','init_inventory','holding_cost','backlog_cost','max_inbound_per_link','max_order']:
+            for k in ['supply_leadtime','order_leadtime','init_inventory','holding_cost','backlog_cost','max_inbound_per_link','max_order']:
                 if k in gp and gp[k] is not None:
                     _check_range(k, float(gp[k]))

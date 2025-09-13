@@ -25,8 +25,8 @@ import {
 import { useNavigate } from 'react-router-dom';
 
 const DEFAULTS = {
-  info_delay: { min: 0, max: 8 },
-  ship_delay: { min: 0, max: 8 },
+  supply_leadtime: { min: 0, max: 8 },
+  order_leadtime: { min: 0, max: 8 },
   init_inventory: { min: 0, max: 1000 },
   holding_cost: { min: 0, max: 100 },
   backlog_cost: { min: 0, max: 200 },
@@ -38,8 +38,8 @@ const DEFAULTS = {
 };
 
 const LABELS = {
-  info_delay: 'Supply Leadtime',
-  ship_delay: 'Order Leadtime',
+  supply_leadtime: 'Supply Leadtime',
+  order_leadtime: 'Order Leadtime',
   max_inbound_per_link: 'Inbound Lane Capacity',
   min_order_qty: 'MOQ',
 };

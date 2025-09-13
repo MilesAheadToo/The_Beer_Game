@@ -381,8 +381,8 @@ class Range(BaseModel):
 
 class SystemConfigModel(BaseModel):
     name: str = Field(default="Default System Config")
-    info_delay: Range = Field(default=Range(min=0, max=8))
-    ship_delay: Range = Field(default=Range(min=0, max=8))
+    supply_leadtime: Range = Field(default=Range(min=0, max=8))
+    order_leadtime: Range = Field(default=Range(min=0, max=8))
     init_inventory: Range = Field(default=Range(min=0, max=1000))
     holding_cost: Range = Field(default=Range(min=0, max=100))
     backlog_cost: Range = Field(default=Range(min=0, max=200))
@@ -596,8 +596,8 @@ def _validate_model_config(cfg: ModelConfig, ranges: SystemConfigModel):
 
     # Validate lanes
     for lane in cfg.lanes:
-        if not (ranges.ship_delay.min <= lane.lead_time <= ranges.ship_delay.max):
-            errors.append(f"lane {lane.from_site_id}->{lane.to_site_id} item {lane.item_id}: lead_time {lane.lead_time} not in [{ranges.ship_delay.min},{ranges.ship_delay.max}]")
+        if not (ranges.order_leadtime.min <= lane.lead_time <= ranges.order_leadtime.max):
+            errors.append(f"lane {lane.from_site_id}->{lane.to_site_id} item {lane.item_id}: lead_time {lane.lead_time} not in [{ranges.order_leadtime.min},{ranges.order_leadtime.max}]")
         if lane.capacity is not None and not (ranges.max_inbound_per_link.min <= lane.capacity <= ranges.max_inbound_per_link.max):
             errors.append(f"lane {lane.from_site_id}->{lane.to_site_id} item {lane.item_id}: capacity {lane.capacity} not in [{ranges.max_inbound_per_link.min},{ranges.max_inbound_per_link.max}]")
 

@@ -62,19 +62,12 @@ class RegisterRequest(UserCreate):
 
 def ensure_default_setup(db: Session, user: User) -> None:
     """Create a default configuration and game for new admins."""
-    if not getattr(user, "is_superuser", False):
-        return
-    existing = (
-        db.query(SupplyChainConfig)
-        .filter(SupplyChainConfig.created_by == user.id)
-        .count()
-    )
-    if existing:
+    if not getattr(user, "is_superuser", False) or user.last_login is not None:
         return
 
     # Create base configuration
     config = SupplyChainConfig(
-        name="Default Beer Game",
+        name="Default TBG",
         is_active=True,
         created_by=user.id,
     )
@@ -83,7 +76,7 @@ def ensure_default_setup(db: Session, user: User) -> None:
     db.refresh(config)
 
     # Default item
-    item = Item(config_id=config.id, name="Case of Beers")
+    item = Item(config_id=config.id, name="Case of Beer")
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -100,7 +93,7 @@ def ensure_default_setup(db: Session, user: User) -> None:
     db.refresh(manufacturer)
     db.refresh(supplier)
 
-    # Lanes with high capacity
+    # Lanes with high capacity and typical lead times
     cap = 9999
     lanes = [
         Lane(
@@ -108,32 +101,47 @@ def ensure_default_setup(db: Session, user: User) -> None:
             upstream_node_id=supplier.id,
             downstream_node_id=manufacturer.id,
             capacity=cap,
+            lead_time_days={"min": 2, "max": 2},
         ),
         Lane(
             config_id=config.id,
             upstream_node_id=manufacturer.id,
             downstream_node_id=distributor.id,
             capacity=cap,
+            lead_time_days={"min": 2, "max": 2},
         ),
         Lane(
             config_id=config.id,
             upstream_node_id=distributor.id,
             downstream_node_id=retailer.id,
             capacity=cap,
+            lead_time_days={"min": 2, "max": 2},
         ),
     ]
     db.add_all(lanes)
     db.commit()
 
-    # Item-node configs
+    # Item-node configs with standard beer game ranges
     for node in [retailer, distributor, manufacturer, supplier]:
-        db.add(ItemNodeConfig(item_id=item.id, node_id=node.id))
+        db.add(
+            ItemNodeConfig(
+                item_id=item.id,
+                node_id=node.id,
+                inventory_target_range={"min": 12, "max": 12},
+                initial_inventory_range={"min": 12, "max": 12},
+                holding_cost_range={"min": 0.5, "max": 0.5},
+                backlog_cost_range={"min": 1.0, "max": 1.0},
+            )
+        )
     db.commit()
 
     # Market demand for retailer
     db.add(
         MarketDemand(
-            config_id=config.id, item_id=item.id, retailer_id=retailer.id
+            config_id=config.id,
+            item_id=item.id,
+            retailer_id=retailer.id,
+            demand_pattern={"type": "constant", "params": {"value": 4}},
         )
     )
     db.commit()
@@ -141,11 +149,14 @@ def ensure_default_setup(db: Session, user: User) -> None:
     # Create default game from configuration
     service = SupplyChainConfigService(db)
     game_cfg = service.create_game_from_config(
-        config.id, {"name": "The Beer Game"}
+        config.id, {"name": "The Beer Game", "max_rounds": 50}
     )
+    for policy in game_cfg.get("node_policies", {}).values():
+        policy["order_leadtime"] = 2
+        policy["supply_leadtime"] = 1
     game = Game(
         name=game_cfg["name"],
-        max_rounds=game_cfg.get("max_rounds", 52),
+        max_rounds=game_cfg.get("max_rounds", 50),
         config=game_cfg,
         created_by=user.id,
         role_assignments={},
@@ -199,6 +210,10 @@ async def login(
         ensure_default_setup(db, user)
     except Exception:
         pass
+
+    if user.last_login is None:
+        user.last_login = datetime.utcnow()
+        db.commit()
     
     # Set cookies: refresh (httpOnly) and access token (for header-less auth)
     response.set_cookie(
