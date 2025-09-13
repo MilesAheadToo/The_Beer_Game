@@ -65,7 +65,7 @@ import {
   DEFAULT_LANE,
   DEFAULT_ITEM_NODE_CONFIG,
   DEFAULT_MARKET_DEMAND,
-  CLASSIC_SUPPLYCHAIN
+  CLASSIC_SUPPLY_CHAIN
 } from '../../services/supplyChainConfigService';
 
 // Import sub-components

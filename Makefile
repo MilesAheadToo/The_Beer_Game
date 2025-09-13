@@ -18,8 +18,8 @@ DOCKER_RUN_ARGS = -e FORCE_GPU=$(FORCE_GPU)
 up:
 	@echo "\n[+] Building and starting full system (proxy, frontend, backend, db)..."; \
 	echo "   Build type: CPU (default)"; \
-	docker compose build $(DOCKER_BUILD_ARGS) backend && \
-	docker compose up -d proxy frontend backend db create-users; \
+	docker-compose build $(DOCKER_BUILD_ARGS) backend && \
+	docker-compose up -d proxy frontend backend db create-users; \
 	echo "\n[✓] Local development server started (CPU mode)."; \
 	echo "   URL:     http://$(HOST):8088"; \
 	echo "   Admin:   admin@daybreak.ai / Daybreak@2025"
@@ -27,15 +27,15 @@ up:
 up-dev:
 	@echo "\n[+] Building and starting full system with dev overrides (proxy, frontend, backend, db)..."; \
 	echo "   Build type: CPU (default)"; \
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml build $(DOCKER_BUILD_ARGS) backend && \
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d proxy frontend backend db create-users; \
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml build $(DOCKER_BUILD_ARGS) backend && \
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d proxy frontend backend db create-users; \
 	echo "\n[✓] Local development server started with dev overrides (CPU mode)."; \
 	echo "   URL:     http://$(HOST):8088"; \
 	echo "   Admin:   admin@daybreak.ai / Daybreak@2025"
 
 up-remote:
 	@echo "\n[+] Building and starting full system for remote access..."; \
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build proxy frontend backend db create-users; \
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build proxy frontend backend db create-users; \
 	echo "\n[✓] Remote server started."; \
 	echo "   URL:     http://$(REMOTE_HOST):8088"; \
 	echo "   Admin:   admin@daybreak.ai / Daybreak@2025"; \
@@ -43,7 +43,7 @@ up-remote:
 
 up-tls:
 	@echo "\n[+] Building and starting full system with TLS proxy on 8443..."; \
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile tls up -d --build frontend backend db proxy-tls create-users; \
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile tls up -d --build frontend backend db proxy-tls create-users; \
 	echo "\n[✓] Local HTTPS server started (self-signed)."; \
 	echo "   URL:     https://$(HOST):8443"; \
 	echo "   Admin:   admin@daybreak.ai / Daybreak@2025"; \
@@ -51,28 +51,28 @@ up-tls:
 
 up-remote-tls:
 	@echo "\n[+] Building and starting full system with TLS for remote access..."; \
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile tls up -d --build frontend backend db proxy-tls create-users; \
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile tls up -d --build frontend backend db proxy-tls create-users; \
 	echo "\n[✓] Remote HTTPS server started (self-signed)."; \
 	echo "   URL:     https://$(REMOTE_HOST):8443"; \
 	echo "   Admin:   admin@daybreak.ai / Daybreak@2025"
 
 up-tls-only:
 	@echo "\n[+] Starting TLS-only proxy (no HTTP proxy on 8088)..."; \
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml --profile tls up -d --build frontend backend db proxy-tls create-users; \
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile tls up -d --build frontend backend db proxy-tls create-users; \
 	echo "\n[✓] Started. Open https://172.29.20.187:8443 in your browser (self-signed)."; \
 	echo "   Admin login: admin@daybreak.ai / Daybreak@2025"
 
 rebuild-frontend:
 	@echo "\n[+] Rebuilding frontend image with dev overrides..."; \
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml build frontend; \
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d frontend; \
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml build frontend; \
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d frontend; \
 	echo "\n[✓] Frontend rebuilt and restarted."
 
 rebuild-backend:
 	@echo "\n[+] Rebuilding backend image..."; \
 	echo "   Build type: $(if $(filter 1,$(FORCE_GPU)),GPU,CPU)"; \
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml build $(DOCKER_BUILD_ARGS) backend; \
-	docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d backend; \
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml build $(DOCKER_BUILD_ARGS) backend; \
+	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d backend; \
 	echo "\n[✓] Backend rebuilt and restarted."
 
 # GPU-specific targets
@@ -85,17 +85,17 @@ cpu-up cpu-up-dev:
 
 down:
 	@echo "\n[+] Stopping and removing containers and volumes..."; \
-	docker compose down -v
+	docker-compose down -v
 
 ps:
-	@docker compose ps
+	@docker-compose ps
 
 logs:
-	@docker compose logs -f --tail=200
+	@docker-compose logs -f --tail=200
 
 seed:
 	@echo "\n[+] Seeding default users..."; \
-	docker compose run --rm create-users
+	docker-compose run --rm create-users
 
 reset-admin:
 	@echo "\n[+] Resetting admin password to Daybreak@2025..."; \

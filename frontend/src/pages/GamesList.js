@@ -68,8 +68,6 @@ const GamesList = () => {
   }, []);
 
   // Check if Daybreak agent is trained
-  const [modelStatus, setModelStatus] = useState(null);
-  const [loadingModelStatus, setLoadingModelStatus] = useState(true);
 
   // Fetch model status
   const fetchModelStatus = async () => {
