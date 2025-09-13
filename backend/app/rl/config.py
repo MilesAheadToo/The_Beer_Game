@@ -25,8 +25,8 @@ SHIPMENT_EDGES: List[Tuple[int, int]] = [
 ORDER_EDGES: List[Tuple[int, int]] = [(v, u) for (u, v) in SHIPMENT_EDGES]
 
 # Default delays (in weeks)
-DEFAULT_INFO_DELAY = 2      # order information delay
-DEFAULT_SHIP_DELAY = 2      # shipping lead time
+DEFAULT_SUPPLY_LEADTIME = 2      # order information delay
+DEFAULT_ORDER_LEADTIME = 2      # shipping lead time
 
 # Features we expect per node per week when training / deciding
 NODE_FEATURES: List[str] = [
@@ -38,13 +38,13 @@ NODE_FEATURES: List[str] = [
     "on_order",         # pipeline (orders placed but not arrived yet)
     # Optional conditioning (context)
     "role_onehot_0", "role_onehot_1", "role_onehot_2", "role_onehot_3",
-    "lead_time_info", "lead_time_ship",
+    "lead_time_supply", "lead_time_order",
 ]
 
 @dataclass
 class BeerGameParams:
-    info_delay: int = DEFAULT_INFO_DELAY
-    ship_delay: int = DEFAULT_SHIP_DELAY
+    supply_leadtime: int = DEFAULT_SUPPLY_LEADTIME
+    order_leadtime: int = DEFAULT_ORDER_LEADTIME
     init_inventory: int = 12
     holding_cost: float = 0.5
     backlog_cost: float = 1.0

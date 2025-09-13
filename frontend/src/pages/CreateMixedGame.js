@@ -114,8 +114,8 @@ const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
       <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={6}>
         <FormControl>
           <FormLabel>Order Leadtime (weeks)</FormLabel>
-          <NumberInput min={ranges.info_delay?.min ?? 0} max={ranges.info_delay?.max ?? 8} value={current.info_delay}
-            onChange={(v) => update('info_delay', parseInt(v) || 0)}>
+          <NumberInput min={ranges.supply_leadtime?.min ?? 0} max={ranges.supply_leadtime?.max ?? 8} value={current.supply_leadtime}
+            onChange={(v) => update('supply_leadtime', parseInt(v) || 0)}>
             <NumberInputField />
             <NumberInputStepper>
               <NumberIncrementStepper />
@@ -125,8 +125,8 @@ const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
         </FormControl>
         <FormControl>
           <FormLabel>Supply Leadtime (weeks)</FormLabel>
-          <NumberInput min={ranges.ship_delay?.min ?? 0} max={ranges.ship_delay?.max ?? 8} value={current.ship_delay}
-            onChange={(v) => update('ship_delay', parseInt(v) || 0)}>
+          <NumberInput min={ranges.order_leadtime?.min ?? 0} max={ranges.order_leadtime?.max ?? 8} value={current.order_leadtime}
+            onChange={(v) => update('order_leadtime', parseInt(v) || 0)}>
             <NumberInputField />
             <NumberInputStepper>
               <NumberIncrementStepper />
@@ -273,8 +273,8 @@ const CreateMixedGame = () => {
   });
   // Policy/Simulation settings (bounded)
   const [policy, setPolicy] = useState({
-    info_delay: 2,         // order delay (weeks)
-    ship_delay: 2,         // delivery delay (weeks)
+    supply_leadtime: 2,         // order delay (weeks)
+    order_leadtime: 2,         // delivery delay (weeks)
     init_inventory: 12,    // starting inventory per role
     holding_cost: 0.5,     // per unit per week
     backlog_cost: 1.0,     // per unit per week
@@ -709,8 +709,8 @@ const CreateMixedGame = () => {
                     <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={6}>
                       <FormControl>
                         <FormLabel>Order Leadtime (weeks)</FormLabel>
-                        <NumberInput min={systemConfig.info_delay?.min ?? 0} max={systemConfig.info_delay?.max ?? 8} value={policy.info_delay}
-                          onChange={(v) => setPolicy((p) => ({ ...p, info_delay: parseInt(v) || 0 }))}>
+                        <NumberInput min={systemConfig.supply_leadtime?.min ?? 0} max={systemConfig.supply_leadtime?.max ?? 8} value={policy.supply_leadtime}
+                          onChange={(v) => setPolicy((p) => ({ ...p, supply_leadtime: parseInt(v) || 0 }))}>
                           <NumberInputField />
                           <NumberInputStepper>
                             <NumberIncrementStepper />
@@ -721,8 +721,8 @@ const CreateMixedGame = () => {
 
                       <FormControl>
                         <FormLabel>Supply Leadtime (weeks)</FormLabel>
-                        <NumberInput min={systemConfig.ship_delay?.min ?? 0} max={systemConfig.ship_delay?.max ?? 8} value={policy.ship_delay}
-                          onChange={(v) => setPolicy((p) => ({ ...p, ship_delay: parseInt(v) || 0 }))}>
+                        <NumberInput min={systemConfig.order_leadtime?.min ?? 0} max={systemConfig.order_leadtime?.max ?? 8} value={policy.order_leadtime}
+                          onChange={(v) => setPolicy((p) => ({ ...p, order_leadtime: parseInt(v) || 0 }))}>
                           <NumberInputField />
                           <NumberInputStepper>
                             <NumberIncrementStepper />
@@ -807,7 +807,7 @@ const CreateMixedGame = () => {
                           const p = Math.round(priceMid() * 100)/100;
                           const stdMin = Number(systemConfig.standard_cost?.min ?? 0);
                           const vcMin = Number(systemConfig.variable_cost?.min ?? 0);
-                          const defaults = (price) => ({ info_delay: mid('info_delay', 0), ship_delay: mid('ship_delay', 0), init_inventory: mid('init_inventory', 12), min_order_qty: mid('min_order_qty', 0), price, standard_cost: Math.max(stdMin, Math.round(price * 0.8 * 100)/100), variable_cost: Math.max(vcMin, Math.round(price * 0.1 * 100)/100) });
+                          const defaults = (price) => ({ supply_leadtime: mid('supply_leadtime', 0), order_leadtime: mid('order_leadtime', 0), init_inventory: mid('init_inventory', 12), min_order_qty: mid('min_order_qty', 0), price, standard_cost: Math.max(stdMin, Math.round(price * 0.8 * 100)/100), variable_cost: Math.max(vcMin, Math.round(price * 0.1 * 100)/100) });
                           setNodePolicies({
                             retailer: defaults(p),
                             distributor: defaults(p),

@@ -64,8 +64,8 @@ def assemble_node_features(
             float(incoming_shipments),
             float(on_order),
             *role_onehot(role),
-            float(params.info_delay),
-            float(params.ship_delay),
+            float(params.supply_leadtime),
+            float(params.order_leadtime),
         ],
         dtype=np.float32,
     )
@@ -246,8 +246,8 @@ def simulate_beer_game(
     placed = {r: [] for r in roles}
 
     # pipelines for delays (FIFO queues)
-    info_pipes = {r: [0] * params.info_delay for r in roles}
-    ship_pipes = {r: [0] * params.ship_delay for r in roles}
+    supply_pipes = {r: [0] * params.supply_leadtime for r in roles}
+    order_pipes = {r: [0] * params.order_leadtime for r in roles}
 
     def clip_ship(x):  # shipping capacity
         return min(x, params.max_inbound_per_link)
@@ -256,18 +256,18 @@ def simulate_beer_game(
         # incoming orders at retailer = external demand
         in_ord["retailer"].append(demand_fn(t))
 
-        # propagate orders upstream with info_delay
+        # propagate orders upstream with supply_leadtime
         for dn, up in ORDER_EDGES:  # (downstream -> upstream)
             src_role = NODES[dn]
             dst_role = NODES[up]
             # downstream placed orders enter info pipe towards upstream
             outgoing = placed[src_role][-1] if placed[src_role] else 0
-            pipe = info_pipes[dst_role]
+            pipe = supply_pipes[dst_role]
             arriving = pipe.pop(0) if pipe else 0
             pipe.append(outgoing)
             in_ord[dst_role].append(arriving)
 
-        # shipments downstream with ship_delay
+        # shipments downstream with order_leadtime
         for up, dn in SHIPMENT_EDGES:
             src_role = NODES[up]
             dst_role = NODES[dn]
@@ -275,7 +275,7 @@ def simulate_beer_game(
             # can only ship what you have
             demand_here = in_ord[dst_role][-1] + back[dst_role][-1]
             outgoing = clip_ship(min(inv[src_role][-1], demand_here))
-            pipe = ship_pipes[dst_role]
+            pipe = order_pipes[dst_role]
             arriving = pipe.pop(0) if pipe else 0
             pipe.append(outgoing)
             in_ship[dst_role].append(arriving)
@@ -293,7 +293,7 @@ def simulate_beer_game(
 
         # simple heuristic ordering (base-stock vibe) for behavior traces
         for r in roles:
-            target = params.init_inventory + params.ship_delay * 2
+            target = params.init_inventory + params.order_leadtime * 2
             # try to restore inventory + clear backlog + maintain pipeline
             desired = target + back[r][-1] - inv[r][-1] - on_ord[r][-1]
             raw_order = int(np.clip(desired, 0, params.max_order))
@@ -345,10 +345,10 @@ def simulate_beer_game_simpy(
     on_ord = {r: [0] for r in roles}
     placed = {r: [] for r in roles}
 
-    info_pipes = {r: [0] * params.info_delay for r in roles}
-    ship_pipes = {r: [0] * params.ship_delay for r in roles}
+    supply_pipes = {r: [0] * params.supply_leadtime for r in roles}
+    order_pipes = {r: [0] * params.order_leadtime for r in roles}
     # Simple per-role demand/throughput forecast to dampen swings
-    forecast = {r: float(params.init_inventory) / max(1, params.ship_delay + 1) for r in roles}
+    forecast = {r: float(params.init_inventory) / max(1, params.order_leadtime + 1) for r in roles}
 
     def clip_ship(x: int) -> int:
         return int(min(max(0, x), params.max_inbound_per_link))
@@ -362,7 +362,7 @@ def simulate_beer_game_simpy(
             src_role = NODES[dn]
             dst_role = NODES[up]
             outgoing = placed[src_role][-1] if placed[src_role] else 0
-            pipe = info_pipes[dst_role]
+            pipe = supply_pipes[dst_role]
             arriving = pipe.pop(0) if pipe else 0
             pipe.append(outgoing)
             in_ord[dst_role].append(arriving)
@@ -373,7 +373,7 @@ def simulate_beer_game_simpy(
             dst_role = NODES[dn]
             demand_here = in_ord[dst_role][-1] + back[dst_role][-1]
             outgoing = clip_ship(min(inv[src_role][-1], demand_here))
-            pipe = ship_pipes[dst_role]
+            pipe = order_pipes[dst_role]
             arriving = pipe.pop(0) if pipe else 0
             pipe.append(outgoing)
             in_ship[dst_role].append(arriving)
@@ -393,8 +393,8 @@ def simulate_beer_game_simpy(
         for r in roles:
             obs = float(in_ord[r][-1])
             forecast[r] = alpha * obs + (1.0 - alpha) * forecast[r]
-            target_inv = params.init_inventory + params.ship_delay * 2
-            order_up_to = target_inv + forecast[r] * params.ship_delay
+            target_inv = params.init_inventory + params.order_leadtime * 2
+            order_up_to = target_inv + forecast[r] * params.order_leadtime
             current_wip = inv[r][-1] + on_ord[r][-1]
             desired = max(0.0, order_up_to - current_wip + back[r][-1])
             raw_order = int(np.clip(wip_k * desired, 0, params.max_order))
@@ -440,8 +440,8 @@ def _sample_params_uniform(base: BeerGameParams, ranges: Optional[Dict[str, Tupl
             return float(np.random.uniform(lo, hi))
 
     return BeerGameParams(
-        info_delay=pick("info_delay", base.info_delay),
-        ship_delay=pick("ship_delay", base.ship_delay),
+        supply_leadtime=pick("supply_leadtime", base.supply_leadtime),
+        order_leadtime=pick("order_leadtime", base.order_leadtime),
         init_inventory=pick("init_inventory", base.init_inventory),
         holding_cost=pick("holding_cost", base.holding_cost),
         backlog_cost=pick("backlog_cost", base.backlog_cost),
@@ -459,7 +459,7 @@ def _load_param_ranges_from_config(
     Looks for ItemNodeConfig ranges (init_inventory, holding_cost, backlog_cost)
     associated with the provided ``config_id`` and combines them with global
     ranges defined in ``data/system_config.json`` for parameters like
-    ``info_delay`` and ``ship_delay``.
+    ``supply_leadtime`` and ``order_leadtime``.
     """
 
     ranges: Dict[str, Tuple[float, float]] = {}
@@ -470,8 +470,8 @@ def _load_param_ranges_from_config(
         if cfg_path.exists():
             data = json.loads(cfg_path.read_text())
             for key in [
-                "info_delay",
-                "ship_delay",
+                "supply_leadtime",
+                "order_leadtime",
                 "init_inventory",
                 "holding_cost",
                 "backlog_cost",
@@ -548,8 +548,8 @@ def generate_sim_training_windows(
 
     # Default ranges (broad but sane for Beer Game)
     default_ranges: Dict[str, Tuple[float, float]] = {
-        "info_delay": (0, 6),
-        "ship_delay": (0, 6),
+        "supply_leadtime": (0, 6),
+        "order_leadtime": (0, 6),
         "init_inventory": (4, 60),
         "holding_cost": (0.1, 2.0),
         "backlog_cost": (0.2, 4.0),

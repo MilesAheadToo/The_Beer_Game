@@ -100,8 +100,8 @@ async def suggest_orders(
                     float(node_data.get("incoming_shipments", 0)),
                     float(node_data.get("on_order", 0)),
                     *[1.0 if role == r else 0.0 for r in NODES],  # one-hot role
-                    float(params.info_delay),
-                    float(params.ship_delay),
+                    float(params.supply_leadtime),
+                    float(params.order_leadtime),
                 ]
                 
                 # Ensure correct feature dimension

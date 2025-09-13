@@ -245,7 +245,7 @@ const GameRoom = () => {
                       : 'bg-gray-400 cursor-not-allowed'
                   }`}
                 >
-                  {isSubmitting ? 'Starting...' : 'Start Game'}
+                  {isSubmitting ? 'Starting...' : 'Start'}
                 </button>
               </div>
             )}
@@ -535,7 +535,7 @@ const GameRoom = () => {
                         disabled={!allPlayersReady || isSubmitting || isGameActive}
                         className="w-full text-left px-3 py-1.5 text-sm rounded bg-indigo-100 text-indigo-700 hover:bg-indigo-200 disabled:opacity-50"
                       >
-                        Start Game
+                        Start
                       </button>
                       <button
                         onClick={async () => {

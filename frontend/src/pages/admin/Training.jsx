@@ -19,7 +19,7 @@ export default function Training() {
   const [simAlpha, setSimAlpha] = useState(0.3);
   const [simWipK, setSimWipK] = useState(1.0);
   const [ranges, setRanges] = useState({
-    info_delay: [0, 6], ship_delay: [0, 6], init_inventory: [4, 60],
+    supply_leadtime: [0, 6], order_leadtime: [0, 6], init_inventory: [4, 60],
     holding_cost: [0.1, 2.0], backlog_cost: [0.2, 4.0], max_inbound_per_link: [50, 300], max_order: [50, 300]
   });
   // Generated dataset info (optional)
