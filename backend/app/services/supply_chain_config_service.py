@@ -81,7 +81,7 @@ class SupplyChainConfigService:
                 standard_cost = 2.0
             
             node_policies[node.name.lower()] = {
-                "info_delay": 1,  # Default value
+                "info_delay": 2,  # Default value
                 "ship_delay": 1,   # Default value
                 "init_inventory": init_inventory,
                 "price": price,
@@ -94,7 +94,7 @@ class SupplyChainConfigService:
         # For now, use a simple constant demand based on the first market demand found
         demand_pattern = {
             "type": "constant",
-            "params": {"value": 5}  # Default value
+            "params": {"value": 4}  # Default value
         }
         
         if market_demands:
@@ -102,7 +102,7 @@ class SupplyChainConfigService:
             md = market_demands[0]
             demand_pattern = {
                 "type": md.demand_pattern.get('type', 'constant'),
-                "params": md.demand_pattern.get('params', {'value': 5})
+                "params": md.demand_pattern.get('params', {'value': 4})
             }
         
         # Create the game configuration

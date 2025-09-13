@@ -150,7 +150,7 @@ const GamesList = () => {
     const cc = game?.core_config || game?.system_config || game?.config;
     if (!cc) {
       return (
-        <Tooltip title="This game uses current system defaults. Configure in Core Configuration.">
+        <Tooltip title="This game uses current system defaults. Configure in SC Configuration.">
           <Chip label="Defaults" size="small" variant="outlined" color="default" />
         </Tooltip>
       );
@@ -306,7 +306,7 @@ const GamesList = () => {
             onClick={() => navigate('/system-config')}
             color="primary"
           >
-            Core Configuration
+            SC Configuration
           </Button>
           <Button
             variant="outlined"
@@ -360,7 +360,7 @@ const GamesList = () => {
         </Stack>
         <Stack direction="row" spacing={1}>
           <Button variant="outlined" startIcon={<Settings />} onClick={() => navigate('/system-config')}>
-            Core Configuration
+            SC Configuration
           </Button>
           <Button variant="outlined" onClick={() => navigate('/supply-chain-config')}>
             Game Configuration
