@@ -69,23 +69,31 @@ class AuthService:
         self.db.refresh(db_user)
         return db_user
     
-    async def authenticate_user(self, username: str, password: str, mfa_code: Optional[str] = None, 
-                             client_ip: Optional[str] = None, user_agent: Optional[str] = None) -> Optional[Token]:
-        """
-        Authenticate a user with username/email and password with security features.
-        
+    async def authenticate_user(
+        self,
+        username: str,
+        password: str,
+        mfa_code: Optional[str] = None,
+        client_ip: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> Optional[User]:
+        """Authenticate a user by username/email and password.
+
+        This method only verifies credentials and MFA. Token creation is
+        handled separately to keep concerns separated.
+
         Args:
             username: The username or email of the user
             password: The user's password
             mfa_code: Optional MFA code if MFA is enabled
-            client_ip: Client IP address for audit logging
-            user_agent: User agent string for audit logging
-            
+            client_ip: Client IP address for audit logging (unused currently)
+            user_agent: User agent string for audit logging (unused currently)
+
         Returns:
-            Token object with access and refresh tokens if authentication is successful
-            
+            The authenticated ``User`` instance or ``None`` if authentication fails.
+
         Raises:
-            HTTPException: If authentication fails
+            HTTPException: If authentication fails due to lockout or invalid MFA.
         """
         # First, try to find the user by username or email
         stmt = select(User).where(
@@ -137,27 +145,16 @@ class AuthService:
                     detail="Invalid MFA code"
                 )
         
-        # Generate tokens
-        access_token = await self.create_access_token(user.id)
-        refresh_token = await self.create_refresh_token(user.id)
+        # Successful authentication returns the user object
+        return user
         
-        # Create a refresh token record in the database
-        await self.create_refresh_token_record(
-            user_id=user.id,
-            token=refresh_token,
-            ip_address=client_ip,
-            user_agent=user_agent
-        )
-        
-        return Token(
-            access_token=access_token,
-            token_type="bearer",
-            refresh_token=refresh_token
-        )
-        
-    async def create_refresh_token_record(self, user_id: int, token: str, 
-                                      ip_address: Optional[str] = None, 
-                                      user_agent: Optional[str] = None) -> RefreshToken:
+    async def create_refresh_token_record(
+        self,
+        user_id: int,
+        token: str,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> RefreshToken:
         """Create a new refresh token record in the database."""
         expires_delta = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
         expires_at = datetime.utcnow() + expires_delta
@@ -177,11 +174,6 @@ class AuthService:
         
         return refresh_token
     
-    async def create_access_token(self, user_id: int) -> str:
-        """Create a new access token for the given user ID."""
-        expires_delta = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-        return create_access_token(user_id, expires_delta=expires_delta)
-        
     async def create_refresh_token(self, user_id: int) -> str:
         """Create a new refresh token for the given user ID."""
         expires_delta = timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
@@ -195,54 +187,35 @@ class AuthService:
         totp = pyotp.TOTP(user.mfa_secret)
         return totp.verify(code)
     
-    async def create_access_token(self, user: User, mfa_verified: bool = False) -> dict:
-        """
-        Create access and refresh tokens for a user with enhanced security.
-        
-        Args:
-            user: The user object for which to create tokens
-            mfa_verified: Whether MFA has been verified for this session
-            
-        Returns:
-            dict: A dictionary containing access_token, refresh_token, and user details
-        """
-        # Create access token with user claims
+    async def create_tokens(
+        self,
+        user: User,
+        mfa_verified: bool = False,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> Token:
+        """Create access and refresh tokens for a user."""
+
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = create_access_token(
-            data={
-                "sub": str(user.id),
-                "email": user.email,
-                "is_superuser": user.is_superuser,
-                "mfa_verified": mfa_verified
-            },
-            expires_delta=access_token_expires
+            subject=str(user.id),
+            roles=user.roles,
+            expires_delta=access_token_expires,
         )
-        
-        # Create refresh token
+
         refresh_token = await self.create_refresh_token(user.id)
-        
-        # Create a refresh token record in the database
         await self.create_refresh_token_record(
             user_id=user.id,
-            token=refresh_token
+            token=refresh_token,
+            ip_address=ip_address,
+            user_agent=user_agent,
         )
-        
-        # Return tokens and user info
-        return {
-            "access_token": access_token,
-            "token_type": "bearer",
-            "refresh_token": refresh_token,
-            "user": {
-                "id": user.id,
-                "email": user.email,
-                "username": user.username,
-                "full_name": user.full_name,
-                "is_active": user.is_active,
-                "is_superuser": user.is_superuser,
-                "mfa_enabled": user.mfa_enabled,
-                "mfa_verified": mfa_verified
-            }
-        }
+
+        return Token(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            token_type="bearer",
+        )
     
     async def refresh_access_token(self, refresh_token: str) -> Token:
         """Refresh an access token using a refresh token."""
@@ -266,7 +239,11 @@ class AuthService:
             )
             
         # Create new access token
-        access_token = await self.create_access_token(db_token.user_id)
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = create_access_token(
+            subject=str(db_token.user_id),
+            expires_delta=access_token_expires,
+        )
         
         # Create new refresh token
         new_refresh_token = await self.create_refresh_token(db_token.user_id)

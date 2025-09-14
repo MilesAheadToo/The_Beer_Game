@@ -233,17 +233,24 @@ async def login(
     Returns an access token in the response body and sets an HTTP-only refresh token cookie.
     """
     # Authenticate user
+    mfa_code = (
+        form_data.client_secret if hasattr(form_data, "client_secret") else None
+    )
     user = await auth_service.authenticate_user(
-        email=form_data.username,  # username is actually email
+        username=form_data.username,
         password=form_data.password,
-        mfa_code=(
-            form_data.client_secret if hasattr(form_data, "client_secret") else None
-        ),
-        device_info=request.headers.get("User-Agent"),
+        mfa_code=mfa_code,
+        client_ip=request.client.host if request.client else None,
+        user_agent=request.headers.get("User-Agent"),
     )
 
     # Generate tokens
-    tokens = await auth_service.create_tokens(user)
+    tokens = await auth_service.create_tokens(
+        user,
+        mfa_verified=bool(mfa_code),
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("User-Agent"),
+    )
 
     # Ensure default configuration and game exist for new admins
     try:
