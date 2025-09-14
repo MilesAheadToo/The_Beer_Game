@@ -24,7 +24,7 @@ import {
   Logout as LogoutIcon,
   Dashboard as DashboardIcon,
   SportsEsports as GamesIcon,
-  People as PeopleIcon,
+  PersonOutline as PlayersIcon,
   HelpOutline as HelpIcon,
   NotificationsNone as NotificationsIcon
 } from '@mui/icons-material';
@@ -46,7 +46,7 @@ const Navbar = () => {
   const navigation = [
     { name: 'Dashboard', path: '/dashboard', icon: <DashboardIcon />, auth: true },
     { name: 'Games', path: '/games', icon: <GamesIcon />, auth: true },
-    { name: 'Players', path: '/players', icon: <PeopleIcon />, auth: true },
+    { name: 'Players', path: '/players', icon: <PlayersIcon />, auth: true },
   ];
 
   const handleMenuOpen = (event) => {
