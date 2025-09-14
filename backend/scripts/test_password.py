@@ -1,10 +1,11 @@
+"""Simple password hash verification test."""
+
 from passlib.context import CryptContext
 
-# The hash from the database
-hashed_password = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
+# Using a pure-python hashing scheme avoids external dependencies
+PWD_CONTEXT = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
-# Create a password context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# Test the password
-print("Testing password 'password':", pwd_context.verify("password", hashed_password))
+def test_password_verification() -> None:
+    """Ensure a generated hash verifies against the original password."""
+    hashed = PWD_CONTEXT.hash("password")
+    assert PWD_CONTEXT.verify("password", hashed)
