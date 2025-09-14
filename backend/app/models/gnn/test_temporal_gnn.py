@@ -66,7 +66,7 @@ def test_temporal_gnn():
             }
             
             outputs = model(
-                x=sample['node_features'],
+                node_features=sample['node_features'],
                 edge_index=sample['edge_index'],
                 edge_attr=sample['edge_attr']
             )
@@ -116,7 +116,7 @@ def test_temporal_gnn():
         dones=batch['dones']
     )
     
-    assert 'total_loss' in loss, "Training step did not return loss"
+    assert 'loss' in loss, "Training step did not return loss"
     print("✅ SupplyChainAgent update() test passed!")
     
     print("\nAll tests passed successfully! 🎉")

@@ -24,16 +24,25 @@ CREATE TABLE IF NOT EXISTS users (
     INDEX idx_username (username)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Create groups table
+CREATE TABLE IF NOT EXISTS groups (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT NULL,
+    logo VARCHAR(255) NULL,
+    admin_id INT NOT NULL,
+    UNIQUE KEY uq_group_admin (admin_id),
+    CONSTRAINT fk_group_admin FOREIGN KEY (admin_id) REFERENCES users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS group_id INT NULL,
+    ADD CONSTRAINT fk_user_group FOREIGN KEY (group_id) REFERENCES groups(id) ON DELETE CASCADE;
+
 -- Insert default users if they don't exist
 -- Password for all users is 'Daybreak@2025' (hashed with bcrypt)
 INSERT IGNORE INTO users (username, email, hashed_password, full_name, is_superuser, is_active) VALUES
-('admin', 'admin@daybreak.ai', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'System Administrator', TRUE, TRUE),
-('superadmin', 'superadmin@daybreak.ai', '$2b$12$/FAxQ94QmW1WFdMZd5nKzegYJZkZSi.JUSX/4IvImY3cE2vtleAu6', 'Super Admin', TRUE, TRUE),
-('Retailer', 'retailer@daybreak.ai', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Retailer User', FALSE, TRUE),
-('Distributor', 'distributor@daybreak.ai', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Distributor User', FALSE, TRUE),
-('Manufacturer', 'manufacturer@daybreak.ai', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Manufacturer User', FALSE, TRUE),
-('Supplier', 'supplier@daybreak.ai', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Supplier User', FALSE, TRUE)
-ON DUPLICATE KEY UPDATE 
+('superadmin', 'superadmin@daybreak.ai', '$2b$12$/FAxQ94QmW1WFdMZd5nKzegYJZkZSi.JUSX/4IvImY3cE2vtleAu6', 'Super Admin', TRUE, TRUE)
+ON DUPLICATE KEY UPDATE
     email = VALUES(email),
     full_name = VALUES(full_name),
     is_superuser = VALUES(is_superuser),

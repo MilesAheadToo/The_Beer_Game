@@ -16,6 +16,8 @@ import AdminDashboard from "./pages/admin/Dashboard.jsx";
 import AdminTraining from "./pages/admin/Training.jsx";
 import ModelSetup from "./pages/admin/ModelSetup.jsx";
 import Users from "./pages/Users";
+import AdminUserManagement from "./pages/admin/UserManagement.js";
+import GroupManagement from "./pages/admin/GroupManagement.jsx";
 import Settings from "./pages/Settings";
 import SystemConfig from "./pages/SystemConfig.jsx";
 import Unauthorized from "./pages/Unauthorized";
@@ -156,6 +158,26 @@ const AppContent = () => {
                   <Navbar />
                   <Box sx={(theme) => theme.mixins.toolbar} />
                   <ModelSetup />
+                </>
+              }
+            />
+            <Route
+              path="/admin/groups"
+              element={
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <GroupManagement />
+                </>
+              }
+            />
+            <Route
+              path="/admin/users"
+              element={
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <AdminUserManagement />
                 </>
               }
             />

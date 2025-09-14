@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FaTrash, FaPlus, FaUserShield, FaUser } from 'react-icons/fa';
+import { FaTrash, FaPlus, FaUserShield, FaUser, FaEdit } from 'react-icons/fa';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../contexts/AuthContext';
 import { mixedGameApi } from '../../services/api';
@@ -9,6 +9,7 @@ function UserManagement() {
   const [users, setUsers] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showAddUser, setShowAddUser] = useState(false);
+  const [editingUser, setEditingUser] = useState(null);
   const [newUser, setNewUser] = useState({
     username: '',
     email: '',
@@ -57,14 +58,38 @@ function UserManagement() {
 
   const handleAddUser = async (e) => {
     e.preventDefault();
-    
+
     try {
-      // Create endpoint may not be available on backend; show info
-      toast.info('User creation is not enabled in this build.');
+      if (editingUser) {
+        await fetch(`/api/v1/users/${editingUser.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ username: newUser.username, email: newUser.email, is_superuser: newUser.isAdmin })
+        });
+        toast.success('User updated');
+      } else {
+        await fetch('/api/v1/users/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ username: newUser.username, email: newUser.email, password: newUser.password, is_superuser: newUser.isAdmin })
+        });
+        toast.success('User added');
+      }
+      fetchUsers();
+      setShowAddUser(false);
+      setEditingUser(null);
     } catch (error) {
-      toast.error(error.message || 'Error adding user');
+      toast.error(error.message || 'Error saving user');
       console.error('Error:', error);
     }
+  };
+
+  const handleEditUser = (user) => {
+    setEditingUser(user);
+    setNewUser({ username: user.username, email: user.email, password: '', isAdmin: user.isAdmin });
+    setShowAddUser(true);
   };
 
   if (isLoading) {
@@ -80,7 +105,7 @@ function UserManagement() {
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold text-gray-800">User Management</h1>
         <button
-          onClick={() => setShowAddUser(true)}
+          onClick={() => { setEditingUser(null); setNewUser({ username: '', email: '', password: '', isAdmin: false }); setShowAddUser(true); }}
           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center"
         >
           <FaPlus className="mr-2" /> Add User
@@ -92,9 +117,9 @@ function UserManagement() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-md">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">Add New User</h2>
+            <h2 className="text-xl font-semibold">{editingUser ? 'Edit User' : 'Add New User'}</h2>
               <button 
-                onClick={() => setShowAddUser(false)}
+                onClick={() => { setShowAddUser(false); setEditingUser(null); }}
                 className="text-gray-500 hover:text-gray-700"
               >
                 ✕
@@ -124,16 +149,18 @@ function UserManagement() {
                 />
               </div>
               
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-                <input
-                  type="password"
-                  value={newUser.password}
-                  onChange={(e) => setNewUser({...newUser, password: e.target.value})}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                  required
-                />
-              </div>
+              {!editingUser && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+                  <input
+                    type="password"
+                    value={newUser.password}
+                    onChange={(e) => setNewUser({...newUser, password: e.target.value})}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
+                    required
+                  />
+                </div>
+              )}
               
               <div className="flex items-center">
                 <input
@@ -151,7 +178,7 @@ function UserManagement() {
               <div className="flex justify-end space-x-3 pt-4">
                 <button
                   type="button"
-                  onClick={() => setShowAddUser(false)}
+                onClick={() => { setShowAddUser(false); setEditingUser(null); }}
                   className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
                 >
                   Cancel
@@ -160,7 +187,7 @@ function UserManagement() {
                   type="submit"
                   className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
                 >
-                  Add User
+                  {editingUser ? 'Save Changes' : 'Add User'}
                 </button>
               </div>
             </form>
@@ -215,13 +242,22 @@ function UserManagement() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     {user.email !== 'admin@daybreak.ai' && (
-                      <button
-                        onClick={() => handleDeleteUser(user.id)}
-                        className="text-red-600 hover:text-red-900 mr-3"
-                        title="Delete User"
-                      >
-                        <FaTrash />
-                      </button>
+                      <>
+                        <button
+                          onClick={() => handleEditUser(user)}
+                          className="text-blue-600 hover:text-blue-900 mr-3"
+                          title="Edit User"
+                        >
+                          <FaEdit />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteUser(user.id)}
+                          className="text-red-600 hover:text-red-900"
+                          title="Delete User"
+                        >
+                          <FaTrash />
+                        </button>
+                      </>
                     )}
                   </td>
                 </tr>

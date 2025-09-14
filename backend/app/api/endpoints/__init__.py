@@ -5,6 +5,7 @@ from .model import router as model_router
 from .dashboard import dashboard_router
 from .config import router as config_router
 from .supply_chain_config import router as supply_chain_config_router
+from .group import router as group_router
 
 # Export all routers
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     'dashboard_router',
     'config_router',
     'supply_chain_config_router',
+    'group_router',
 ]

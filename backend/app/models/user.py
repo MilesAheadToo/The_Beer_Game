@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .session import UserSession
     from .auth_models import PasswordHistory, PasswordResetToken
     from .user import RefreshToken
+    from .group import Group
 
 # Association table for many-to-many relationship between users and games
 # Using older style Column syntax for Table definition
@@ -92,6 +93,7 @@ class User(Base):
     locked_until: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     mfa_secret: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    group_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -156,6 +158,11 @@ class User(Base):
         cascade="all, delete-orphan"
     )
     
+    group: Mapped[Optional["Group"]] = relationship("Group", back_populates="users", foreign_keys=[group_id])
+    admin_of_group: Mapped[Optional["Group"]] = relationship(
+        "Group", back_populates="admin", uselist=False, foreign_keys="Group.admin_id"
+    )
+
     def __repr__(self) -> str:
         return f"<User {self.username}>"
 
