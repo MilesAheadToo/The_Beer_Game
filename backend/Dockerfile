@@ -5,14 +5,16 @@ FROM nvidia/cuda:12.2.0-base-ubuntu20.04
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     DEBIAN_FRONTEND=noninteractive \
-    # CUDA and GPU settings
-    CUDA_VISIBLE_DEVICES=all \
+    NVIDIA_VISIBLE_DEVICES=all \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility \
-    LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/nvidia/bin:/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64:${LD_LIBRARY_PATH} \
-    PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH} \
-    # Python settings
     PYTHONPATH=/app \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:/usr/local/cuda-12.1/extras/CUPTI/lib64:/usr/local/nvidia/lib64:/usr/local/nvidia/lib:${LD_LIBRARY_PATH} \
+    CUDA_HOME=/usr/local/cuda-12.1 \
+    PATH=/usr/local/cuda-12.1/bin:${PATH} \
+    CUDA_VISIBLE_DEVICES=0 \
+    FORCE_CUDA=1 \
+    TORCH_CUDA_ARCH_LIST=7.5
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -29,7 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     netcat-openbsd \
     curl \
     vim \
-    # CUDA toolkit and dependencies
+    # Additional dependencies for GPU
     cuda-toolkit-12-1 \
     cuda-libraries-12-1 \
     cuda-nvtx-12-1 \
@@ -62,7 +64,8 @@ RUN pip3 install --no-cache-dir \
     torch==2.1.2+cu121 \
     torchvision==0.16.2+cu121 \
     torchaudio==2.1.2+cu121 \
-    --index-url https://download.pytorch.org/whl/cu121
+    --index-url https://download.pytorch.org/whl/cu121 \
+    && python3 -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
 
 # Install additional Python packages for MariaDB and other requirements
 RUN pip3 install --no-cache-dir \
