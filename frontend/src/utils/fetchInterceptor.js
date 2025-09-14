@@ -8,8 +8,10 @@ window.fetch = async function(input, init = {}) {
   const headers = new Headers(options.headers || {});
   const isAuth = /\/api\/v1\/auth\//.test(url);
 
-  // Ensure cookies are sent for API calls
-  const credentials = options.credentials || 'same-origin';
+  // Ensure cookies are sent for API calls. We default to 'include' so that
+  // cross-origin requests (e.g. different ports during local development)
+  // still include authentication cookies.
+  const credentials = options.credentials || 'include';
 
   try {
     const response = await nativeFetch(input, { ...options, headers, credentials });
