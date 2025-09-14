@@ -29,8 +29,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     netcat-openbsd \
     curl \
     vim \
+    # CUDA toolkit and dependencies
+    cuda-toolkit-12-1 \
+    cuda-libraries-12-1 \
+    cuda-nvtx-12-1 \
+    cuda-nvml-dev-12-1 \
+    libcublas-12-1 \
+    libcufft-12-1 \
+    libcurand-12-1 \
+    libcusolver-12-1 \
+    libcusparse-12-1 \
+    libcudnn8 \
+    libcudnn8-dev \
+    # Clean up
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    # Create symlinks for CUDA
+    && ln -s /usr/local/cuda-12.1 /usr/local/cuda \
+    && ln -s /usr/local/cuda-12.1/targets/x86_64-linux/lib/stubs/libcuda.so /usr/local/cuda-12.1/targets/x86_64-linux/lib/stubs/libcuda.so.1
 
 # Set working directory
 WORKDIR /app
@@ -43,9 +59,9 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 
 # Install PyTorch with CUDA 12.1 support
 RUN pip3 install --no-cache-dir \
-    torch==2.0.1+cu121 \
-    torchvision==0.15.2+cu121 \
-    torchaudio==2.0.2+cu121 \
+    torch==2.1.2+cu121 \
+    torchvision==0.16.2+cu121 \
+    torchaudio==2.1.2+cu121 \
     --index-url https://download.pytorch.org/whl/cu121
 
 # Install additional Python packages for MariaDB and other requirements
