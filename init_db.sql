@@ -1,9 +1,10 @@
 -- Create database if not exists
-CREATE DATABASE IF NOT EXISTS beer_game;
+CREATE DATABASE IF NOT EXISTS beer_game CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- Create user if not exists and grant privileges
 CREATE USER IF NOT EXISTS 'beer_user'@'%' IDENTIFIED BY 'Daybreak@2025';
-GRANT ALL PRIVILEGES ON beer_game.* TO 'beer_user'@'%';
+GRANT ALL PRIVILEGES ON beer_game.* TO 'beer_user'@'%' WITH GRANT OPTION;
+GRANT ALL PRIVILEGES ON *.* TO 'beer_user'@'%' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 
 -- Use the database

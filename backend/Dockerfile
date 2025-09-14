@@ -94,8 +94,10 @@ RUN pip install --no-cache-dir \
 # Copy the current directory contents into the container at /app
 COPY . .
 
-# Make scripts executable
-RUN chmod +x /app/startup.sh /app/init-db.sh
+# Ensure scripts have proper permissions and line endings
+RUN chmod +x /app/startup.sh /app/init-db.sh && \
+    find /app -name "*.sh" -exec dos2unix {} + 2>/dev/null || true && \
+    find /app -name "*.sh" -exec chmod 755 {} +
 
 # Expose the port the app runs on
 EXPOSE 8000
@@ -109,5 +111,5 @@ RUN if [ "$GPU_ENABLED" = "true" ]; then \
         python3 -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"; \
     fi
 
-# Command to run the application
-CMD ["./startup.sh"]
+# Command to run the application with uvicorn
+CMD ["sh", "-c", "export PYTHONUNBUFFERED=1 && uvicorn main:app --host 0.0.0.0 --port 8000"]
