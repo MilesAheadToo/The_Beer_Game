@@ -41,7 +41,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
       args:
-        - FORCE_GPU=1
+        - FORCE_GPU=0
     container_name: the_beer_game_backend
     restart: unless-stopped
     runtime: nvidia
