@@ -10,6 +10,7 @@ export default function Training() {
   const [horizon, setHorizon] = useState(1);
   const [epochs, setEpochs] = useState(10);
   const [device, setDevice] = useState('cpu');
+  const [dataPath, setDataPath] = useState('');
   const [stepsTable, setStepsTable] = useState('beer_game_steps');
   const [dbUrl, setDbUrl] = useState('');
   const [job, setJob] = useState(null);
@@ -57,7 +58,7 @@ export default function Training() {
 
   const generate = async () => {
     try {
-      const param_ranges = Object.fromEntries(Object.entries(ranges).map(([k,v]) => [k, [Number(v[0]), Number(v[1])]]));
+      const param_ranges = Object.fromEntries(Object.entries(ranges).map(([k, v]) => [k, [Number(v[0]), Number(v[1])]]));
       const data = await mixedGameApi.generateData({
         num_runs: 64,
         T: 64,
@@ -68,14 +69,16 @@ export default function Training() {
         sim_alpha: simAlpha,
         sim_wip_k: simWipK,
       });
+      setDataPath(data.path || '');
       toast({ title: 'Dataset generated', description: data.path, status: 'success', duration: 4000, isClosable: true });
     } catch (e) {
+      setDataPath('');
       toast({ title: 'Failed to generate dataset', description: e?.response?.data?.detail || e.message, status: 'error', duration: 5000, isClosable: true });
     }
   };
 
   return (
-    <PageLayout title="Temporal GNN Training">
+    <PageLayout title="Daybreak Agent Training">
       <Box className="card-surface pad-6">
         <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={6}>
           <FormControl>
@@ -103,7 +106,10 @@ export default function Training() {
           </FormControl>
           <FormControl>
             <FormLabel>Device</FormLabel>
-            <Input value={device} onChange={(e)=> setDevice(e.target.value)} placeholder="cpu or cuda" />
+            <Select value={device} onChange={(e) => setDevice(e.target.value)}>
+              <option value="cpu">CPU</option>
+              <option value="cuda">GPU</option>
+            </Select>
           </FormControl>
           {source === 'db' && (
             <>
@@ -151,11 +157,14 @@ export default function Training() {
               </HStack>
             ))}
           </Grid>
+          {!dataPath && (
+            <Text fontSize="sm" color="gray.500" mb={2}>No Training Data</Text>
+          )}
           <HStack mt={3} justify="flex-end">
             <Button variant="outline" onClick={generate}>Generate Data</Button>
-            <Button colorScheme="green" onClick={launch}>Launch Training</Button>
+            <Button colorScheme="green" onClick={launch} isDisabled={!dataPath}>Launch Training</Button>
             {job?.job_id && jobStatus?.running && (
-              <Button colorScheme="red" onClick={async ()=> { try { await mixedGameApi.stopJob(job.job_id); } catch(e) {} }}>Stop</Button>
+              <Button colorScheme="red" onClick={async () => { try { await mixedGameApi.stopJob(job.job_id); } catch (e) {} }}>Stop</Button>
             )}
           </HStack>
         </Box>

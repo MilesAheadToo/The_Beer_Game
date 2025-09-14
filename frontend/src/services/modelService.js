@@ -1,7 +1,7 @@
 import api from './api';
 
 /**
- * Get the status of the GNN model
+ * Get the status of the Daybreak agent model
  * @returns {Promise<Object>} Model status information
  */
 export const getModelStatus = async () => {
@@ -19,7 +19,7 @@ export const getModelStatus = async () => {
 };
 
 /**
- * Check if the GNN model is trained
+ * Check if the Daybreak agent model is trained
  * @returns {Promise<boolean>} True if model is trained, false otherwise
  */
 export const isModelTrained = async () => {
