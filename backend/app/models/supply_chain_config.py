@@ -13,9 +13,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declared_attr
 from enum import Enum as PyEnum
-from typing import List, Optional
+from typing import List, Optional, TYPE_CHECKING
 import datetime
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from .group import Group
 
 class NodeType(str, PyEnum):
     RETAILER = "retailer"
@@ -34,12 +37,14 @@ class SupplyChainConfig(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
     created_by = Column(Integer, ForeignKey('users.id'), nullable=True)
+    group_id = Column(Integer, ForeignKey('groups.id', ondelete='CASCADE'), nullable=False)
     
     # Relationships
     items = relationship("Item", back_populates="config", cascade="all, delete-orphan")
     nodes = relationship("Node", back_populates="config", cascade="all, delete-orphan")
     lanes = relationship("Lane", back_populates="config", cascade="all, delete-orphan")
     market_demands = relationship("MarketDemand", back_populates="config", cascade="all, delete-orphan")
+    group = relationship("Group", back_populates="supply_chain_configs")
 
 class Item(Base):
     """Products in the supply chain"""

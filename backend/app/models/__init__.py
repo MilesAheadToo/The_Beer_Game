@@ -15,6 +15,7 @@ from sqlalchemy import inspect
 # 1. Core models with no dependencies
 from .user import RefreshToken  # Must be imported before User to avoid circular import
 from .user import User, user_games
+from .group import Group
 
 # 2. Models that depend on User
 from .player import Player, PlayerRole, PlayerType, PlayerStrategy
@@ -31,7 +32,7 @@ registered_tables = set(Base.metadata.tables.keys())
 expected_tables = {
     'users', 'refresh_tokens', 'players', 'password_history',
     'password_reset_tokens', 'token_blacklist', 'user_sessions',
-    'games', 'rounds', 'player_actions', 'user_games'
+    'games', 'rounds', 'player_actions', 'user_games', 'groups'
 }
 
 missing_tables = expected_tables - registered_tables
@@ -45,6 +46,7 @@ logger.info(f"Registered tables in metadata: {registered_tables}")
 __all__ = [
     'Base',
     'User',
+    'Group',
     'RefreshToken',
     'Player',
     'Game',

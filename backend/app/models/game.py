@@ -9,6 +9,7 @@ from .base import Base
 
 # Import for type checking only to avoid circular imports
 if TYPE_CHECKING:
+    from .group import Group
     from .player import Player
     from .user import User
     from .agent_config import AgentConfig
@@ -37,6 +38,7 @@ class Game(Base):
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     config: Mapped[dict] = mapped_column(JSON, default=dict)  # Store game configuration
+    group_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=True)
     
     # Role assignments: {role: {'is_ai': bool, 'agent_config_id': Optional[int], 'user_id': Optional[int]}}
     role_assignments: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -47,6 +49,7 @@ class Game(Base):
     users = relationship("User", secondary="user_games", back_populates="games", lazy="selectin")
     supervisor_actions = relationship("SupervisorAction", back_populates="game", lazy="selectin")
     agent_configs = relationship("AgentConfig", back_populates="game", lazy="selectin")
+    group: Mapped[Optional["Group"]] = relationship("Group", back_populates="games")
     
     def get_role_assignment(self, role: str) -> Dict[str, Any]:
         """Get the assignment for a specific role"""

@@ -22,6 +22,7 @@ import {
   SportsEsports as GamesIcon,
   AdminPanelSettings as AdminIcon,
   People as UsersIcon,
+  Groups as GroupsIcon,
   ExpandLess,
   ExpandMore,
 } from '@mui/icons-material';
@@ -51,6 +52,7 @@ const menuItems = [
 ];
 
 const adminMenuItems = [
+  { text: 'Group Management', icon: <GroupsIcon />, path: '/admin/groups' },
   { text: 'User Management', icon: <UsersIcon />, path: '/admin/users' },
 ];
 

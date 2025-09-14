@@ -7,6 +7,7 @@ from .game import (
 )
 from .agent_config import AgentConfig, AgentConfigCreate, AgentConfigUpdate, AgentConfigInDBBase as AgentConfigInDB
 from .dashboard import DashboardResponse, PlayerMetrics, TimeSeriesPoint
+from .group import Group, GroupCreate, GroupUpdate
 
 # Re-export all schemas
 __all__ = [
@@ -21,7 +22,10 @@ __all__ = [
     
     # Agent Config
     'AgentConfig', 'AgentConfigCreate', 'AgentConfigUpdate', 'AgentConfigInDB',
-    
+
     # Dashboard
     'DashboardResponse', 'PlayerMetrics', 'TimeSeriesPoint',
+
+    # Group
+    'Group', 'GroupCreate', 'GroupUpdate',
 ]

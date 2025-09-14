@@ -7,7 +7,8 @@ from app.api.endpoints import (
     model_router,
     dashboard_router,
     config_router,
-    supply_chain_config_router
+    supply_chain_config_router,
+    group_router
 )
 from app.core.config import settings
 
@@ -21,3 +22,4 @@ api_router.include_router(model_router, prefix="/model", tags=["model"])
 api_router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
 api_router.include_router(config_router, tags=["config"])
 api_router.include_router(supply_chain_config_router, prefix="/supply-chain-config", tags=["supply-chain-config"])
+api_router.include_router(group_router, prefix="/groups", tags=["groups"])
