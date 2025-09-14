@@ -184,7 +184,7 @@ const PlayersPage = () => {
                   <FormControl>
                     <FormLabel>Agent Type</FormLabel>
                     <Select value={form.agent_type} onChange={(e) => setForm({ ...form, agent_type: e.target.value })}>
-                      <option value="DAYBREAK">Daybreak (GNN)</option>
+                      <option value="DAYBREAK">Daybreak Agent</option>
                       <option value="LLM_BALANCED">LLM - Balanced</option>
                       <option value="LLM_CONSERVATIVE">LLM - Conservative</option>
                       <option value="LLM_AGGRESSIVE">LLM - Aggressive</option>

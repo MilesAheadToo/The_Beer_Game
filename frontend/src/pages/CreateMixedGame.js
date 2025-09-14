@@ -72,7 +72,7 @@ const agentStrategies = [
   {
     group: 'Daybreak',
     options: [
-      { value: 'DAYBREAK', label: 'Daybreak Agent (GNN)' },
+      { value: 'DAYBREAK', label: 'Daybreak Agent' },
     ]
   }
 ];
@@ -338,7 +338,7 @@ const CreateMixedGame = () => {
     })();
   }, []);
 
-  // Load Daybreak GNN model status
+  // Load Daybreak agent model status
   useEffect(() => {
     (async () => {
       try {
@@ -1055,7 +1055,7 @@ const CreateMixedGame = () => {
                         {player.strategy === 'LLM_BALANCED' && 'Advanced AI with learning capabilities'}
                         {player.strategy === 'LLM_AGGRESSIVE' && 'Aggressive AI strategy'}
                         {player.strategy === 'LLM_ADAPTIVE' && 'Adaptive AI strategy'}
-                        {player.strategy === 'DAYBREAK' && !(modelStatus && modelStatus.is_trained) && 'Daybreak (GNN) is not trained yet and cannot be used'}
+                        {player.strategy === 'DAYBREAK' && !(modelStatus && modelStatus.is_trained) && 'Daybreak agent is not trained yet and cannot be used'}
                       </FormHelperText>
                     </FormControl>
                   )}

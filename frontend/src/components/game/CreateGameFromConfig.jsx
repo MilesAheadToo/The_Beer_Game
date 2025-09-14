@@ -58,7 +58,7 @@ const CreateGameFromConfig = () => {
     fetchConfigs();
   }, [enqueueSnackbar]);
 
-  // Load Daybreak GNN model status
+  // Load Daybreak agent model status
   useEffect(() => {
     (async () => {
       try {
