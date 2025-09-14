@@ -1,15 +1,16 @@
+import os
 import sys
-from sqlalchemy.orm import Session
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
 # Add the parent directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.demand_patterns import DemandGenerator
 
+
 def test_classic_demand_pattern() -> None:
     """Classic pattern should step from 4 to 8 after five rounds."""
     expected = [4, 4, 4, 4, 4, 8, 8, 8, 8, 8]
-    pattern = DemandGenerator.generate_classic(num_rounds=10, stable_period=5, step_increase=4)
+    pattern = DemandGenerator.generate_classic(
+        num_rounds=10, stable_period=5, step_increase=4
+    )
     assert pattern == expected
