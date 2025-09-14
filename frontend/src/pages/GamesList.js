@@ -288,6 +288,22 @@ const GamesList = () => {
     }
   };
 
+  // Reusable alert shown when the Daybreak model hasn't been trained yet
+  const DaybreakAlert = () => {
+    if (loadingModelStatus || !modelStatus || modelStatus.is_trained) return null;
+    return (
+      <Box mb={4}>
+        <Alert severity="error" variant="outlined">
+          <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
+          <Typography variant="body2">
+            The Daybreak agent has not yet been trained, so it cannot be used until training completes.
+            You may still select Basic (heuristics) or LLM agents.
+          </Typography>
+        </Alert>
+      </Box>
+    );
+  };
+
   if (loading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="200px">
@@ -332,17 +348,7 @@ const GamesList = () => {
         </Box>
 
         {/* Daybreak Agent Not Trained Alert */}
-        {!loadingModelStatus && modelStatus && !modelStatus.is_trained && (
-          <Box mb={4}>
-            <Alert severity="error" variant="outlined">
-              <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
-              <Typography variant="body2">
-                The Daybreak agent has not yet been trained, so it cannot be used until training completes.
-                You may still select Basic (heuristics) or LLM agents.
-              </Typography>
-            </Alert>
-          </Box>
-        )}
+        <DaybreakAlert />
         <Typography color="error">{error}</Typography>
       </Box>
     );
@@ -377,17 +383,7 @@ const GamesList = () => {
       <Divider sx={{ mb: 2 }} />
 
       {/* Daybreak Agent Not Trained Alert */}
-      {!loadingModelStatus && modelStatus && !modelStatus.is_trained && (
-        <Box mb={4}>
-          <Alert severity="error" variant="outlined">
-            <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
-            <Typography variant="body2">
-              The Daybreak agent has not yet been trained, so it cannot be used until training completes.
-              You may still select Basic (heuristics) or LLM agents.
-            </Typography>
-          </Alert>
-        </Box>
-      )}
+      <DaybreakAlert />
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 3 }}>
         <Button
           variant="contained"
