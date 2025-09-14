@@ -1,10 +1,20 @@
-# Use an official Python runtime as a parent image with CUDA support
-FROM nvidia/cuda:11.3.1-cudnn8-runtime-ubuntu20.04
+# Use an official Python runtime as a parent image
+FROM nvidia/cuda:12.2.0-base-ubuntu20.04
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    DEBIAN_FRONTEND=noninteractive
+    DEBIAN_FRONTEND=noninteractive \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
+    PYTHONPATH=/app \
+    PIP_NO_CACHE_DIR=1 \
+    LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:/usr/local/cuda-12.1/extras/CUPTI/lib64:/usr/local/nvidia/lib64:/usr/local/nvidia/lib:${LD_LIBRARY_PATH} \
+    CUDA_HOME=/usr/local/cuda-12.1 \
+    PATH=/usr/local/cuda-12.1/bin:${PATH} \
+    CUDA_VISIBLE_DEVICES=0 \
+    FORCE_CUDA=1 \
+    TORCH_CUDA_ARCH_LIST=7.5
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -14,23 +24,78 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3.9-dev \
     default-mysql-client \
     libmariadb-dev \
-    && rm -rf /var/lib/apt/lists/*
+    libmariadb-dev-compat \
+    iputils-ping \
+    net-tools \
+    dnsutils \
+    netcat-openbsd \
+    curl \
+    vim \
+    # Additional dependencies for GPU
+    cuda-toolkit-12-1 \
+    cuda-libraries-12-1 \
+    cuda-nvtx-12-1 \
+    cuda-nvml-dev-12-1 \
+    libcublas-12-1 \
+    libcufft-12-1 \
+    libcurand-12-1 \
+    libcusolver-12-1 \
+    libcusparse-12-1 \
+    libcudnn8 \
+    libcudnn8-dev \
+    # Clean up
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* \
+    # Create symlinks for CUDA
+    && ln -s /usr/local/cuda-12.1 /usr/local/cuda \
+    && ln -s /usr/local/cuda-12.1/targets/x86_64-linux/lib/stubs/libcuda.so /usr/local/cuda-12.1/targets/x86_64-linux/lib/stubs/libcuda.so.1
 
 # Set working directory
 WORKDIR /app
 
-# Set environment variables
-ENV PYTHONPATH=/app \
-    PIP_NO_CACHE_DIR=1 \
-    LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH \
-    CUDA_HOME=/usr/local/cuda
-
 # Install Python dependencies
 COPY requirements.txt .
+
+# Install base requirements first
 RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Install PyTorch with CUDA 12.1 support
+RUN pip3 install --no-cache-dir \
+    torch==2.1.2+cu121 \
+    torchvision==0.16.2+cu121 \
+    torchaudio==2.1.2+cu121 \
+    --index-url https://download.pytorch.org/whl/cu121 \
+    && python3 -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}')"
+
+# Install additional Python packages for MariaDB and other requirements
+RUN pip3 install --no-cache-dir \
+    pymysql \
+    mysql-connector-python==8.0.33 \
+    alembic
+
+# Install additional Python packages for MariaDB and other requirements
+RUN pip install --no-cache-dir \
+    pymysql \
+    mysql-connector-python==8.0.33 \
+    alembic
 
 # Copy the current directory contents into the container at /app
 COPY . .
 
+# Ensure scripts have proper permissions and line endings
+RUN chmod +x /app/startup.sh /app/init-db.sh && \
+    find /app -name "*.sh" -exec dos2unix {} + 2>/dev/null || true && \
+    find /app -name "*.sh" -exec chmod 755 {} +
+
+# Expose the port the app runs on
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/api/health || exit 1
+
+# Verify GPU is available
+RUN python3 -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA device count: {torch.cuda.device_count()}'); [torch.cuda.is_available()] and [print(f'Device {i}: {torch.cuda.get_device_properties(i)}') for i in range(torch.cuda.device_count())]"
+
 # Command to run the application with uvicorn
-CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "export PYTHONUNBUFFERED=1 && uvicorn main:app --host 0.0.0.0 --port 8000"]
