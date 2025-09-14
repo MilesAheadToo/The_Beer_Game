@@ -25,13 +25,16 @@ import {
   MenuItem,
   Snackbar,
   Alert,
+  AlertTitle,
   Divider,
   Stack,
 } from '@mui/material';
 import { PlayArrow, Edit, Delete, Add, Settings, FileDownloadOutlined } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import gameApi from '../services/gameApi';
-import { Alert as ChakraAlert, AlertTitle, AlertDescription, AlertIcon, Box as ChakraBox } from '@chakra-ui/react';
+// Removed Chakra UI components to avoid runtime errors when the Chakra provider
+// isn't available. Using MUI components exclusively ensures the page renders
+// correctly without additional providers.
 
 const GamesList = () => {
   const [games, setGames] = useState([]);
@@ -330,18 +333,15 @@ const GamesList = () => {
 
         {/* Daybreak Agent Not Trained Alert */}
         {!loadingModelStatus && modelStatus && !modelStatus.is_trained && (
-          <ChakraBox mb={4}>
-            <Alert status="error" variant="left-accent" borderRadius="md">
-              <AlertIcon />
-              <Box>
-                <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
-                <AlertDescription fontSize="sm">
-                  The Daybreak agent has not yet been trained, so it cannot be used until training completes.
-                  You may still select Basic (heuristics) or LLM agents.
-                </AlertDescription>
-              </Box>
+          <Box mb={4}>
+            <Alert severity="error" variant="outlined">
+              <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
+              <Typography variant="body2">
+                The Daybreak agent has not yet been trained, so it cannot be used until training completes.
+                You may still select Basic (heuristics) or LLM agents.
+              </Typography>
             </Alert>
-          </ChakraBox>
+          </Box>
         )}
         <Typography color="error">{error}</Typography>
       </Box>
@@ -378,18 +378,15 @@ const GamesList = () => {
 
       {/* Daybreak Agent Not Trained Alert */}
       {!loadingModelStatus && modelStatus && !modelStatus.is_trained && (
-        <ChakraBox mb={4}>
-          <ChakraAlert status="error" variant="left-accent" borderRadius="md" bg="red.50">
-            <AlertIcon color="red.500" />
-            <Box>
-              <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
-              <AlertDescription fontSize="sm">
-                The Daybreak agent has not yet been trained, so it cannot be used until training completes.
-                You may still select Basic (heuristics) or LLM agents.
-              </AlertDescription>
-            </Box>
-          </ChakraAlert>
-        </ChakraBox>
+        <Box mb={4}>
+          <Alert severity="error" variant="outlined">
+            <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
+            <Typography variant="body2">
+              The Daybreak agent has not yet been trained, so it cannot be used until training completes.
+              You may still select Basic (heuristics) or LLM agents.
+            </Typography>
+          </Alert>
+        </Box>
       )}
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 3 }}>
         <Button
