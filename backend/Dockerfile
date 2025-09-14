@@ -1,52 +1,29 @@
 # Use an official Python runtime as a parent image
-# Base image is selected based on whether GPU support is needed
-ARG GPU_ENABLED=false # Set to true to enable GPU support
+FROM python:3.9-slim
 
-# Set base image
-FROM python:3.9-slim as base
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    DEBIAN_FRONTEND=noninteractive
 
-# Set up environment for GPU support if enabled
-FROM base as gpu-runtime
-ENV NVIDIA_VISIBLE_DEVICES=all \
-    NVIDIA_DRIVER_CAPABILITIES=compute,utility \
-    LD_LIBRARY_PATH=/usr/local/nvidia/lib64:/usr/local/nvidia/bin:/usr/local/cuda/lib64:$LD_LIBRARY_PATH
-
-# Install NVIDIA runtime
+# Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    cuda-cudart-11-3 \
+    build-essential \
+    python3-dev \
+    default-mysql-client \
+    libmariadb-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Final stage - use base as parent
-FROM base
-
-# Set GPU configuration
-ARG GPU_ENABLED=false
-
-# Install GPU support if enabled
-RUN if [ "$GPU_ENABLED" = "true" ]; then \
-        echo "Setting up GPU support"; \
-        apt-get update && apt-get install -y --no-install-recommends \
-            cuda-cudart-11-3 \
-            cuda-toolkit-11-3 \
-            libcudnn8=8.2.1.32-1+cuda11.3 \
-            libcudnn8-dev=8.2.1.32-1+cuda11.3 \
-            nvidia-cuda-toolkit \
-            && rm -rf /var/lib/apt/lists/*; \
-    fi
-
-# Set CUDA environment variables if GPU is enabled
-ENV PATH=/usr/local/cuda/bin:${PATH} \
-    LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH} \
-    CUDA_HOME=/usr/local/cuda
-
-# Set the working directory in the container
+# Set working directory
 WORKDIR /app
 
 # Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
-    PIP_NO_CACHE_DIR=1
+ENV PYTHONPATH=/app \
+    PIP_NO_CACHE_DIR=1 \
+    # Ensure PyTorch uses CPU
+    CUDA_VISIBLE_DEVICES= \
+    NO_CUDA=1 \
+    USE_CUDA=0
 
 # Install system dependencies and network debugging tools
 RUN apt-get update && apt-get install -y --no-install-recommends \

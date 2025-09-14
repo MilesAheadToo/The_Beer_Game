@@ -7,22 +7,35 @@ REMOTE_HOST = 172.29.20.187
 # Default to CPU build (explicitly disable GPU)
 FORCE_GPU ?= 0
 
-# Docker build arguments
-DOCKER_BUILD_ARGS = --build-arg FORCE_GPU=$(FORCE_GPU)
+# Docker build arguments for CPU
+DOCKER_BUILD_ARGS_CPU = --build-arg FORCE_GPU=0
+
+# Docker build arguments for GPU
+DOCKER_BUILD_ARGS_GPU = --build-arg FORCE_GPU=1
 
 # Docker runtime arguments
 DOCKER_RUN_ARGS = -e FORCE_GPU=$(FORCE_GPU)
 
-.PHONY: up up-dev up-remote up-tls up-tls-only rebuild-frontend down ps logs seed reset-admin proxy-url help remote-train remote-train-dataset train-setup train-cpu
+.PHONY: up gpu-up up-dev down ps logs seed reset-admin help
 
+# Default CPU target
 up:
-	@echo "\n[+] Building and starting full system (proxy, frontend, backend, db)..."; \
-	echo "   Build type: CPU (default)"; \
-	docker-compose build $(DOCKER_BUILD_ARGS) backend && \
-	docker-compose up -d proxy frontend backend db create-users; \
+	@echo "\n[+] Building and starting full system in CPU mode (proxy, frontend, backend, db)..."; \
+	docker-compose -f docker-compose.yml build --no-cache $(DOCKER_BUILD_ARGS_CPU) backend && \
+	docker-compose -f docker-compose.yml up -d proxy frontend backend db create-users; \
 	echo "\n[✓] Local development server started (CPU mode)."; \
 	echo "   URL:     http://$(HOST):8088"; \
 	echo "   Admin:   admin@daybreak.ai / Daybreak@2025"
+
+# GPU target
+gpu-up:
+	@echo "\n[+] Building and starting full system in GPU mode (proxy, frontend, gpu-backend, db)..."; \
+	docker-compose -f docker-compose.yml -f docker-compose.gpu.yml build --no-cache backend && \
+	docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d proxy frontend backend db create-users; \
+	echo "\n[✓] Local development server started (GPU mode)."; \
+	echo "   URL:     http://$(HOST):8088"; \
+	echo "   Admin:   admin@daybreak.ai / Daybreak@2025"; \
+	echo "   GPU:     $(shell nvidia-smi --query-gpu=gpu_name --format=csv,noheader 2>/dev/null || echo 'No GPU detected')"
 
 up-dev:
 	@echo "\n[+] Building and starting full system with dev overrides (proxy, frontend, backend, db)..."; \
@@ -112,7 +125,8 @@ help:
 	@echo "Available targets:"; \
 	echo ""; \
 	echo "Local Development (CPU/GPU):"; \
-	echo "  make up            - build/start HTTP proxy (8088), frontend, backend, db, seed (CPU by default)"; \
+	echo "  make up            - build/start HTTP proxy (8088), frontend, backend, db, seed (CPU mode)"; \
+	echo "  make gpu-up        - build/start with GPU support (requires NVIDIA Docker)"; \
 	echo "  make up FORCE_GPU=1 - enable GPU support if available (set to 1 to enable)"; \
 	echo "  make up-dev        - same as up, with dev overrides"; \
 	echo "  make up-tls        - start with HTTPS (8443) using self-signed cert"; \
