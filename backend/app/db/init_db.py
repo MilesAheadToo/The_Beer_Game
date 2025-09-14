@@ -1,7 +1,7 @@
 import os
 import logging
 import asyncio
-from sqlalchemy import create_engine, exc, text
+from sqlalchemy import create_engine, exc, text, select, update
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 
@@ -21,6 +21,7 @@ from app.models.player import Player, PlayerRole, PlayerType, PlayerStrategy
 from app.models.auth_models import PasswordHistory, PasswordResetToken
 from app.models.session import TokenBlacklist, UserSession
 from app.models.game import Game, GameStatus, Round, PlayerAction
+from app.models.group import Group
 from scripts.seed_core_config import seed_core_config
 
 # Ensure all models are imported and registered with SQLAlchemy
@@ -114,11 +115,10 @@ async def init_db():
             
             # Check if admin user already exists
             result = await db.execute(
-                text("SELECT * FROM users WHERE email = :email"),
-                {"email": settings.FIRST_SUPERUSER}
+                select(User).where(User.email == settings.FIRST_SUPERUSER)
             )
-            admin = result.first()
-            
+            admin = result.scalars().first()
+
             if not admin:
                 logger.info("Creating admin user...")
                 admin = User(
@@ -129,7 +129,22 @@ async def init_db():
                 )
                 db.add(admin)
                 await db.commit()
+                await db.refresh(admin)
                 logger.info("Admin user created successfully")
+
+            # Ensure default Daybreak group exists
+            result = await db.execute(select(Group).where(Group.name == "Daybreak"))
+            group = result.scalars().first()
+            if not group:
+                group = Group(name="Daybreak", description="Default group", admin_id=admin.id)
+                db.add(group)
+                await db.flush()
+
+            # Assign group to admin and any users missing a group
+            admin.group_id = group.id
+            await db.execute(
+                update(User).where(User.group_id.is_(None)).values(group_id=group.id)
+            )
 
             # Seed core supply chain configuration
             await seed_core_config(db)

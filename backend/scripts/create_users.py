@@ -11,6 +11,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.models.base import Base
 from app.models.user import User
 from app.models.player import Player, PlayerRole, PlayerType, PlayerStrategy
+from app.models.group import Group
 from app.core.config import settings
 
 # Password hashing
@@ -62,6 +63,21 @@ def create_role_user(session, role: str):
     session.add(user)
     return user
 
+def get_or_create_default_group(session, admin_user):
+    """Create the default 'Daybreak' group if it does not exist."""
+    group = session.query(Group).filter(Group.name == "Daybreak").first()
+    if group:
+        return group
+
+    group = Group(
+        name="Daybreak",
+        description="Default group",
+        admin_id=admin_user.id,
+    )
+    session.add(group)
+    session.flush()  # Ensure group ID is available
+    return group
+
 def get_db_connection_string():
     """Construct the database connection string from environment variables."""
     server = os.getenv("MYSQL_SERVER", "db")
@@ -94,15 +110,22 @@ def main():
         # Create admin user
         admin = create_admin_user(db)
         print(f"Admin user created/updated: {admin.email}")
-        
+
+        # Create or get default group and assign admin
+        group = get_or_create_default_group(db, admin)
+        admin.group_id = group.id
+
         # Create role users
         roles = ["retailer", "distributor", "manufacturer", "wholesaler"]
         for role in roles:
             user = create_role_user(db, role)
+            user.group_id = group.id
             print(f"{role.capitalize()} user created/updated: {user.email}")
-        
+
         # Commit the changes
         db.commit()
+
+        print(f"Assigned all users to default group: {group.name}")
         
     except Exception as e:
         print(f"Error creating users: {e}")
