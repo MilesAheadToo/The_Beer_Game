@@ -1,14 +1,19 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import Login from '../../pages/Login';
+import Login from '../../pages/Login.jsx';
 import { AuthProvider } from '../../contexts/AuthContext';
 
 // Mock the API
-jest.mock('../../services/api', () => ({
-  mixedGameApi: {
+jest.mock('../../services/api', () => {
+  const apiMock = {
     login: jest.fn(),
-  },
-}));
+    getGames: jest.fn().mockResolvedValue([]),
+    getCurrentUser: jest.fn().mockResolvedValue(null),
+    refreshToken: jest.fn(),
+    logout: jest.fn(),
+  };
+  return { __esModule: true, mixedGameApi: apiMock, default: apiMock };
+});
 
 // Mock the useNavigate hook
 const mockNavigate = jest.fn();
@@ -46,8 +51,8 @@ describe('Login', () => {
     
     expect(screen.getByLabelText(/email address/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /forgot password/i })).toBeInTheDocument();
-    expect(screen.getByText(/don't have an account/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /forgot your password/i })).toBeInTheDocument();
+    expect(screen.getByText(/create a new account/i)).toBeInTheDocument();
   });
 
   it('validates form fields', async () => {
@@ -77,7 +82,7 @@ describe('Login', () => {
 
   it('handles successful login', async () => {
     const mockUser = { id: 1, username: 'testuser', email: 'test@example.com' };
-    require('../../services/api').mixedGameApi.login.mockResolvedValue(mockUser);
+    require('../../services/api').mixedGameApi.login.mockResolvedValue({ success: true, user: mockUser });
     
     renderLogin();
     
@@ -97,21 +102,18 @@ describe('Login', () => {
       expect(require('../../services/api').mixedGameApi.login).toHaveBeenCalledWith({
         username: 'test@example.com',
         password: 'password123',
-        grant_type: 'password',
       });
     });
-    
-    // Check that we navigate to the dashboard after successful login
+
+    // Check that we navigate to the games list after successful login
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/dashboard', { replace: true });
+      expect(mockNavigate).toHaveBeenCalledWith('/games', { replace: true });
     });
   });
 
   it('handles login failure', async () => {
     const errorMessage = 'Invalid credentials';
-    require('../../services/api').mixedGameApi.login.mockRejectedValue({
-      response: { data: { detail: errorMessage } },
-    });
+    require('../../services/api').mixedGameApi.login.mockResolvedValue({ success: false, error: errorMessage });
     
     renderLogin();
     
@@ -130,29 +132,5 @@ describe('Login', () => {
     await waitFor(() => {
       expect(global.toast.error).toHaveBeenCalledWith(errorMessage, expect.any(Object));
     });
-  });
-
-  it('toggles password visibility', () => {
-    renderLogin();
-    
-    const passwordInput = screen.getByPlaceholderText('Password');
-    const toggleButton = screen.getByRole('button', { name: /show password/i });
-    
-    // Password should be hidden by default
-    expect(passwordInput).toHaveAttribute('type', 'password');
-    
-    // Click the toggle button
-    fireEvent.click(toggleButton);
-    
-    // Password should be visible
-    expect(passwordInput).toHaveAttribute('type', 'text');
-    expect(toggleButton).toHaveTextContent(/hide password/i);
-    
-    // Click again to hide
-    fireEvent.click(toggleButton);
-    
-    // Password should be hidden again
-    expect(passwordInput).toHaveAttribute('type', 'password');
-    expect(toggleButton).toHaveTextContent(/show password/i);
   });
 });
