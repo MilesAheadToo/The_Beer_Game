@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS users (
 -- Password for all users is 'Daybreak@2025' (hashed with bcrypt)
 INSERT IGNORE INTO users (username, email, hashed_password, full_name, is_superuser, is_active) VALUES
 ('admin', 'admin@daybreak.ai', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'System Administrator', TRUE, TRUE),
+('superadmin', 'superadmin@daybreak.ai', '$2b$12$/FAxQ94QmW1WFdMZd5nKzegYJZkZSi.JUSX/4IvImY3cE2vtleAu6', 'Super Admin', TRUE, TRUE),
 ('Retailer', 'retailer@daybreak.ai', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Retailer User', FALSE, TRUE),
 ('Distributor', 'distributor@daybreak.ai', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Distributor User', FALSE, TRUE),
 ('Manufacturer', 'manufacturer@daybreak.ai', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Manufacturer User', FALSE, TRUE),

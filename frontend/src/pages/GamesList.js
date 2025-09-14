@@ -29,7 +29,7 @@ import {
   Divider,
   Stack,
 } from '@mui/material';
-import { PlayArrow, Edit, Delete, Add, Settings, FileDownloadOutlined } from '@mui/icons-material';
+import { PlayArrow, Edit, Delete, Add, Settings, FileDownloadOutlined, SportsEsports, PersonOutline } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
 import gameApi from '../services/gameApi';
 // Removed Chakra UI components to avoid runtime errors when the Chakra provider
@@ -327,12 +327,14 @@ const GamesList = () => {
           </Button>
           <Button
             variant="outlined"
+            startIcon={<SportsEsports />}
             onClick={() => navigate('/supply-chain-config')}
           >
             Game Configuration
           </Button>
           <Button
             variant="outlined"
+            startIcon={<PersonOutline />}
             onClick={() => navigate('/players')}
           >
             Players
@@ -366,10 +368,10 @@ const GamesList = () => {
           <Button variant="outlined" startIcon={<Settings />} onClick={() => navigate('/system-config')}>
             SC Configuration
           </Button>
-          <Button variant="outlined" onClick={() => navigate('/supply-chain-config')}>
+          <Button variant="outlined" startIcon={<SportsEsports />} onClick={() => navigate('/supply-chain-config')}>
             Game Configuration
           </Button>
-          <Button variant="outlined" onClick={() => navigate('/players')}>
+          <Button variant="outlined" startIcon={<PersonOutline />} onClick={() => navigate('/players')}>
             Players
           </Button>
           <Button variant="outlined" onClick={() => navigate('/admin/training')}>

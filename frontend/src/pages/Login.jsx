@@ -23,10 +23,10 @@ const Login = () => {
       if (!isAuthenticated) return;
       const redirectTo = searchParams.get('redirect');
 
-      // If admin, honor redirect or go to games
+      // If admin/superadmin, honor redirect or go to players page
       const isAdmin = user?.is_superuser || (Array.isArray(user?.roles) && user.roles.includes('admin'));
       if (isAdmin) {
-        navigate(redirectTo || '/', { replace: true });
+        navigate(redirectTo || '/players', { replace: true });
         return;
       }
 
@@ -111,9 +111,12 @@ const Login = () => {
           } catch (e) {
             // ignore and fall back
           }
+          const redirectTo = searchParams.get('redirect') || '/games';
+          navigate(redirectTo, { replace: true });
+        } else {
+          const redirectTo = searchParams.get('redirect') || '/players';
+          navigate(redirectTo, { replace: true });
         }
-        const redirectTo = searchParams.get('redirect') || '/games';
-        navigate(redirectTo, { replace: true });
       } else if (error) {
         toast.error(error);
       }
