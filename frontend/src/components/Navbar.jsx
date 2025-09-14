@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { Link, useNavigate, useLocation, useParams } from 'react-router-dom';
 import {
   AppBar,
   Toolbar,
@@ -29,19 +29,39 @@ import {
   NotificationsNone as NotificationsIcon
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import mixedGameApi from '../services/api';
 
 const Navbar = () => {
   const { user, isAuthenticated, logout } = useAuth();
   const [currentPath, setCurrentPath] = useState('');
   const [anchorEl, setAnchorEl] = useState(null);
+  const [gameInfo, setGameInfo] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
+  const { gameId } = useParams();
   const open = Boolean(anchorEl);
   
   // Update current path when location changes
   useEffect(() => {
     setCurrentPath(location.pathname);
   }, [location]);
+
+  // Load game information when on a game page
+  useEffect(() => {
+    const fetchGameInfo = async () => {
+      if (gameId) {
+        try {
+          const data = await mixedGameApi.getGame(gameId);
+          setGameInfo(data);
+        } catch (err) {
+          console.error('Failed to load game info', err);
+        }
+      } else {
+        setGameInfo(null);
+      }
+    };
+    fetchGameInfo();
+  }, [gameId]);
 
   const navigation = [
     { name: 'Dashboard', path: '/dashboard', icon: <DashboardIcon />, auth: true },
@@ -77,6 +97,10 @@ const Navbar = () => {
       .substring(0, 2);
   };
 
+  const groupName = user?.group?.name || gameInfo?.group?.name;
+  const scName = gameInfo?.config?.name;
+  const gameName = gameInfo?.name;
+
   if (!isAuthenticated) {
     return null; // Don't show navbar for unauthenticated users
   }
@@ -109,6 +133,15 @@ const Navbar = () => {
           >
             The Beer Game
           </Typography>
+          {(groupName || scName || gameName) && (
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ ml: 2 }}
+            >
+              {[groupName, scName, gameName].filter(Boolean).join(' | ')}
+            </Typography>
+          )}
 
           {/* Navigation Links - Desktop */}
           <Box sx={{ display: { xs: 'none', md: 'flex' }, gap: 1 }}>
