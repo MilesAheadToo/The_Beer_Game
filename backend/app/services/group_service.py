@@ -2,7 +2,17 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from fastapi import HTTPException, status
 
-from ..models import Group, User, SupplyChainConfig, Game, GameStatus
+from ..models import (
+    Group,
+    User,
+    SupplyChainConfig,
+    Game,
+    GameStatus,
+    Player,
+    PlayerRole,
+    PlayerType,
+    PlayerStrategy,
+)
 from ..schemas.group import GroupCreate, GroupUpdate
 from ..core.security import get_password_hash
 
@@ -51,6 +61,45 @@ class GroupService:
                 status=GameStatus.CREATED
             )
             self.db.add_all([sc_config, game])
+            self.db.flush()
+
+            # Create default players and corresponding user accounts
+            default_roles = [
+                ("retailer", PlayerRole.RETAILER),
+                ("wholesaler", PlayerRole.WHOLESALER),
+                ("distributor", PlayerRole.DISTRIBUTOR),
+                ("manufacturer", PlayerRole.MANUFACTURER),
+            ]
+
+            player_users = []
+            for username, role_enum in default_roles:
+                user = User(
+                    username=username,
+                    email=f"{username}@daybreak.ai",
+                    full_name=username.capitalize(),
+                    hashed_password=get_password_hash("Daybreak2025"),
+                    roles=["player"],
+                    group_id=group.id,
+                    is_active=True,
+                    is_superuser=False,
+                )
+                self.db.add(user)
+                self.db.flush()
+                player_users.append((user, role_enum))
+
+            players = []
+            for user_obj, role_enum in player_users:
+                player = Player(
+                    game_id=game.id,
+                    user_id=user_obj.id,
+                    name=user_obj.full_name or user_obj.username,
+                    role=role_enum,
+                    type=PlayerType.AI,
+                    strategy=PlayerStrategy.LLM_BASIC,
+                )
+                players.append(player)
+
+            self.db.add_all(players)
             self.db.commit()
             self.db.refresh(group)
             return group
