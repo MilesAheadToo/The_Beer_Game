@@ -23,7 +23,12 @@ from pydantic import BaseModel
 # Config
 # ------------------------------------------------------------------------------
 API_PREFIX = os.getenv("API_PREFIX", "/api/v1")
-FRONTEND_ORIGINS = os.getenv("FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000")
+# Allow common local frontend ports so CORS works out of the box
+FRONTEND_ORIGINS = os.getenv(
+    "FRONTEND_ORIGINS",
+    "http://localhost:3000,http://127.0.0.1:3000,"
+    "http://localhost:8080,http://127.0.0.1:8080",
+)
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-insecure-secret-key-change-me")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
