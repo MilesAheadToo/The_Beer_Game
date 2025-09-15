@@ -14,17 +14,25 @@ if not api_key:
 client = OpenAI(api_key=api_key)
 
 def call_beer_game_gpt(user_message: str):
-    """Call the custom GPT to get an order and structured data."""
-    gpt_id = os.getenv("GPT_ID")
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
+    """Call the Beer Game GPT and return the order and any structured data.
+
+    Uses a custom GPT model specified by the ``GPT_ID`` environment variable,
+    defaulting to ``gpt-50`` if unset.
+    """
+
+    gpt_id = os.getenv("GPT_ID", "gpt-50")
+
+    request_args = {
+        "model": "gpt-4o",
+        "gpt": gpt_id,
+        "messages": [
             {"role": "system", "content": "You are Daybreak Beer Game Strategist."},
             {"role": "user", "content": user_message},
         ],
-        tool_choice="auto",
-        gpt=gpt_id,
-    )
+        "tool_choice": "auto",
+    }
+
+    response = client.chat.completions.create(**request_args)
     reply = response.choices[0].message.content
     print("FULL RESPONSE:\n", reply)
 
