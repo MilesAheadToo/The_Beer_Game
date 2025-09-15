@@ -31,6 +31,8 @@ import {
 } from '@mui/material';
 import { PlayArrow, Edit, Delete, Add, Settings, FileDownloadOutlined, SportsEsports, PersonOutline } from '@mui/icons-material';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { isGroupAdmin as isGroupAdminUser } from '../utils/authUtils';
 import gameApi from '../services/gameApi';
 // Removed Chakra UI components to avoid runtime errors when the Chakra provider
 // isn't available. Using MUI components exclusively ensures the page renders
@@ -46,6 +48,9 @@ const GamesList = () => {
   const [modelStatus, setModelStatus] = useState({ is_trained: false });
   const [loadingModelStatus, setLoadingModelStatus] = useState(true);
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isGroupAdmin = isGroupAdminUser(user);
+  const scConfigBasePath = isGroupAdmin ? '/admin/group/supply-chain-configs' : '/supply-chain-config';
   
   // Form state
   const [formData, setFormData] = useState({
@@ -328,7 +333,7 @@ const GamesList = () => {
           <Button
             variant="outlined"
             startIcon={<SportsEsports />}
-            onClick={() => navigate('/supply-chain-config')}
+            onClick={() => navigate(scConfigBasePath)}
           >
             Game Configuration
           </Button>
@@ -368,7 +373,7 @@ const GamesList = () => {
           <Button variant="outlined" startIcon={<Settings />} onClick={() => navigate('/system-config')}>
             SC Configuration
           </Button>
-          <Button variant="outlined" startIcon={<SportsEsports />} onClick={() => navigate('/supply-chain-config')}>
+          <Button variant="outlined" startIcon={<SportsEsports />} onClick={() => navigate(scConfigBasePath)}>
             Game Configuration
           </Button>
           <Button variant="outlined" startIcon={<PersonOutline />} onClick={() => navigate('/players')}>
