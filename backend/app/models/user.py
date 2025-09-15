@@ -68,6 +68,8 @@ class UserPublic(UserBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    is_superuser: bool = False
+    roles: List[str] = Field(default_factory=list)
     last_login: Optional[datetime] = None
     
     class Config:
