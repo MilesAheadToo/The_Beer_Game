@@ -46,14 +46,14 @@ COOKIE_COMMON_KWARGS = dict(httponly=True, samesite="lax", secure=False, path="/
 # This mirrors your default frontend creds to make dev easy.
 _FAKE_USERS = {
     # Keyed by email for canonical lookup
-    "admin@daybreak.ai": {
+    "superadmin@daybreak.ai": {
         "id": 1,
-        "email": "admin@daybreak.ai",
-        "name": "Admin",
-        "role": "admin",
+        "email": "superadmin@daybreak.ai",
+        "name": "Super Admin",
+        "role": "superadmin",
         # Dev-only password to simplify getting started
         "passwords": {"Daybreak@2025", "Daybreak@2025!"},
-        "aliases": {"admin"},
+        "aliases": {"superadmin"},
     }
 }
 

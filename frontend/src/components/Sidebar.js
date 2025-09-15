@@ -56,9 +56,14 @@ const adminMenuItems = [
   { text: 'User Management', icon: <UsersIcon />, path: '/admin/users' },
 ];
 
+const superAdminMenuItems = [
+  { text: 'Group Management', icon: <GroupsIcon />, path: '/admin/groups' },
+];
+
 const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
   const [adminOpen, setAdminOpen] = React.useState(false);
   const { user: currentUser } = useAuth() || {};
+  const isSuperAdmin = currentUser?.email === 'superadmin@daybreak.ai';
   const isAdmin = currentUser?.email === 'admin@daybreak.ai';
   const location = useLocation();
   
@@ -79,7 +84,7 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
       </Toolbar>
       <Divider />
       <List>
-        {menuItems.map((item) => (
+        {!isSuperAdmin && menuItems.map((item) => (
           <ListItem key={item.text} disablePadding>
             <ListItemButton
               component={Link}
@@ -105,9 +110,9 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
             </ListItemButton>
           </ListItem>
         ))}
-        
-        {/* Admin Section */}
-        {isAdmin && (
+
+        {/* Admin Section for regular admin */}
+        {!isSuperAdmin && isAdmin && (
           <>
             <Divider sx={{ my: 1 }} />
             <ListItemButton onClick={() => setAdminOpen(!adminOpen)}>
@@ -149,6 +154,34 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
             </Collapse>
           </>
         )}
+
+        {/* Superadmin menu */}
+        {isSuperAdmin && superAdminMenuItems.map((item) => (
+          <ListItem key={item.text} disablePadding>
+            <ListItemButton
+              component={Link}
+              to={item.path}
+              selected={location.pathname === item.path}
+              sx={{
+                '&.Mui-selected': {
+                  backgroundColor: 'primary.light',
+                  color: 'primary.contrastText',
+                  '&:hover': {
+                    backgroundColor: 'primary.light',
+                  },
+                  '& .MuiListItemIcon-root': {
+                    color: 'primary.contrastText',
+                  },
+                },
+              }}
+            >
+              <ListItemIcon sx={{ color: 'inherit' }}>
+                {item.icon}
+              </ListItemIcon>
+              <ListItemText primary={item.text} />
+            </ListItemButton>
+          </ListItem>
+        ))}
       </List>
     </div>
   );
