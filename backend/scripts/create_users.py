@@ -76,6 +76,10 @@ def get_or_create_default_group(session, admin_user):
     )
     session.add(group)
     session.flush()  # Ensure group ID is available
+    
+    # Skip supply_chain_configs relationship for now to avoid dependency issues
+    if hasattr(Group, 'supply_chain_configs'):
+        group.supply_chain_configs = []
     return group
 
 def get_db_connection_string():
