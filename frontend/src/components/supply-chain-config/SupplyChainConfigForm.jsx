@@ -460,7 +460,7 @@ const SupplyChainConfigForm = ({
               <Typography>Name: {formik.values.name}</Typography>
               <Typography>Description: {formik.values.description || 'N/A'}</Typography>
               <Typography>Status: {formik.values.is_active ? 'Active' : 'Inactive'}</Typography>
-              {(allowGroupSelection || formik.values.group_id) && (
+              {allowGroupSelection && (
                 <Typography>Group ID: {formik.values.group_id || (config.group_id ? String(config.group_id) : 'N/A')}</Typography>
               )}
             </Paper>

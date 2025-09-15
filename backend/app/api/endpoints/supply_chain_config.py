@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Iterable, Set
 from fastapi import APIRouter, Depends, HTTPException, status, Body
 from sqlalchemy.orm import Session
 
@@ -41,18 +41,44 @@ def get_node_or_404(db: Session, node_id: int, config_id: int):
     return node
 
 
+def _normalize_roles(roles: Optional[Iterable[str]]) -> Set[str]:
+    """Normalize role strings to a comparable set."""
+    normalized: Set[str] = set()
+    if not roles:
+        return normalized
+
+    for role in roles:
+        if isinstance(role, str):
+            normalized.add(role.strip().lower().replace(" ", "").replace("_", ""))
+    return normalized
+
+
 def _get_user_admin_group_id(db: Session, user: models.User) -> Optional[int]:
     """Return the group ID managed by the provided user, if any."""
     if user.is_superuser:
         return None
 
-    result = (
+    # First, check if the user is explicitly registered as the group's primary admin
+    direct_group = (
         db.query(models.Group)
         .filter(models.Group.admin_id == user.id)
         .first()
     )
-    if result:
-        return result.id
+    if direct_group:
+        return direct_group.id
+
+    # Fall back to role-based group admins tied to their group's membership
+    normalized_roles = _normalize_roles(getattr(user, "roles", []))
+    is_group_admin = "groupadmin" in normalized_roles or "admin" in normalized_roles
+    if is_group_admin and user.group_id:
+        group = (
+            db.query(models.Group)
+            .filter(models.Group.id == user.group_id)
+            .first()
+        )
+        if group:
+            return group.id
+
     return None
 
 

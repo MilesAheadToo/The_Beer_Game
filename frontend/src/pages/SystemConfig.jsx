@@ -23,6 +23,8 @@ import {
   Select,
 } from '@chakra-ui/react';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
+import { isGroupAdmin as isGroupAdminUser } from '../utils/authUtils';
 
 const DEFAULTS = {
   order_leadtime: { min: 0, max: 8 },
@@ -52,6 +54,9 @@ export default function SystemConfig() {
   const [selectedId, setSelectedId] = useState(null);
   const [counts, setCounts] = useState({ items: 0, nodes: 0, lanes: 0 });
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isGroupAdmin = isGroupAdminUser(user);
+  const scConfigBasePath = isGroupAdmin ? '/admin/group/supply-chain-configs' : '/supply-chain-config';
   useEffect(() => {
     (async () => {
       let cfgName;
@@ -151,7 +156,7 @@ export default function SystemConfig() {
               ))}
             </Select>
           </FormControl>
-          <Button colorScheme="blue" onClick={() => navigate('/supply-chain-config/new')}>New</Button>
+          <Button colorScheme="blue" onClick={() => navigate(`${scConfigBasePath}/new`)}>New</Button>
         </Grid>
         <Table variant='simple' size='sm'>
           <Thead>
@@ -197,7 +202,7 @@ export default function SystemConfig() {
           <Button
             mt={2}
             colorScheme="teal"
-            onClick={() => navigate(`/supply-chain-config/edit/${selectedId}`)}
+            onClick={() => navigate(`${scConfigBasePath}/edit/${selectedId}`)}
             isDisabled={!selectedId || name === 'Undefined'}
           >
             Define Items, Nodes, Lanes
