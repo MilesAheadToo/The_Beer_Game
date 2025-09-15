@@ -23,6 +23,7 @@ from app.models.session import TokenBlacklist, UserSession
 from app.models.game import Game, GameStatus, Round, PlayerAction
 from app.models.group import Group
 from scripts.seed_core_config import seed_core_config
+from app.core.security import get_password_hash
 
 # Ensure all models are imported and registered with SQLAlchemy
 # This is necessary for proper relationship resolution
@@ -113,35 +114,45 @@ async def init_db():
             # Add any initial data here if needed
             logger.info("Adding initial data...")
             
-            # Check if admin user already exists
-            result = await db.execute(
-                select(User).where(User.email == settings.FIRST_SUPERUSER)
+            # Check if superadmin user already exists
+            superadmin_email = os.getenv(
+                "SUPERADMIN_EMAIL", "superadmin@daybreak.ai"
             )
-            admin = result.scalars().first()
+            superadmin_password = os.getenv(
+                "SUPERADMIN_PASSWORD", "Daybreak@2025"
+            )
 
-            if not admin:
-                logger.info("Creating admin user...")
-                admin = User(
-                    email=settings.FIRST_SUPERUSER,
-                    hashed_password=settings.FIRST_SUPERUSER_PASSWORD,
+            result = await db.execute(
+                select(User).where(User.email == superadmin_email)
+            )
+            superadmin = result.scalars().first()
+
+            if not superadmin:
+                logger.info("Creating superadmin user...")
+                superadmin = User(
+                    username="superadmin",
+                    email=superadmin_email,
+                    hashed_password=get_password_hash(superadmin_password),
                     is_superuser=True,
-                    is_active=True
+                    is_active=True,
                 )
-                db.add(admin)
+                db.add(superadmin)
                 await db.commit()
-                await db.refresh(admin)
-                logger.info("Admin user created successfully")
+                await db.refresh(superadmin)
+                logger.info("Superadmin user created successfully")
 
             # Ensure default Daybreak group exists
             result = await db.execute(select(Group).where(Group.name == "Daybreak"))
             group = result.scalars().first()
             if not group:
-                group = Group(name="Daybreak", description="Default group", admin_id=admin.id)
+                group = Group(
+                    name="Daybreak", description="Default group", admin_id=superadmin.id
+                )
                 db.add(group)
                 await db.flush()
 
-            # Assign group to admin and any users missing a group
-            admin.group_id = group.id
+            # Assign group to superadmin and any users missing a group
+            superadmin.group_id = group.id
             await db.execute(
                 update(User).where(User.group_id.is_(None)).values(group_id=group.id)
             )
