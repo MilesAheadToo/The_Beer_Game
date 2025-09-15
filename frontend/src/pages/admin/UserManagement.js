@@ -1,6 +1,29 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FaTrash, FaPlus, FaUserShield, FaUser, FaEdit } from 'react-icons/fa';
+import {
+  Box,
+  Button,
+  Chip,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControl,
+  FormHelperText,
+  IconButton,
+  InputLabel,
+  MenuItem,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+} from '@mui/material';
+import { Add, Delete, Edit } from '@mui/icons-material';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../contexts/AuthContext';
 import { api, mixedGameApi } from '../../services/api';
@@ -46,14 +69,14 @@ const getUserType = (user) => {
   return 'player';
 };
 
-const getTypeBadgeClass = (type) => {
+const getTypeChipColor = (type) => {
   switch (type) {
     case 'system_admin':
-      return 'bg-purple-100 text-purple-800';
+      return 'secondary';
     case 'group_admin':
-      return 'bg-blue-100 text-blue-800';
+      return 'primary';
     default:
-      return 'bg-green-100 text-green-800';
+      return 'success';
   }
 };
 
@@ -71,27 +94,47 @@ function UserManagement() {
   const [users, setUsers] = useState([]);
   const [groups, setGroups] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [showAddUser, setShowAddUser] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
   const [form, setForm] = useState({ ...DEFAULT_FORM });
+  const [saving, setSaving] = useState(false);
   const [replacementPrompt, setReplacementPrompt] = useState({ ...DEFAULT_REPLACEMENT_PROMPT });
 
   const navigate = useNavigate();
   const { isGroupAdmin } = useAuth();
 
   const groupMap = useMemo(() => {
-    const entries = (groups || []).map((group) => [group.id, group.name]);
-    return Object.fromEntries(entries);
+    const map = {};
+    (groups || []).forEach((group) => {
+      map[group.id] = group.name;
+    });
+    return map;
   }, [groups]);
 
   const loadGroups = useCallback(async () => {
-    const response = await api.get('/groups');
-    setGroups(Array.isArray(response.data) ? response.data : []);
+    try {
+      const response = await api.get('/api/v1/groups');
+      const data = Array.isArray(response.data) ? response.data : [];
+      setGroups(data);
+      return data;
+    } catch (error) {
+      console.error('Error loading groups:', error);
+      setGroups([]);
+      throw error;
+    }
   }, []);
 
   const loadUsers = useCallback(async () => {
-    const response = await api.get('/auth/users/');
-    setUsers(Array.isArray(response.data) ? response.data : []);
+    try {
+      const response = await api.get('/api/v1/users');
+      const data = Array.isArray(response.data) ? response.data : [];
+      setUsers(data);
+      return data;
+    } catch (error) {
+      console.error('Error loading users:', error);
+      setUsers([]);
+      throw error;
+    }
   }, []);
 
   useEffect(() => {
@@ -116,31 +159,31 @@ function UserManagement() {
     fetchAll();
   }, [isGroupAdmin, navigate, loadGroups, loadUsers]);
 
-  const handleOpenModal = () => {
-    setEditingUser(null);
-    setForm({ ...DEFAULT_FORM });
-    setShowAddUser(true);
+  const handleOpenModal = (user = null) => {
+    if (user) {
+      setEditingUser(user);
+      setForm({
+        username: user.username || '',
+        email: user.email || '',
+        password: '',
+        userType: getUserType(user),
+        groupId: user.group_id ? String(user.group_id) : '',
+      });
+    } else {
+      setEditingUser(null);
+      setForm({ ...DEFAULT_FORM });
+    }
+    setDialogOpen(true);
   };
 
   const handleCloseModal = () => {
-    setShowAddUser(false);
+    setDialogOpen(false);
     setEditingUser(null);
     setForm({ ...DEFAULT_FORM });
   };
 
-  const handleEditUser = (user) => {
-    setEditingUser(user);
-    setForm({
-      username: user.username || '',
-      email: user.email || '',
-      password: '',
-      userType: getUserType(user),
-      groupId: user.group_id ? String(user.group_id) : '',
-    });
-    setShowAddUser(true);
-  };
-
-  const handleTypeChange = (value) => {
+  const handleTypeChange = (event) => {
+    const value = event.target.value;
     setForm((prev) => ({
       ...prev,
       userType: value,
@@ -180,25 +223,23 @@ function UserManagement() {
       payload.password = form.password;
     }
 
+    setSaving(true);
     try {
       if (editingUser) {
-        await api.put(`/users/${editingUser.id}`, payload);
-        toast.success('User updated');
+        await api.put(`/api/v1/users/${editingUser.id}`, payload);
+        toast.success('User updated successfully');
       } else {
-        await api.post('/users/', payload);
-        toast.success('User created');
+        await api.post('/api/v1/users', payload);
+        toast.success('User created successfully');
       }
 
       handleCloseModal();
-      try {
-        await Promise.all([loadUsers(), loadGroups()]);
-      } catch (refreshError) {
-        console.error('Error refreshing user list:', refreshError);
-        toast.error('User saved, but the list could not be refreshed.');
-      }
+      await Promise.all([loadUsers(), loadGroups()]);
     } catch (error) {
       const message = parseErrorMessage(error, 'Failed to save user');
       toast.error(message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -208,14 +249,9 @@ function UserManagement() {
     if (!window.confirm(confirmMessage)) return;
 
     try {
-      await api.delete(`/users/${user.id}`);
+      await api.delete(`/api/v1/users/${user.id}`);
       toast.success('User deleted');
-      try {
-        await Promise.all([loadUsers(), loadGroups()]);
-      } catch (refreshError) {
-        console.error('Error refreshing user list:', refreshError);
-        toast.error('User deleted, but the list could not be refreshed.');
-      }
+      await Promise.all([loadUsers(), loadGroups()]);
     } catch (error) {
       const detail = error?.response?.data?.detail;
       if (detail && typeof detail === 'object' && detail.code === 'replacement_required') {
@@ -251,17 +287,12 @@ function UserManagement() {
     }
 
     try {
-      await api.delete(`/users/${replacementPrompt.user.id}`, {
+      await api.delete(`/api/v1/users/${replacementPrompt.user.id}`, {
         params: { replacement_admin_id: replacementPrompt.selected },
       });
       toast.success('User deleted and replacement promoted to system admin');
       closeReplacementPrompt();
-      try {
-        await Promise.all([loadUsers(), loadGroups()]);
-      } catch (refreshError) {
-        console.error('Error refreshing user list:', refreshError);
-        toast.error('Changes applied, but the list could not be refreshed.');
-      }
+      await Promise.all([loadUsers(), loadGroups()]);
     } catch (error) {
       const message = parseErrorMessage(error, 'Failed to delete user');
       toast.error(message);
@@ -270,259 +301,191 @@ function UserManagement() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500" />
-      </div>
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
+        <CircularProgress />
+      </Box>
     );
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-800">User Management</h1>
-        <button
-          onClick={handleOpenModal}
-          className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center"
-        >
-          <FaPlus className="mr-2" /> Add User
-        </button>
-      </div>
+    <Box p={2}>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+        <Typography variant="h4">User Management</Typography>
+        <Button variant="contained" startIcon={<Add />} onClick={() => handleOpenModal(null)}>
+          Add User
+        </Button>
+      </Box>
 
-      {showAddUser && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-lg">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">{editingUser ? 'Edit User' : 'Add New User'}</h2>
-              <button onClick={handleCloseModal} className="text-gray-500 hover:text-gray-700">
-                ✕
-              </button>
-            </div>
+      <Table>
+        <TableHead>
+          <TableRow>
+            <TableCell>User</TableCell>
+            <TableCell>Email</TableCell>
+            <TableCell>Group</TableCell>
+            <TableCell>Type</TableCell>
+            <TableCell align="right">Actions</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {users.length === 0 ? (
+            <TableRow>
+              <TableCell colSpan={5} align="center">
+                <Typography variant="body2" color="text.secondary">
+                  No users found.
+                </Typography>
+              </TableCell>
+            </TableRow>
+          ) : (
+            users.map((user) => {
+              const type = getUserType(user);
+              return (
+                <TableRow key={user.id} hover>
+                  <TableCell>{user.username}</TableCell>
+                  <TableCell>{user.email}</TableCell>
+                  <TableCell>{groupMap[user.group_id] || '—'}</TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      label={USER_TYPE_LABELS[type] || 'User'}
+                      color={getTypeChipColor(type)}
+                    />
+                  </TableCell>
+                  <TableCell align="right">
+                    <IconButton onClick={() => handleOpenModal(user)} size="small" color="primary">
+                      <Edit fontSize="small" />
+                    </IconButton>
+                    <IconButton onClick={() => handleDeleteUser(user)} size="small" color="error">
+                      <Delete fontSize="small" />
+                    </IconButton>
+                  </TableCell>
+                </TableRow>
+              );
+            })
+          )}
+        </TableBody>
+      </Table>
 
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Username</label>
-                <input
-                  type="text"
-                  value={form.username}
-                  onChange={(event) => setForm((prev) => ({ ...prev, username: event.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
-                <input
-                  type="email"
-                  value={form.email}
-                  onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Password {editingUser ? '(leave blank to keep current)' : ''}
-                </label>
-                <input
-                  type="password"
-                  value={form.password}
-                  onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                  required={!editingUser}
-                />
-              </div>
-
-              <div>
-                <span className="block text-sm font-medium text-gray-700 mb-2">User Type</span>
-                <div className="flex flex-wrap gap-3">
-                  {USER_TYPE_OPTIONS.map((option) => (
-                    <label
-                      key={option.value}
-                      className={`flex items-center gap-2 px-3 py-2 border rounded-md cursor-pointer ${
-                        form.userType === option.value ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="userType"
-                        value={option.value}
-                        checked={form.userType === option.value}
-                        onChange={() => handleTypeChange(option.value)}
-                        className="h-4 w-4"
-                      />
-                      <span className="text-sm font-medium text-gray-700">{option.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              {form.userType !== 'system_admin' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Group</label>
-                  <select
-                    value={form.groupId}
-                    onChange={(event) => setForm((prev) => ({ ...prev, groupId: event.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md"
-                    required
-                  >
-                    <option value="">Select a group</option>
-                    {groups.map((group) => (
-                      <option key={group.id} value={group.id}>
-                        {group.name}
-                      </option>
-                    ))}
-                  </select>
-                  {groups.length === 0 && (
-                    <p className="text-xs text-red-600 mt-1">
-                      No groups available. Create a group before adding players or group admins.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <div className="flex justify-end space-x-3 pt-4">
-                <button
-                  type="button"
-                  onClick={handleCloseModal}
-                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
-                >
-                  {editingUser ? 'Save Changes' : 'Add User'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      <div className="table-surface overflow-hidden sm:rounded-lg">
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50">
-              <tr>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  User
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Email
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Group
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Type
-                </th>
-                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {users.map((user) => {
-                const type = getUserType(user);
-                return (
-                  <tr key={user.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="flex-shrink-0 h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                          {type === 'system_admin' ? (
-                            <FaUserShield className="h-5 w-5 text-blue-600" />
-                          ) : (
-                            <FaUser className="h-5 w-5 text-gray-400" />
-                          )}
-                        </div>
-                        <div className="ml-4">
-                          <div className="text-sm font-medium text-gray-900">{user.username}</div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{user.email}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {groupMap[user.group_id] || '—'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getTypeBadgeClass(type)}`}>
-                        {USER_TYPE_LABELS[type] || 'User'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <div className="flex items-center justify-end space-x-3">
-                        <button
-                          onClick={() => handleEditUser(user)}
-                          className="text-blue-600 hover:text-blue-900"
-                          title="Edit User"
-                        >
-                          <FaEdit />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteUser(user)}
-                          className="text-red-600 hover:text-red-900"
-                          title="Delete User"
-                        >
-                          <FaTrash />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {replacementPrompt.open && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-md">
-            <h3 className="text-lg font-semibold mb-4">Promote a Group Admin</h3>
-            <p className="text-sm text-gray-700 mb-3">
-              {replacementPrompt.message || 'Select a group admin to promote to system admin before deleting this user.'}
-            </p>
-            <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Replacement System Admin</label>
-              <select
-                value={replacementPrompt.selected}
-                onChange={(event) =>
-                  setReplacementPrompt((prev) => ({ ...prev, selected: event.target.value }))
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-md"
+      <Dialog open={dialogOpen} onClose={handleCloseModal} maxWidth="sm" fullWidth>
+        <DialogTitle>{editingUser ? 'Edit User' : 'Create User'}</DialogTitle>
+        <DialogContent dividers>
+          <Box
+            component="form"
+            id="user-management-form"
+            onSubmit={handleSubmit}
+            sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}
+          >
+            <TextField
+              label="Username"
+              value={form.username}
+              onChange={(event) => setForm((prev) => ({ ...prev, username: event.target.value }))}
+              fullWidth
+              required
+            />
+            <TextField
+              label="Email"
+              type="email"
+              value={form.email}
+              onChange={(event) => setForm((prev) => ({ ...prev, email: event.target.value }))}
+              fullWidth
+              required
+            />
+            <TextField
+              label={editingUser ? 'Password (leave blank to keep current)' : 'Password'}
+              type="password"
+              value={form.password}
+              onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))}
+              fullWidth
+              required={!editingUser}
+            />
+            <FormControl fullWidth>
+              <InputLabel id="user-type-label">User Type</InputLabel>
+              <Select
+                labelId="user-type-label"
+                label="User Type"
+                value={form.userType}
+                onChange={handleTypeChange}
               >
-                <option value="">Select a group admin</option>
-                {replacementPrompt.options.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.username || option.email}
-                    {option.group_name ? ` — ${option.group_name}` : ''}
-                  </option>
+                {USER_TYPE_OPTIONS.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuItem>
                 ))}
-              </select>
-            </div>
-            <div className="flex justify-end space-x-3">
-              <button
-                type="button"
-                onClick={closeReplacementPrompt}
-                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmReplacement}
-                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
-              >
-                Promote &amp; Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+              </Select>
+            </FormControl>
+            {form.userType !== 'system_admin' && (
+              <FormControl fullWidth>
+                <InputLabel id="group-select-label">Group</InputLabel>
+                <Select
+                  labelId="group-select-label"
+                  label="Group"
+                  value={form.groupId}
+                  onChange={(event) => setForm((prev) => ({ ...prev, groupId: event.target.value }))}
+                  required
+                >
+                  <MenuItem value="">
+                    <em>Select a group</em>
+                  </MenuItem>
+                  {groups.map((group) => (
+                    <MenuItem key={group.id} value={String(group.id)}>
+                      {group.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+                {groups.length === 0 && (
+                  <FormHelperText error>
+                    No groups available. Create a group before adding players or group admins.
+                  </FormHelperText>
+                )}
+              </FormControl>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseModal} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" form="user-management-form" variant="contained" disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={replacementPrompt.open} onClose={closeReplacementPrompt} maxWidth="xs" fullWidth>
+        <DialogTitle>Promote a Group Admin</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" mb={2}>
+            {replacementPrompt.message || 'Select a group admin to promote to system admin before deleting this user.'}
+          </Typography>
+          <FormControl fullWidth>
+            <InputLabel id="replacement-admin-label">Replacement System Admin</InputLabel>
+            <Select
+              labelId="replacement-admin-label"
+              label="Replacement System Admin"
+              value={replacementPrompt.selected}
+              onChange={(event) =>
+                setReplacementPrompt((prev) => ({ ...prev, selected: event.target.value }))
+              }
+            >
+              <MenuItem value="">
+                <em>Select a group admin</em>
+              </MenuItem>
+              {replacementPrompt.options.map((option) => (
+                <MenuItem key={option.id} value={String(option.id)}>
+                  {option.username || option.email}
+                  {option.group_name ? ` — ${option.group_name}` : ''}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeReplacementPrompt}>Cancel</Button>
+          <Button onClick={handleConfirmReplacement} variant="contained">
+            Promote & Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
   );
 }
 
