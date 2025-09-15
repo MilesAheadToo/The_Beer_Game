@@ -34,7 +34,9 @@ class PlayerAssignment(BaseModel):
     user_id: Optional[int] = None  # Required for human players
     strategy: Optional[PlayerStrategy] = PlayerStrategy.NAIVE  # For AI players
     can_see_demand: bool = False  # Whether this player can see customer demand
-    llm_model: Optional[str] = None  # Optional: selected LLM when using LLM strategies
+    llm_model: Optional[str] = Field(
+        default="gpt-4o-mini", description="Selected LLM when using LLM strategies"
+    )
     llm_config: Optional[dict] = None  # temperature, max_tokens, prompt
     basic_config: Optional[dict] = None  # heuristic params, e.g., base_stock_target, smoothing
 
@@ -60,6 +62,7 @@ class PlayerResponse(BaseModel):
     name: str
     strategy: Optional[PlayerStrategy]
     can_see_demand: bool
+    llm_model: Optional[str] = None
     is_ready: bool = False
 
     class Config:
@@ -69,4 +72,5 @@ class PlayerUpdate(BaseModel):
     """Schema for updating player information."""
     strategy: Optional[PlayerStrategy] = None
     can_see_demand: Optional[bool] = None
+    llm_model: Optional[str] = None
     is_ready: Optional[bool] = None

@@ -94,6 +94,7 @@ class MixedGameService:
                 is_ai=is_ai,
                 ai_strategy=(assignment.strategy.value if hasattr(assignment.strategy, 'value') else str(assignment.strategy)) if is_ai else None,
                 can_see_demand=assignment.can_see_demand,
+                llm_model=assignment.llm_model if is_ai else None,
                 user_id=assignment.user_id if not is_ai else None
             )
             self.db.add(player)
