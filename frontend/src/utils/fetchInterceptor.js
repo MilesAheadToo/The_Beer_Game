@@ -17,7 +17,9 @@ window.fetch = async function(input, init = {}) {
     const response = await nativeFetch(input, { ...options, headers, credentials });
 
     // Redirect to login on 401 for non-auth endpoints
-    if (response.status === 401 && !isAuth) {
+    // Avoid redirect loops if we're already on the login page
+    const isLoginPage = window.location.pathname.startsWith('/login');
+    if (response.status === 401 && !isAuth && !isLoginPage) {
       const back = encodeURIComponent(window.location.pathname + window.location.search);
       window.location.replace(`/login?redirect=${back}`);
       return new Response(null, { status: 401, statusText: 'Unauthorized' });

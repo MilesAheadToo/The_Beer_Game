@@ -7,7 +7,7 @@ import GamesList from "./pages/GamesList";
 import CreateMixedGame from "./pages/CreateMixedGame";
 import CreateGameFromConfig from "./components/game/CreateGameFromConfig";
 import GameBoard from "./pages/GameBoard";
-import Login from "./pages/Login";
+import Login from "./pages/Login.jsx";
 import { WebSocketProvider } from "./contexts/WebSocketContext";
 import { useAuth } from "./contexts/AuthContext";
 import "./utils/fetchInterceptor";
