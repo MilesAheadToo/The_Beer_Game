@@ -17,6 +17,7 @@ import {
 } from '@mui/material';
 import { Edit, Delete } from '@mui/icons-material';
 import api from '../../services/api';
+import { toast } from 'react-toastify';
 
 const defaultForm = {
   name: 'Daybreak',
@@ -37,6 +38,7 @@ const GroupManagement = () => {
   const [form, setForm] = useState(defaultForm);
   const [logoPreview, setLogoPreview] = useState(defaultForm.logo || '');
   const [logoFileName, setLogoFileName] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const fetchGroups = async () => {
     try {
@@ -107,16 +109,22 @@ const GroupManagement = () => {
   };
 
   const handleSubmit = async () => {
+    setSaving(true);
     try {
       if (editing) {
         await api.put(`/api/v1/groups/${editing}`, { name: form.name, description: form.description, logo: form.logo });
+        toast.success('Group updated successfully');
       } else {
         await api.post('/api/v1/groups', form);
+        toast.success('Group created successfully');
       }
       handleClose();
-      fetchGroups();
+      await fetchGroups();
     } catch (err) {
       console.error(err);
+      toast.error('Failed to save group. Please try again.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -223,8 +231,10 @@ const GroupManagement = () => {
           )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleClose}>Cancel</Button>
-          <Button onClick={handleSubmit} variant="contained">Save</Button>
+          <Button onClick={handleClose} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSubmit} variant="contained" disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
         </DialogActions>
       </Dialog>
     </Box>

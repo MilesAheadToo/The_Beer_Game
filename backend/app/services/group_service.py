@@ -1,5 +1,4 @@
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import SQLAlchemyError
 from fastapi import HTTPException, status
 
 from ..models import (
@@ -13,8 +12,17 @@ from ..models import (
     PlayerType,
     PlayerStrategy,
 )
+from ..models.supply_chain_config import (
+    Item,
+    Node,
+    Lane,
+    ItemNodeConfig,
+    MarketDemand,
+    NodeType,
+)
 from ..schemas.group import GroupCreate, GroupUpdate
 from ..core.security import get_password_hash
+from .supply_chain_config_service import SupplyChainConfigService
 
 class GroupService:
     def __init__(self, db: Session):
@@ -36,7 +44,7 @@ class GroupService:
                 email=admin_data.email,
                 full_name=admin_data.full_name,
                 hashed_password=hashed_password,
-                roles=["admin"],
+                roles=["groupadmin", "admin"],
                 group_id=group.id,
                 is_active=True,
                 is_superuser=False
@@ -46,37 +54,112 @@ class GroupService:
 
             group.admin_id = admin_user.id
             self.db.add(group)
+            self.db.flush()
 
             sc_config = SupplyChainConfig(
                 name="Default TBG",
                 description="Default supply chain configuration",
                 created_by=admin_user.id,
                 group_id=group.id,
-                is_active=False
+                is_active=True
             )
-            game = Game(
-                name="The Beer Game",
-                created_by=admin_user.id,
-                group_id=group.id,
-                status=GameStatus.CREATED
-            )
-            self.db.add_all([sc_config, game])
+            self.db.add(sc_config)
             self.db.flush()
 
-            # Create default players and corresponding user accounts
-            default_roles = [
-                ("retailer", PlayerRole.RETAILER),
-                ("wholesaler", PlayerRole.WHOLESALER),
-                ("distributor", PlayerRole.DISTRIBUTOR),
-                ("manufacturer", PlayerRole.MANUFACTURER),
+            item = Item(
+                config_id=sc_config.id,
+                name="Case of Beer",
+                description="Standard product for the Beer Game"
+            )
+            self.db.add(item)
+            self.db.flush()
+
+            node_specs = [
+                ("Retailer", NodeType.RETAILER),
+                ("Distributor", NodeType.DISTRIBUTOR),
+                ("Manufacturer", NodeType.MANUFACTURER),
+                ("Supplier", NodeType.SUPPLIER),
+            ]
+            nodes = {}
+            for name, node_type in node_specs:
+                node = Node(
+                    config_id=sc_config.id,
+                    name=name,
+                    type=node_type,
+                )
+                self.db.add(node)
+                self.db.flush()
+                nodes[node_type] = node
+
+            lane_specs = [
+                (NodeType.SUPPLIER, NodeType.MANUFACTURER),
+                (NodeType.MANUFACTURER, NodeType.DISTRIBUTOR),
+                (NodeType.DISTRIBUTOR, NodeType.RETAILER),
+            ]
+            for upstream_type, downstream_type in lane_specs:
+                lane = Lane(
+                    config_id=sc_config.id,
+                    upstream_node_id=nodes[upstream_type].id,
+                    downstream_node_id=nodes[downstream_type].id,
+                    capacity=9999,
+                    lead_time_days={"min": 2, "max": 10},
+                )
+                self.db.add(lane)
+
+            self.db.flush()
+
+            for node in nodes.values():
+                node_config = ItemNodeConfig(
+                    item_id=item.id,
+                    node_id=node.id,
+                    inventory_target_range={"min": 10, "max": 20},
+                    initial_inventory_range={"min": 5, "max": 30},
+                    holding_cost_range={"min": 1.0, "max": 5.0},
+                    backlog_cost_range={"min": 5.0, "max": 10.0},
+                    selling_price_range={"min": 25.0, "max": 50.0},
+                )
+                self.db.add(node_config)
+
+            market_demand = MarketDemand(
+                config_id=sc_config.id,
+                item_id=item.id,
+                retailer_id=nodes[NodeType.RETAILER].id,
+                demand_pattern={"type": "constant", "params": {"value": 4}},
+            )
+            self.db.add(market_demand)
+            self.db.flush()
+
+            config_service = SupplyChainConfigService(self.db)
+            game_config = config_service.create_game_from_config(
+                sc_config.id,
+                {"name": "The Beer Game", "max_rounds": 50},
+            )
+
+            game = Game(
+                name=game_config.get("name", "The Beer Game"),
+                created_by=admin_user.id,
+                group_id=group.id,
+                status=GameStatus.CREATED,
+                max_rounds=game_config.get("max_rounds", 52),
+                config=game_config,
+                demand_pattern=game_config.get("demand_pattern", {}),
+            )
+            self.db.add(game)
+            self.db.flush()
+
+            default_users = [
+                {"username": "retailer", "email": "retailer@daybreak.ai", "full_name": "Retailer", "role": PlayerRole.RETAILER},
+                {"username": "distributor", "email": "distributor@daybreak.ai", "full_name": "Distributor", "role": PlayerRole.DISTRIBUTOR},
+                {"username": "manufacturer", "email": "manufacturer@daybreak.ai", "full_name": "Manufacturer", "role": PlayerRole.MANUFACTURER},
+                {"username": "supplier", "email": "supplier@daybreak.ai", "full_name": "Supplier", "role": PlayerRole.WHOLESALER},
             ]
 
             player_users = []
-            for username, role_enum in default_roles:
+            for spec in default_users:
                 user = User(
-                    username=username,
-                    email=f"{username}@daybreak.ai",
-                    full_name=username.capitalize(),
+                    username=spec["username"],
+                    email=spec["email"],
+                    full_name=spec["full_name"],
                     hashed_password=get_password_hash("Daybreak@2025"),
                     roles=["player"],
                     group_id=group.id,
@@ -85,25 +168,36 @@ class GroupService:
                 )
                 self.db.add(user)
                 self.db.flush()
-                player_users.append((user, role_enum))
+                player_users.append((user, spec["role"], spec["full_name"]))
 
             players = []
-            for user_obj, role_enum in player_users:
+            for user_obj, role_enum, display_name in player_users:
                 player = Player(
                     game_id=game.id,
                     user_id=user_obj.id,
-                    name=user_obj.full_name or user_obj.username,
+                    name=display_name,
                     role=role_enum,
-                    type=PlayerType.AI,
-                    strategy=PlayerStrategy.LLM_BASIC,
+                    type=PlayerType.HUMAN,
+                    strategy=PlayerStrategy.MANUAL,
                 )
                 players.append(player)
 
             self.db.add_all(players)
+
+            game.role_assignments = {
+                role_enum.value: {
+                    "is_ai": False,
+                    "agent_config_id": None,
+                    "user_id": user_obj.id,
+                }
+                for user_obj, role_enum, _ in player_users
+            }
+            self.db.add(game)
+
             self.db.commit()
             self.db.refresh(group)
             return group
-        except SQLAlchemyError as e:
+        except Exception:
             self.db.rollback()
             raise HTTPException(status_code=500, detail="Error creating group")
 

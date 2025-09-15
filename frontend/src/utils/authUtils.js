@@ -58,7 +58,7 @@ export const isGroupAdmin = (user) => {
 
 export const getDefaultLandingPath = (user) => {
   if (isSystemAdmin(user)) {
-    return '/system-config';
+    return '/admin/groups';
   }
 
   if (isGroupAdmin(user)) {
