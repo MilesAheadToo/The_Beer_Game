@@ -12,6 +12,7 @@ from app.models.base import Base
 from app.models.user import User
 from app.models.player import Player, PlayerRole, PlayerType, PlayerStrategy
 from app.models.group import Group
+from app.models.supply_chain_config import SupplyChainConfig  # noqa: F401
 from app.core.config import settings
 
 # Password hashing

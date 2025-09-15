@@ -149,7 +149,7 @@ services:
       - MYSQL_SERVER=db
       - MYSQL_PORT=3306
       - MYSQL_USER=beer_user
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-change-me-user}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-beer_password}
       - MYSQL_DB=beer_game
     depends_on:
       db:

@@ -15,7 +15,7 @@ from sqlalchemy.ext.declarative import declared_attr
 from enum import Enum as PyEnum
 from typing import List, Optional, TYPE_CHECKING
 import datetime
-from app.db.base import Base
+from .base import Base
 
 if TYPE_CHECKING:
     from .group import Group
