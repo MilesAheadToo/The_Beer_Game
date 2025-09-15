@@ -218,46 +218,14 @@ def init_db():
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         db = SessionLocal()
         
-        # Create default users if they don't exist
+        # Create default superadmin if it doesn't exist
         default_users = [
             {
-                "username": "admin",
-                "email": "admin@daybreak.ai",
+                "username": "superadmin",
+                "email": "superadmin@daybreak.ai",
                 "password": "Daybreak@2025",
-                "full_name": "System Administrator",
+                "full_name": "Super Admin",
                 "is_superuser": True,
-                "is_active": True
-            },
-            {
-                "username": "retailer",
-                "email": "retailer@daybreak.ai",
-                "password": "Daybreak@2025",
-                "full_name": "Retailer User",
-                "is_superuser": False,
-                "is_active": True
-            },
-            {
-                "username": "distributor",
-                "email": "distributor@daybreak.ai",
-                "password": "Daybreak@2025",
-                "full_name": "Distributor User",
-                "is_superuser": False,
-                "is_active": True
-            },
-            {
-                "username": "manufacturer",
-                "email": "manufacturer@daybreak.ai",
-                "password": "Daybreak@2025",
-                "full_name": "Manufacturer User",
-                "is_superuser": False,
-                "is_active": True
-            },
-            {
-                "username": "wholesaler",
-                "email": "wholesaler@daybreak.ai",
-                "password": "Daybreak@2025",
-                "full_name": "Wholesaler User",
-                "is_superuser": False,
                 "is_active": True
             }
         ]

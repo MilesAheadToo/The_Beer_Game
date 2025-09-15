@@ -3,16 +3,31 @@ import { Box, Button, TextField, Dialog, DialogActions, DialogContent, DialogTit
 import { Edit, Delete } from '@mui/icons-material';
 import api from '../../services/api';
 
+const defaultForm = {
+  name: 'Daybreak',
+  description: '',
+  logo: '/daybreak_logo.png',
+  admin: {
+    username: 'admin',
+    email: 'admin@daybreak.ai',
+    password: 'Daybreak@2025',
+    full_name: 'System Administrator'
+  }
+};
+
 const GroupManagement = () => {
   const [groups, setGroups] = useState([]);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ name: '', description: '', logo: '', admin: { username: '', email: '', password: '', full_name: '' } });
+  const [form, setForm] = useState(defaultForm);
 
   const fetchGroups = async () => {
     try {
       const res = await api.get('/api/v1/groups');
       setGroups(res.data);
+      if (res.data.length === 0) {
+        handleOpen(null);
+      }
     } catch (err) {
       setGroups([]);
     }
@@ -26,7 +41,7 @@ const GroupManagement = () => {
       setForm({ name: group.name, description: group.description || '', logo: group.logo || '', admin: { username: '', email: '', password: '', full_name: '' } });
     } else {
       setEditing(null);
-      setForm({ name: '', description: '', logo: '', admin: { username: '', email: '', password: '', full_name: '' } });
+      setForm(defaultForm);
     }
     setOpen(true);
   };
@@ -69,35 +84,38 @@ const GroupManagement = () => {
   return (
     <Box p={2}>
       <Button variant="contained" onClick={() => handleOpen(null)}>Add Group</Button>
-      <Table sx={{ mt: 2 }}>
-        <TableHead>
-          <TableRow>
-            <TableCell>Name</TableCell>
-            <TableCell>Description</TableCell>
-            <TableCell>Admin</TableCell>
-            <TableCell>Actions</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {groups.map(g => (
-            <TableRow key={g.id}>
-              <TableCell>{g.name}</TableCell>
-              <TableCell>{g.description}</TableCell>
-              <TableCell>{g.admin?.email}</TableCell>
-              <TableCell>
-                <IconButton onClick={() => handleOpen(g)}><Edit /></IconButton>
-                <IconButton onClick={() => handleDelete(g.id)}><Delete /></IconButton>
-              </TableCell>
+      {groups.length > 0 && (
+        <Table sx={{ mt: 2 }}>
+          <TableHead>
+            <TableRow>
+              <TableCell>Name</TableCell>
+              <TableCell>Description</TableCell>
+              <TableCell>Admin</TableCell>
+              <TableCell>Actions</TableCell>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHead>
+          <TableBody>
+            {groups.map(g => (
+              <TableRow key={g.id}>
+                <TableCell>{g.name}</TableCell>
+                <TableCell>{g.description}</TableCell>
+                <TableCell>{g.admin?.email}</TableCell>
+                <TableCell>
+                  <IconButton onClick={() => handleOpen(g)}><Edit /></IconButton>
+                  <IconButton onClick={() => handleDelete(g.id)}><Delete /></IconButton>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
       <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
         <DialogTitle>{editing ? 'Edit Group' : 'Create Group'}</DialogTitle>
         <DialogContent>
           <TextField margin="dense" label="Name" name="name" fullWidth value={form.name} onChange={handleChange} />
           <TextField margin="dense" label="Description" name="description" fullWidth value={form.description} onChange={handleChange} />
           <TextField margin="dense" label="Logo" name="logo" fullWidth value={form.logo} onChange={handleChange} />
+          <TextField margin="dense" label="SC Config" name="sc_config" fullWidth value="Default TBG" disabled />
           {!editing && (
             <>
               <TextField margin="dense" label="Admin Username" name="admin.username" fullWidth value={form.admin.username} onChange={handleChange} />

@@ -23,7 +23,12 @@ const Login = () => {
       if (!isAuthenticated) return;
       const redirectTo = searchParams.get('redirect');
 
-      // If admin/superadmin, honor redirect or go to players page
+      // Handle superadmin separately
+      const isSuperAdmin = user?.email === 'superadmin@daybreak.ai';
+      if (isSuperAdmin) {
+        navigate('/admin/groups', { replace: true });
+        return;
+      }
       const isAdmin = user?.is_superuser || (Array.isArray(user?.roles) && user.roles.includes('admin'));
       if (isAdmin) {
         navigate(redirectTo || '/players', { replace: true });
@@ -99,8 +104,13 @@ const Login = () => {
       
       if (success) {
         // After successful login: if non-admin, try to jump directly to their assigned game
+        const isSuperAdmin = loggedInUser?.email === 'superadmin@daybreak.ai';
         const isAdmin = loggedInUser?.is_superuser || (Array.isArray(loggedInUser?.roles) && loggedInUser.roles.includes('admin'));
-        if (!isAdmin) {
+        if (!isAdmin || isSuperAdmin) {
+          if (isSuperAdmin) {
+            navigate('/admin/groups', { replace: true });
+            return;
+          }
           try {
             const games = await mixedGameApi.getGames();
             const assigned = games.find(g => Array.isArray(g.players) && g.players.some(p => p.user_id === loggedInUser?.id));

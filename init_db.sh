@@ -39,11 +39,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- Insert default users if they don't exist
 INSERT IGNORE INTO users (username, email, hashed_password, full_name, is_superuser, is_active) VALUES
-('admin', 'admin@daybreak.ai', '\$2b\$12\$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'System Administrator', TRUE, TRUE),
-('retailer', 'retailer@daybreak.ai', '\$2b\$12\$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Retailer User', FALSE, TRUE),
-('distributor', 'distributor@daybreak.ai', '\$2b\$12\$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Distributor User', FALSE, TRUE),
-('manufacturer', 'manufacturer@daybreak.ai', '\$2b\$12\$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Manufacturer User', FALSE, TRUE),
-('wholesaler', 'wholesaler@daybreak.ai', '\$2b\$12\$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'Wholesaler User', FALSE, TRUE);
+('superadmin', 'superadmin@daybreak.ai', '\$2b\$12\$/FAxQ94QmW1WFdMZd5nKzegYJZkZSi.JUSX/4IvImY3cE2vtleAu6', 'Super Admin', TRUE, TRUE);
 
 -- Verify users were created
 SELECT id, username, email, is_superuser, is_active FROM users;

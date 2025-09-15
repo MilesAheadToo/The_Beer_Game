@@ -77,7 +77,7 @@ class GroupService:
                     username=username,
                     email=f"{username}@daybreak.ai",
                     full_name=username.capitalize(),
-                    hashed_password=get_password_hash("Daybreak2025"),
+                    hashed_password=get_password_hash("Daybreak@2025"),
                     roles=["player"],
                     group_id=group.id,
                     is_active=True,
