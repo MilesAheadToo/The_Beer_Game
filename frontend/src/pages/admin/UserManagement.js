@@ -56,6 +56,9 @@ function GroupPlayerManagement() {
   const navigate = useNavigate();
   const { isGroupAdmin, user } = useAuth();
   const systemAdmin = isSystemAdminUser(user);
+  const rawGroupId = user?.group_id;
+  const parsedGroupId = typeof rawGroupId === 'number' ? rawGroupId : Number(rawGroupId);
+  const groupId = Number.isFinite(parsedGroupId) ? parsedGroupId : null;
 
   const [players, setPlayers] = useState([]);
   const [groups, setGroups] = useState([]);
@@ -89,10 +92,19 @@ function GroupPlayerManagement() {
   }, []);
 
   const loadPlayers = useCallback(async () => {
+    if (!groupId) {
+      setPlayers([]);
+      return [];
+    }
+
     try {
-      const response = await api.get('/api/v1/users', { params: { limit: 250 } });
+      const response = await api.get('/api/v1/users', {
+        params: { limit: 250, user_type: 'player' },
+      });
       const data = Array.isArray(response.data) ? response.data : [];
-      const filtered = data.filter((item) => getUserType(item) === 'player');
+      const filtered = data.filter(
+        (item) => getUserType(item) === 'player' && item.group_id === groupId,
+      );
       setPlayers(filtered);
       return filtered;
     } catch (error) {
@@ -100,10 +112,14 @@ function GroupPlayerManagement() {
       setPlayers([]);
       throw error;
     }
-  }, []);
+  }, [groupId]);
 
   useEffect(() => {
     if (!isGroupAdmin || systemAdmin) {
+      return;
+    }
+
+    if (!groupId) {
       return;
     }
 
@@ -119,7 +135,7 @@ function GroupPlayerManagement() {
     };
 
     fetchAll();
-  }, [isGroupAdmin, systemAdmin, loadGroups, loadPlayers]);
+  }, [groupId, isGroupAdmin, systemAdmin, loadGroups, loadPlayers]);
 
   const groupMap = useMemo(() => {
     const map = {};
@@ -162,6 +178,11 @@ function GroupPlayerManagement() {
       return;
     }
 
+    if (!groupId) {
+      toast.error('Your account is not linked to a group. Please contact your system administrator.');
+      return;
+    }
+
     const payload = {
       username: trimmedUsername,
       email: trimmedEmail,
@@ -173,6 +194,8 @@ function GroupPlayerManagement() {
         return;
       }
       payload.password = form.password;
+      payload.group_id = groupId;
+      payload.user_type = 'player';
     } else if (form.password.trim()) {
       payload.password = form.password.trim();
     }
