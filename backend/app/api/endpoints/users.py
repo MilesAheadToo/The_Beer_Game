@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from typing import List, Any
+from typing import List, Any, Optional
 from sqlalchemy.orm import Session
 from ... import models
 from ...schemas.user import User, UserCreate, UserUpdate, UserInDB, UserPasswordChange
@@ -49,6 +49,7 @@ async def create_user(
 @router.delete("/{user_id}", response_model=dict)
 async def delete_user(
     user_id: int,
+    replacement_admin_id: Optional[int] = None,
     user_service: UserService = Depends(get_user_service),
     current_user: models.User = Depends(get_current_active_user)
 ):
@@ -60,7 +61,7 @@ async def delete_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not enough permissions"
         )
-    return user_service.delete_user(user_id, current_user)
+    return user_service.delete_user(user_id, current_user, replacement_admin_id)
 
 @router.put("/{user_id}", response_model=User)
 async def update_user(
