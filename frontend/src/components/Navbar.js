@@ -133,10 +133,10 @@ const Navbar = ({ handleDrawerToggle }) => {
               <Button
                 color="inherit"
                 startIcon={<GroupIcon />}
-                onClick={() => navigate('/admin/users')}
+                onClick={() => navigate('/system/users')}
                 sx={{
                   mx: 1,
-                  bgcolor: isActive('/admin/users') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  bgcolor: isActive('/system/users') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
                   '&:hover': {
                     bgcolor: 'rgba(255, 255, 255, 0.15)'
                   }

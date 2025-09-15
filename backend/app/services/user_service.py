@@ -277,11 +277,29 @@ class UserService:
         current_user: models.User,
         skip: int = 0,
         limit: int = 100,
+        user_type: Optional[str] = None,
     ) -> List[models.User]:
+        normalized_type = self._normalize_type(user_type) if user_type else None
+
         if current_user.is_superuser:
-            return self.get_users(skip=skip, limit=limit)
+            target_type = normalized_type or "group_admin"
+            users = (
+                self.db.query(models.User)
+                .order_by(models.User.username.asc())
+                .all()
+            )
+            filtered = [user for user in users if self._get_user_type(user) == target_type]
+
+            start = max(skip, 0)
+            end = start + limit if limit is not None else None
+            return filtered[start:end]
 
         if self._is_group_admin_user(current_user):
+            if normalized_type and normalized_type != "player":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Group admins can only view players",
+                )
             return self.list_group_players(current_user.group_id, skip=skip, limit=limit)
 
         raise HTTPException(
@@ -336,9 +354,18 @@ class UserService:
                 existing_roles=user.roles,
                 default_is_superuser=bool(user.is_superuser),
             )
+            if desired_type == "player" and user.user_type is None:
+                desired_type = "group_admin"
+
+            if desired_type != "group_admin":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="System administrators can only create group admin users",
+                )
+
             group, normalized_group_id = self._validate_group_assignment(user.group_id, desired_type)
             roles_source = user.roles
-            is_superuser_flag = desired_type == "system_admin"
+            is_superuser_flag = False
         else:
             if not current_user or not current_user.group_id:
                 raise HTTPException(
@@ -505,6 +532,51 @@ class UserService:
                     detail="Error updating user",
                 )
 
+        if (
+            acting_is_superuser
+            and user_id != current_user.id
+        ):
+            if target_type != "group_admin":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="System administrators can only manage group admin users",
+                )
+
+            normalized_update_type = (
+                self._normalize_type(user_update.user_type)
+                if user_update.user_type is not None
+                else None
+            )
+            if normalized_update_type and normalized_update_type != "group_admin":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="System administrators can only assign the group admin user type",
+                )
+
+            if user_update.is_superuser is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="System administrators cannot modify system permissions for group admins",
+                )
+
+            if user_update.roles is not None:
+                normalized_roles = set(self._normalized_roles(user_update.roles))
+                disallowed_roles = normalized_roles - {"groupadmin", "admin"}
+                if disallowed_roles:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="System administrators cannot assign custom roles to group admins",
+                    )
+
+            if user_update.is_active is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="System administrators cannot change activation status for group admins",
+                )
+
+            if user_update.group_id is not None:
+                self._validate_group_assignment(user_update.group_id, "group_admin")
+
         if user_update.email is not None:
             existing = self.get_user_by_email(user_update.email)
             if existing and existing.id != user_id:
@@ -628,6 +700,13 @@ class UserService:
         acting_is_superuser = bool(current_user.is_superuser)
         acting_is_group_admin = self._is_group_admin_user(current_user)
         user_type = self._get_user_type(db_user)
+        is_self_delete = user_id == current_user.id
+
+        if acting_is_superuser and not is_self_delete and user_type != "group_admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="System administrators can only delete group admin users",
+            )
 
         can_group_admin_delete = (
             acting_is_group_admin
