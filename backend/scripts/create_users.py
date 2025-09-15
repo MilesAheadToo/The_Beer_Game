@@ -25,16 +25,16 @@ def get_db_connection_string():
     encoded_password = quote_plus(password)
     return f"mysql+pymysql://{user}:{encoded_password}@{server}:{port}/{db_name}?charset=utf8mb4"
 
-def get_or_create_superadmin(session):
-    user = session.query(User).filter(User.email == "superadmin@daybreak.ai").first()
+def get_or_create_systemadmin(session):
+    user = session.query(User).filter(User.email == "systemadmin@daybreak.ai").first()
     if user:
-        print("Superadmin user already exists")
+        print("System administrator user already exists")
         return user
     user = User(
-        username="superadmin",
-        email="superadmin@daybreak.ai",
+        username="systemadmin",
+        email="systemadmin@daybreak.ai",
         hashed_password=hash_password("Daybreak@2025"),
-        full_name="Super Admin",
+        full_name="System Admin",
         is_active=True,
         is_superuser=True,
         last_login=datetime.utcnow(),
@@ -50,11 +50,11 @@ def main():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        superadmin = get_or_create_superadmin(db)
+        systemadmin = get_or_create_systemadmin(db)
         db.commit()
-        print(f"Superadmin user ready: {superadmin.email}")
+        print(f"System administrator user ready: {systemadmin.email}")
     except Exception as e:
-        print(f"Error creating superadmin: {e}")
+        print(f"Error creating system administrator: {e}")
         db.rollback()
     finally:
         db.close()

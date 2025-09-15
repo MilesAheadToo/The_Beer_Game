@@ -1,4 +1,5 @@
 import secrets
+import os
 import pyotp
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List
@@ -95,6 +96,12 @@ class AuthService:
         Raises:
             HTTPException: If authentication fails due to lockout or invalid MFA.
         """
+        systemadmin_email = (
+            os.getenv("SYSTEMADMIN_EMAIL")
+            or os.getenv("SUPERADMIN_EMAIL")
+            or "systemadmin@daybreak.ai"
+        )
+
         # First, try to find the user by username or email
         stmt = select(User).where(
             or_(User.username == username, User.email == username)
@@ -111,17 +118,30 @@ class AuthService:
                     "code": "user_not_found",
                     "message": (
                         "We couldn't find an account with that email. "
-                        "Please contact your superadmin to request login credentials."
+                        "Please contact your system administrator to request login credentials."
                     ),
-                    "contact_role": "superadmin",
+                    "contact_role": "systemadmin",
+                    "systemadmin_email": systemadmin_email,
                     "show_contact_form": True,
                 },
             )
 
         roles: List[str] = user.roles or []
-        is_superadmin = bool(user.is_superuser or "superadmin" in roles)
-        is_group_admin = "admin" in roles and not is_superadmin
-        is_player = "player" in roles
+        normalized_roles = [
+            str(role).strip().lower().replace(" ", "") if isinstance(role, str) else ""
+            for role in roles
+        ]
+        normalized_roles = [r.replace("_", "") for r in normalized_roles if r]
+
+        is_system_admin = bool(
+            user.is_superuser
+            or "systemadmin" in normalized_roles
+            or "superadmin" in normalized_roles
+        )
+        is_group_admin = (
+            "groupadmin" in normalized_roles or "admin" in normalized_roles
+        ) and not is_system_admin
+        is_player = "player" in normalized_roles
 
         # Check if the account is locked
         if user.failed_login_attempts >= settings.MAX_LOGIN_ATTEMPTS and \
@@ -141,19 +161,19 @@ class AuthService:
 
             if is_group_admin:
                 message = (
-                    "Incorrect password. Please contact your superadmin for assistance."
+                    "Incorrect password. Please contact your system administrator for assistance."
                 )
-                contact_role = "superadmin"
+                contact_role = "systemadmin"
             elif is_player:
                 message = (
                     "Incorrect password. Please contact your group admin for assistance."
                 )
-                contact_role = "group_admin"
-            elif is_superadmin:
+                contact_role = "groupadmin"
+            elif is_system_admin:
                 message = (
-                    "Incorrect password. Please verify your credentials or reach out to a fellow superadmin for support."
+                    "Incorrect password. Please verify your credentials or reach out to a fellow system administrator for support."
                 )
-                contact_role = "superadmin"
+                contact_role = "systemadmin"
             else:
                 message = (
                     "Incorrect password. Please contact your administrator for assistance."
@@ -166,6 +186,7 @@ class AuthService:
                     "code": "incorrect_password",
                     "message": message,
                     "contact_role": contact_role,
+                    "systemadmin_email": systemadmin_email,
                 },
             )
             

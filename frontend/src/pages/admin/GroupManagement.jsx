@@ -23,10 +23,10 @@ const defaultForm = {
   description: '',
   logo: '/daybreak_logo.png',
   admin: {
-    username: 'admin',
-    email: 'admin@daybreak.ai',
+    username: 'groupadmin',
+    email: 'groupadmin@daybreak.ai',
     password: 'Daybreak@2025',
-    full_name: 'System Administrator'
+    full_name: 'Group Administrator'
   }
 };
 

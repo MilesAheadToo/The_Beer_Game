@@ -20,10 +20,11 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import GroupIcon from '@mui/icons-material/Group';
-import TuneIcon from '@mui/icons-material/Tune';
+import GroupsIcon from '@mui/icons-material/Groups';
 import Logout from '@mui/icons-material/Logout';
 import { styled } from '@mui/material/styles';
 import { useAuth } from '../contexts/AuthContext';
+import { isGroupAdmin as isGroupAdminUser, isSystemAdmin as isSystemAdminUser } from '../utils/authUtils';
 
 const StyledAppBar = styled(AppBar)(({ theme }) => ({
   zIndex: theme.zIndex.drawer + 1,
@@ -34,11 +35,14 @@ const StyledAppBar = styled(AppBar)(({ theme }) => ({
 }));
 
 const Navbar = ({ handleDrawerToggle }) => {
-  const { logout, user, isAdmin } = useAuth();
+  const { logout, user, isGroupAdmin } = useAuth();
   const [anchorEl, setAnchorEl] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
   const open = Boolean(anchorEl);
+
+  const systemAdmin = isSystemAdminUser(user);
+  const groupAdmin = isGroupAdmin || isGroupAdminUser(user);
   
   const isActive = (path) => {
     return location.pathname === path || 
@@ -82,13 +86,13 @@ const Navbar = ({ handleDrawerToggle }) => {
           </Typography>
         </Box>
         <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, ml: 4 }}>
-          {isAdmin ? (
+          {systemAdmin ? (
             <>
-              <Button 
-                color="inherit" 
+              <Button
+                color="inherit"
                 startIcon={<DashboardIcon />}
                 onClick={() => navigate('/admin')}
-                sx={{ 
+                sx={{
                   mx: 1,
                   bgcolor: isActive('/admin') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
                   '&:hover': {
@@ -98,11 +102,11 @@ const Navbar = ({ handleDrawerToggle }) => {
               >
                 Admin Dashboard
               </Button>
-              <Button 
-                color="inherit" 
+              <Button
+                color="inherit"
                 startIcon={<SettingsIcon />}
                 onClick={() => navigate('/system-config')}
-                sx={{ 
+                sx={{
                   mx: 1,
                   bgcolor: isActive('/system-config') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
                   '&:hover': {
@@ -112,25 +116,39 @@ const Navbar = ({ handleDrawerToggle }) => {
               >
                 System Config
               </Button>
-              <Button 
-                color="inherit" 
-                startIcon={<TuneIcon />}
-                onClick={() => navigate('/admin?openSystemRanges=1')}
-                sx={{ 
+              <Button
+                color="inherit"
+                startIcon={<GroupsIcon />}
+                onClick={() => navigate('/admin/groups')}
+                sx={{
                   mx: 1,
-                  bgcolor: location.search.includes('openSystemRanges=1') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  bgcolor: isActive('/admin/groups') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
                   '&:hover': {
                     bgcolor: 'rgba(255, 255, 255, 0.15)'
                   }
                 }}
               >
-                Edit System Ranges
+                Group Management
               </Button>
-              <Button 
-                color="inherit" 
+              <Button
+                color="inherit"
+                startIcon={<GroupIcon />}
+                onClick={() => navigate('/admin/users')}
+                sx={{
+                  mx: 1,
+                  bgcolor: isActive('/admin/users') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  '&:hover': {
+                    bgcolor: 'rgba(255, 255, 255, 0.15)'
+                  }
+                }}
+              >
+                Manage Users
+              </Button>
+              <Button
+                color="inherit"
                 startIcon={<SportsEsportsIcon />}
                 onClick={() => navigate('/games')}
-                sx={{ 
+                sx={{
                   mx: 1,
                   bgcolor: isActive('/games') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
                   '&:hover': {
@@ -140,13 +158,58 @@ const Navbar = ({ handleDrawerToggle }) => {
               >
                 Manage Games
               </Button>
-              <Button 
-                color="inherit" 
-                startIcon={<GroupIcon />}
-                onClick={() => navigate('/users')}
-                sx={{ 
+            </>
+          ) : groupAdmin ? (
+            <>
+              <Button
+                color="inherit"
+                startIcon={<DashboardIcon />}
+                onClick={() => navigate('/admin')}
+                sx={{
                   mx: 1,
-                  bgcolor: isActive('/users') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  bgcolor: isActive('/admin') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  '&:hover': {
+                    bgcolor: 'rgba(255, 255, 255, 0.15)'
+                  }
+                }}
+              >
+                Admin Dashboard
+              </Button>
+              <Button
+                color="inherit"
+                startIcon={<SportsEsportsIcon />}
+                onClick={() => navigate('/games')}
+                sx={{
+                  mx: 1,
+                  bgcolor: isActive('/games') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  '&:hover': {
+                    bgcolor: 'rgba(255, 255, 255, 0.15)'
+                  }
+                }}
+              >
+                Manage Games
+              </Button>
+              <Button
+                color="inherit"
+                startIcon={<GroupsIcon />}
+                onClick={() => navigate('/admin/groups')}
+                sx={{
+                  mx: 1,
+                  bgcolor: isActive('/admin/groups') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  '&:hover': {
+                    bgcolor: 'rgba(255, 255, 255, 0.15)'
+                  }
+                }}
+              >
+                Group Management
+              </Button>
+              <Button
+                color="inherit"
+                startIcon={<GroupIcon />}
+                onClick={() => navigate('/admin/users')}
+                sx={{
+                  mx: 1,
+                  bgcolor: isActive('/admin/users') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
                   '&:hover': {
                     bgcolor: 'rgba(255, 255, 255, 0.15)'
                   }
@@ -157,11 +220,11 @@ const Navbar = ({ handleDrawerToggle }) => {
             </>
           ) : (
             <>
-              <Button 
-                color="inherit" 
+              <Button
+                color="inherit"
                 startIcon={<DashboardIcon />}
                 onClick={() => navigate('/dashboard')}
-                sx={{ 
+                sx={{
                   mx: 1,
                   bgcolor: isActive('/dashboard') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
                   '&:hover': {
@@ -171,11 +234,11 @@ const Navbar = ({ handleDrawerToggle }) => {
               >
                 My Dashboard
               </Button>
-              <Button 
-                color="inherit" 
+              <Button
+                color="inherit"
                 startIcon={<SportsEsportsIcon />}
                 onClick={() => navigate('/games')}
-                sx={{ 
+                sx={{
                   mx: 1,
                   bgcolor: isActive('/games') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
                   '&:hover': {
@@ -272,9 +335,9 @@ const Navbar = ({ handleDrawerToggle }) => {
           </ListItemIcon>
           Logout
         </MenuItem>
-        {isAdmin && (
+        {(groupAdmin || systemAdmin) && (
           <Box sx={{ p: 2, pt: 1, fontSize: '0.75rem', color: 'text.secondary' }}>
-            <Box>Admin User</Box>
+            <Box>{systemAdmin ? 'System Administrator' : 'Group Administrator'}</Box>
             <Box>{user.email}</Box>
           </Box>
         )}

@@ -83,20 +83,20 @@ def init_db(drop_tables=False):
         user_count = db.query(User).count()
         print(f"Found {user_count} users in the database.")
         
-        # If no users, create a superadmin user
+        # If no users, create a system administrator user
         if user_count == 0:
             from app.core.security import get_password_hash
             test_user = User(
-                username="superadmin",
-                email="superadmin@daybreak.ai",
+                username="systemadmin",
+                email="systemadmin@daybreak.ai",
                 hashed_password=get_password_hash("Daybreak@2025"),
-                full_name="Super Admin",
+                full_name="System Admin",
                 is_active=True,
                 is_superuser=True
             )
             db.add(test_user)
             db.commit()
-            print("Created superadmin user: superadmin@daybreak.ai / Daybreak@2025")
+            print("Created system administrator user: systemadmin@daybreak.ai / Daybreak@2025")
         
     except Exception as e:
         print(f"Error accessing database: {e}")

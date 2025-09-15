@@ -2,6 +2,11 @@
 import { createContext, useContext, useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { mixedGameApi } from '../services/api';
 import { toast } from 'react-toastify';
+import {
+  getNormalizedEmail,
+  isSystemAdmin,
+  normalizeRoles,
+} from '../utils/authUtils';
 
 // Session timeout in milliseconds (30 minutes)
 const SESSION_TIMEOUT = 30 * 60 * 1000;
@@ -204,9 +209,17 @@ export function AuthProvider({ children }) {
 
   // ----- Role helpers -----
   const hasRole = useCallback((role) => {
-    if (!user) return false;
-    const roles = Array.isArray(user.roles) ? user.roles : [];
-    return Boolean(user.is_superuser) || roles.includes(role);
+    if (!user || !role) return false;
+    if (isSystemAdmin(user)) return true;
+
+    const normalizedRoles = normalizeRoles(user.roles || []);
+    const [targetRole] = normalizeRoles([role]);
+
+    if (!targetRole) {
+      return false;
+    }
+
+    return normalizedRoles.includes(targetRole);
   }, [user]);
 
   const hasAnyRole = useCallback((roles = []) => {
@@ -219,10 +232,17 @@ export function AuthProvider({ children }) {
     return roles.every((r) => hasRole(r));
   }, [hasRole]);
 
-  const isAdmin = useMemo(() => {
+  const isGroupAdmin = useMemo(() => {
     if (!user) return false;
-    const roles = Array.isArray(user.roles) ? user.roles : [];
-    return Boolean(user.is_superuser) || roles.includes('admin');
+    if (isSystemAdmin(user)) return true;
+
+    const normalizedRoles = normalizeRoles(user.roles || []);
+    const normalizedEmail = getNormalizedEmail(user);
+
+    return (
+      normalizedRoles.includes('groupadmin') ||
+      normalizedEmail === 'groupadmin@daybreak.ai'
+    );
   }, [user]);
 
   const value = useMemo(() => ({
@@ -237,11 +257,11 @@ export function AuthProvider({ children }) {
     hasRole,
     hasAnyRole,
     hasAllRoles,
-    isAdmin,
+    isGroupAdmin,
     showTimeoutWarning,
     timeLeft,
     resetTimers, // Export resetTimers to allow manual reset from components
-  }), [isAuthenticated, user, loading, error, login, logout, refreshUser, hasRole, hasAnyRole, hasAllRoles, isAdmin, showTimeoutWarning, timeLeft, resetTimers]);
+  }), [isAuthenticated, user, loading, error, login, logout, refreshUser, hasRole, hasAnyRole, hasAllRoles, isGroupAdmin, showTimeoutWarning, timeLeft, resetTimers]);
 
   return (
     <AuthContext.Provider value={value}>

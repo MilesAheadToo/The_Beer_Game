@@ -23,23 +23,24 @@ db = SessionLocal()
 
 def reset_admin_password():
     try:
-        # Get admin user
-        admin = db.execute(text("SELECT * FROM users WHERE username = 'admin'")).first()
+        # Get system administrator user
+        admin = db.execute(text("SELECT * FROM users WHERE username = 'systemadmin'"))
+        admin = admin.first()
         if not admin:
-            print("Admin user not found")
+            print("System administrator user not found")
             return
-            
+
         # New password
         new_password = "Daybreak@2025"
         hashed_password = get_password_hash(new_password)
-        
+
         # Update password
         db.execute(
-            text("UPDATE users SET hashed_password = :password WHERE username = 'admin'"),
+            text("UPDATE users SET hashed_password = :password WHERE username = 'systemadmin'"),
             {"password": hashed_password}
         )
         db.commit()
-        print("Admin password has been reset successfully")
+        print("System administrator password has been reset successfully")
         
     except Exception as e:
         print(f"Error resetting password: {e}")

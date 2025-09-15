@@ -41,7 +41,7 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS group_id INT NULL,
 -- Insert default users if they don't exist
 -- Password for all users is 'Daybreak@2025' (hashed with bcrypt)
 INSERT IGNORE INTO users (username, email, hashed_password, full_name, is_superuser, is_active) VALUES
-('superadmin', 'superadmin@daybreak.ai', '$2b$12$/FAxQ94QmW1WFdMZd5nKzegYJZkZSi.JUSX/4IvImY3cE2vtleAu6', 'Super Admin', TRUE, TRUE)
+('systemadmin', 'systemadmin@daybreak.ai', '$2b$12$/FAxQ94QmW1WFdMZd5nKzegYJZkZSi.JUSX/4IvImY3cE2vtleAu6', 'System Admin', TRUE, TRUE)
 ON DUPLICATE KEY UPDATE
     email = VALUES(email),
     full_name = VALUES(full_name),

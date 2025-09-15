@@ -1,17 +1,17 @@
 import { useState } from 'react';
 
-const DEFAULT_SUPERADMIN_EMAIL = 'superadmin@daybreak.ai';
+const DEFAULT_SYSTEMADMIN_EMAIL = 'systemadmin@daybreak.ai';
 
-const ContactSuperadminForm = ({ email, superadminEmail = DEFAULT_SUPERADMIN_EMAIL, onClose }) => {
+const ContactSystemAdminForm = ({ email, systemAdminEmail = DEFAULT_SYSTEMADMIN_EMAIL, onClose }) => {
   const [name, setName] = useState('');
   const [notes, setNotes] = useState('');
-  const contactEmail = superadminEmail || DEFAULT_SUPERADMIN_EMAIL;
+  const contactEmail = systemAdminEmail || DEFAULT_SYSTEMADMIN_EMAIL;
 
   const handleSubmit = (event) => {
     event.preventDefault();
 
     const lines = [];
-    lines.push('Hello Superadmin,');
+    lines.push('Hello System Administrator,');
 
     if (name.trim()) {
       lines.push(`My name is ${name.trim()}.`);
@@ -45,7 +45,7 @@ const ContactSuperadminForm = ({ email, superadminEmail = DEFAULT_SUPERADMIN_EMA
     <div className="mt-6 rounded-lg border border-indigo-200 bg-white p-6 shadow-sm">
       <div className="flex items-start justify-between">
         <div>
-          <h3 className="text-lg font-semibold text-gray-900">Request access from your superadmin</h3>
+          <h3 className="text-lg font-semibold text-gray-900">Request access from your system administrator</h3>
           <p className="mt-2 text-sm text-gray-600">
             We couldn't find an account associated with{' '}
             <span className="font-medium text-gray-900">{email || 'your email address'}</span>. Fill out the form below to
@@ -81,7 +81,7 @@ const ContactSuperadminForm = ({ email, superadminEmail = DEFAULT_SUPERADMIN_EMA
 
         <div>
           <label htmlFor="contact-notes" className="block text-sm font-medium text-gray-700">
-            Message to your superadmin (optional)
+            Message to your system administrator (optional)
           </label>
           <textarea
             id="contact-notes"
@@ -90,7 +90,7 @@ const ContactSuperadminForm = ({ email, superadminEmail = DEFAULT_SUPERADMIN_EMA
             onChange={(event) => setNotes(event.target.value)}
             rows={4}
             className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-            placeholder="Let your superadmin know how they can help."
+            placeholder="Let your system administrator know how they can help."
           />
         </div>
 
@@ -98,12 +98,12 @@ const ContactSuperadminForm = ({ email, superadminEmail = DEFAULT_SUPERADMIN_EMA
           type="submit"
           className="w-full rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
         >
-          Open email to superadmin
+          Open email to system administrator
         </button>
       </form>
 
       <p className="mt-4 text-xs text-gray-500">
-        Prefer to reach out another way? Contact your superadmin directly at{' '}
+        Prefer to reach out another way? Contact your system administrator directly at{' '}
         <a className="font-medium text-indigo-600 hover:text-indigo-500" href={`mailto:${contactEmail}`}>
           {contactEmail}
         </a>
@@ -113,4 +113,4 @@ const ContactSuperadminForm = ({ email, superadminEmail = DEFAULT_SUPERADMIN_EMA
   );
 };
 
-export default ContactSuperadminForm;
+export default ContactSystemAdminForm;

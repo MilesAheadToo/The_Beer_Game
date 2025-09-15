@@ -114,45 +114,49 @@ async def init_db():
             # Add any initial data here if needed
             logger.info("Adding initial data...")
             
-            # Check if superadmin user already exists
-            superadmin_email = os.getenv(
-                "SUPERADMIN_EMAIL", "superadmin@daybreak.ai"
+            # Check if system administrator user already exists
+            systemadmin_email = (
+                os.getenv("SYSTEMADMIN_EMAIL")
+                or os.getenv("SUPERADMIN_EMAIL")
+                or "systemadmin@daybreak.ai"
             )
-            superadmin_password = os.getenv(
-                "SUPERADMIN_PASSWORD", "Daybreak@2025"
+            systemadmin_password = (
+                os.getenv("SYSTEMADMIN_PASSWORD")
+                or os.getenv("SUPERADMIN_PASSWORD")
+                or "Daybreak@2025"
             )
 
             result = await db.execute(
-                select(User).where(User.email == superadmin_email)
+                select(User).where(User.email == systemadmin_email)
             )
-            superadmin = result.scalars().first()
+            systemadmin = result.scalars().first()
 
-            if not superadmin:
-                logger.info("Creating superadmin user...")
-                superadmin = User(
-                    username="superadmin",
-                    email=superadmin_email,
-                    hashed_password=get_password_hash(superadmin_password),
+            if not systemadmin:
+                logger.info("Creating system administrator user...")
+                systemadmin = User(
+                    username="systemadmin",
+                    email=systemadmin_email,
+                    hashed_password=get_password_hash(systemadmin_password),
                     is_superuser=True,
                     is_active=True,
                 )
-                db.add(superadmin)
+                db.add(systemadmin)
                 await db.commit()
-                await db.refresh(superadmin)
-                logger.info("Superadmin user created successfully")
+                await db.refresh(systemadmin)
+                logger.info("System administrator user created successfully")
 
             # Ensure default Daybreak group exists
             result = await db.execute(select(Group).where(Group.name == "Daybreak"))
             group = result.scalars().first()
             if not group:
                 group = Group(
-                    name="Daybreak", description="Default group", admin_id=superadmin.id
+                    name="Daybreak", description="Default group", admin_id=systemadmin.id
                 )
                 db.add(group)
                 await db.flush()
 
-            # Assign group to superadmin and any users missing a group
-            superadmin.group_id = group.id
+            # Assign group to system administrator and any users missing a group
+            systemadmin.group_id = group.id
             await db.execute(
                 update(User).where(User.group_id.is_(None)).values(group_id=group.id)
             )
