@@ -117,8 +117,8 @@ seed:
 	docker-compose run --rm create-users
 
 reset-admin:
-        @echo "\n[+] Resetting system administrator password to Daybreak@2025..."; \
-        docker compose exec backend python scripts/reset_admin_password.py
+	@echo "\n[+] Resetting superadmin password to Daybreak@2025..."; \
+	docker compose exec backend python scripts/reset_admin_password.py
 
 proxy-url:
 	@echo "Current host: $(HOST) (set with HOST=ip make ...)"; \
