@@ -15,9 +15,23 @@ def get_group_service(db: Session = Depends(get_db)) -> GroupService:
 
 @router.get("/", response_model=List[GroupSchema])
 def list_groups(group_service: GroupService = Depends(get_group_service), current_user: User = Depends(get_current_active_user)):
-    if not current_user.is_superuser:
-        raise HTTPException(status_code=403, detail="Not enough permissions")
-    return group_service.get_groups()
+    if current_user.is_superuser:
+        return group_service.get_groups()
+
+    roles = current_user.roles or []
+    normalized_roles = {
+        "".join(ch for ch in str(role).lower() if ch.isalnum())
+        for role in roles
+        if role is not None
+    }
+
+    is_group_admin = "groupadmin" in normalized_roles or "admin" in normalized_roles
+
+    if is_group_admin and current_user.group_id:
+        group = group_service.get_group(current_user.group_id)
+        return [group]
+
+    raise HTTPException(status_code=403, detail="Not enough permissions")
 
 @router.post("/", response_model=GroupSchema, status_code=status.HTTP_201_CREATED)
 def create_group(group_in: GroupCreate, group_service: GroupService = Depends(get_group_service), current_user: User = Depends(get_current_active_user)):
