@@ -33,7 +33,8 @@ class UserBase(BaseModel):
     full_name: Optional[str] = None
     is_active: bool = True
     is_superuser: bool = False
-    roles: List[str] = []
+    group_id: Optional[int] = None
+    roles: List[str] = Field(default_factory=list)
 
     class Config:
         from_attributes = True  # Updated from orm_mode in Pydantic v2
@@ -123,6 +124,7 @@ class User(Base):
             "full_name": self.full_name,
             "is_active": self.is_active,
             "is_superuser": self.is_superuser,
+            "group_id": self.group_id,
             "roles": self.roles or [],
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

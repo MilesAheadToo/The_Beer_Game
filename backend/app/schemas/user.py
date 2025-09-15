@@ -1,17 +1,21 @@
 from typing import Optional, List
-from pydantic import BaseModel, EmailStr, Field, validator
 from datetime import datetime
+from typing import List, Optional, Literal
+from pydantic import BaseModel, EmailStr, Field, validator
 
 class UserBase(BaseModel):
     """Base user schema with common fields."""
     username: str = Field(..., min_length=3, max_length=50, regex="^[a-zA-Z0-9_-]+$")
     email: EmailStr
     full_name: Optional[str] = Field(None, max_length=100)
+    group_id: Optional[int] = None
+    roles: List[str] = Field(default_factory=list)
 
 class UserCreate(UserBase):
     """Schema for creating a new user."""
     password: str = Field(default='Daybreak@2025', min_length=8, max_length=50)
     is_superuser: Optional[bool] = False
+    user_type: Optional[Literal['player', 'group_admin', 'system_admin']] = None
     
     @validator('password')
     def password_strength(cls, v):
@@ -27,16 +31,21 @@ class UserCreate(UserBase):
 
 class UserUpdate(BaseModel):
     """Schema for updating user information."""
+    username: Optional[str] = Field(None, min_length=3, max_length=50, regex="^[a-zA-Z0-9_-]+$")
     email: Optional[EmailStr] = None
     full_name: Optional[str] = Field(None, max_length=100)
     password: Optional[str] = Field(None, min_length=8, max_length=50)
     is_active: Optional[bool] = None
     is_superuser: Optional[bool] = None
+    group_id: Optional[int] = None
+    roles: Optional[List[str]] = None
+    user_type: Optional[Literal['player', 'group_admin', 'system_admin']] = None
 
 class UserInDBBase(UserBase):
     """Base schema for user data in the database."""
     id: int
     is_active: bool
+    is_superuser: bool
     created_at: datetime
     updated_at: datetime
     
