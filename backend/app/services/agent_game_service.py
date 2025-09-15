@@ -189,7 +189,8 @@ class AgentGameService:
             order_quantity=order_quantity,
             received_quantity=0,  # Will be updated when upstream ships
             inventory=inventory.current_inventory,
-            backlog=inventory.current_backlog
+            backlog=inventory.current_backlog,
+            comment=agent.get_last_explanation_comment(),
         )
         self.db.add(player_round)
         
