@@ -60,7 +60,7 @@ const groupAdminMenuItems = [
 const systemAdminMenuItems = [
   { text: 'System Config', icon: <SettingsIcon />, path: '/system-config' },
   { text: 'Group Management', icon: <GroupsIcon />, path: '/admin/groups' },
-  { text: 'User Management', icon: <UsersIcon />, path: '/admin/users' },
+  { text: 'Group Admins', icon: <UsersIcon />, path: '/admin/group-admins' },
 ];
 
 const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {

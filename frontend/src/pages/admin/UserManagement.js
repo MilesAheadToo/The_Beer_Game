@@ -4,7 +4,7 @@ import { FaTrash, FaPlus, FaUserShield, FaUser, FaEdit } from 'react-icons/fa';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../contexts/AuthContext';
 import { api, mixedGameApi } from '../../services/api';
-import { normalizeRoles } from '../../utils/authUtils';
+import { normalizeRoles, isSystemAdmin as isSystemAdminUser } from '../../utils/authUtils';
 
 const USER_TYPE_OPTIONS = [
   { value: 'player', label: 'Player' },
@@ -77,7 +77,8 @@ function UserManagement() {
   const [replacementPrompt, setReplacementPrompt] = useState({ ...DEFAULT_REPLACEMENT_PROMPT });
 
   const navigate = useNavigate();
-  const { isGroupAdmin } = useAuth();
+  const { isGroupAdmin, user } = useAuth();
+  const systemAdmin = isSystemAdminUser(user);
 
   const groupMap = useMemo(() => {
     const entries = (groups || []).map((group) => [group.id, group.name]);
@@ -100,6 +101,11 @@ function UserManagement() {
       return;
     }
 
+    if (systemAdmin) {
+      navigate('/admin/group-admins');
+      return;
+    }
+
     const fetchAll = async () => {
       setIsLoading(true);
       try {
@@ -114,7 +120,7 @@ function UserManagement() {
     };
 
     fetchAll();
-  }, [isGroupAdmin, navigate, loadGroups, loadUsers]);
+  }, [isGroupAdmin, systemAdmin, navigate, loadGroups, loadUsers]);
 
   const handleOpenModal = () => {
     setEditingUser(null);
