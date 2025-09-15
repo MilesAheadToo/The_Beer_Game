@@ -1,7 +1,17 @@
 from typing import List, Dict, Optional, Any, Tuple
 import random
+import statistics
 from enum import Enum
 from collections import deque
+
+from .beer_game_xai_explain import (
+    Obs,
+    Forecast,
+    RoleParams,
+    SupervisorContext,
+    explain_role_decision,
+    explain_supervisor_adjustment,
+)
 
 # Import the LLM agent only when needed to avoid unnecessary dependencies
 try:  # pragma: no cover - optional import
@@ -70,21 +80,34 @@ class DaybreakCoordinator:
             return sum(values) / len(values)
         return None
 
-    def apply_override(self, agent_type: AgentType, base_order: float, context: Optional[Dict[str, Any]] = None) -> int:
-        """Apply the centralized override to the base order."""
+    def apply_override(
+        self,
+        agent_type: AgentType,
+        base_order: float,
+        context: Optional[Dict[str, Any]] = None,
+        week: Optional[int] = None,
+    ) -> Tuple[int, Optional[str]]:
+        """Apply the centralized override to the base order and return an explanation."""
+
         base = max(0.0, float(base_order))
         network_avg = self._network_average(agent_type)
         target = base
+        reasons: List[str] = []
+        global_notes: List[str] = []
+
         if network_avg is not None:
             target = (base + network_avg) / 2.0
+            reasons.append(f"align toward network avg {network_avg:.1f}")
 
         backlog = float(context.get("backlog", 0)) if context else 0.0
         inventory = float(context.get("inventory", 0)) if context else 0.0
 
         if backlog > inventory:
             target = max(target, base + (backlog - inventory))
-        elif inventory > backlog * 2:
+            reasons.append("backlog exceeds on-hand")
+        elif inventory > backlog * 2 and inventory > 0:
             target = min(target, base - (inventory - backlog) / 2.0)
+            reasons.append("inventory well above backlog")
 
         pct = self.get_override_pct(agent_type)
         max_adjustment = base * pct
@@ -97,7 +120,30 @@ class DaybreakCoordinator:
         adjusted = max(0.0, base + adjustment)
         final_order = int(round(adjusted))
         self._record_order(agent_type, final_order)
-        return final_order
+
+        pre_qty = int(round(base))
+        if context:
+            global_notes.append(f"inventory {inventory:.1f}, backlog {backlog:.1f}")
+            pipeline = context.get("pipeline")
+            if pipeline is not None:
+                global_notes.append(f"pipeline {float(pipeline):.1f}")
+
+        week_val = week if week is not None else int(context.get("week", 0)) if context else 0
+        supervisor_ctx = SupervisorContext(
+            max_scale_pct=pct * 100,
+            rule="stability_smoothing",
+            reasons=reasons,
+        )
+        explanation = explain_supervisor_adjustment(
+            role=agent_type.name.title(),
+            week=week_val,
+            pre_qty=pre_qty,
+            post_qty=final_order,
+            ctx=supervisor_ctx,
+            global_notes=global_notes or None,
+        )
+
+        return final_order, explanation
 
 class BeerGameAgent:
     def __init__(
@@ -126,6 +172,7 @@ class BeerGameAgent:
         self._llm_agent: Optional[LLMAgent] = None
         # Optional centralized coordinator for Daybreak variants
         self.central_coordinator = central_coordinator
+        self.last_explanation: Optional[str] = None
         
     def make_decision(
         self,
@@ -176,6 +223,9 @@ class BeerGameAgent:
         self.inventory = inventory_level
         self.backlog = backlog_level
 
+        prev_order = self.last_order
+        self.last_explanation = None
+
         # Make decision based on strategy
         if self.strategy == AgentStrategy.NAIVE:
             order = self._naive_strategy(current_demand)
@@ -187,6 +237,8 @@ class BeerGameAgent:
             order = self._llm_strategy(current_round, current_demand, upstream_data)
         elif self.strategy == AgentStrategy.DAYBREAK_DTCE:
             order = self._daybreak_dtce_strategy(
+                current_round,
+                prev_order,
                 current_demand,
                 upstream_data,
                 inventory_level,
@@ -195,6 +247,8 @@ class BeerGameAgent:
             )
         elif self.strategy == AgentStrategy.DAYBREAK_DTCE_CENTRAL:
             order = self._daybreak_central_strategy(
+                current_round,
+                prev_order,
                 current_demand,
                 upstream_data,
                 inventory_level,
@@ -330,6 +384,8 @@ class BeerGameAgent:
 
     def _daybreak_dtce_strategy(
         self,
+        current_round: int,
+        prev_order: Optional[int],
         current_demand: Optional[int],
         upstream_data: Optional[Dict],
         inventory_level: int,
@@ -344,12 +400,25 @@ class BeerGameAgent:
             incoming_shipments,
         )
         order = max(0, int(round(base_order)))
+        explanation = self._build_daybreak_explanation(
+            week=current_round,
+            inventory_level=inventory_level,
+            backlog_level=backlog_level,
+            incoming_shipments=incoming_shipments,
+            context=context,
+            action_qty=order,
+            prev_action=prev_order,
+            base_order=base_order,
+        )
+        self.last_explanation = explanation
         if self.central_coordinator:
             self.central_coordinator.register_decision(self.agent_type, order)
         return order
 
     def _daybreak_central_strategy(
         self,
+        current_round: int,
+        prev_order: Optional[int],
         current_demand: Optional[int],
         upstream_data: Optional[Dict],
         inventory_level: int,
@@ -363,9 +432,165 @@ class BeerGameAgent:
             backlog_level,
             incoming_shipments,
         )
+        final_order = max(0, int(round(base_order)))
+        supervisor_explanation: Optional[str] = None
         if self.central_coordinator:
-            return self.central_coordinator.apply_override(self.agent_type, base_order, context)
-        return max(0, int(round(base_order)))
+            final_order, supervisor_explanation = self.central_coordinator.apply_override(
+                self.agent_type,
+                base_order,
+                context,
+                week=current_round,
+            )
+
+        role_explanation = self._build_daybreak_explanation(
+            week=current_round,
+            inventory_level=inventory_level,
+            backlog_level=backlog_level,
+            incoming_shipments=incoming_shipments,
+            context=context,
+            action_qty=final_order,
+            prev_action=prev_order,
+            base_order=base_order,
+        )
+
+        if supervisor_explanation:
+            if role_explanation:
+                role_explanation = f"{role_explanation}\n\n{supervisor_explanation}"
+            else:
+                role_explanation = supervisor_explanation
+
+        self.last_explanation = role_explanation
+        return final_order
+
+    def _build_daybreak_explanation(
+        self,
+        week: int,
+        inventory_level: int,
+        backlog_level: int,
+        incoming_shipments: List[float],
+        context: Dict[str, Any],
+        action_qty: int,
+        prev_action: Optional[int],
+        base_order: float,
+    ) -> str:
+        try:
+            lead_time = max(1, len(incoming_shipments) or 2)
+            pipeline_orders = [int(round(x)) for x in self.order_history[-lead_time:]]
+            if not pipeline_orders and self.pipeline:
+                pipeline_orders = [int(round(x)) for x in self.pipeline[:lead_time]]
+            if not pipeline_orders:
+                pipeline_orders = [0] * lead_time
+
+            pipeline_shipments = [int(round(x)) for x in incoming_shipments[:lead_time]]
+            if not pipeline_shipments:
+                pipeline_shipments = [0] * lead_time
+
+            last_k_in = [int(round(x)) for x in self.demand_history[-lead_time:]] if self.demand_history else []
+            last_k_out = [int(round(x)) for x in self.order_history[-lead_time:]] if self.order_history else []
+            notes = self._format_daybreak_notes(context)
+
+            obs = Obs(
+                on_hand=int(inventory_level),
+                backlog=int(backlog_level),
+                pipeline_orders=pipeline_orders,
+                pipeline_shipments=pipeline_shipments,
+                last_k_orders_in=last_k_in,
+                last_k_shipments_in=pipeline_shipments,
+                last_k_orders_out=last_k_out,
+                notes=notes,
+            )
+
+            forecast_mean = float(context.get("forecast", 0.0)) if context else 0.0
+            forecast_mean_vec = [forecast_mean] * lead_time
+            demand_window = self.demand_history[-max(lead_time, 3):]
+            forecast_std_vec: Optional[List[float]] = None
+            if demand_window and len(demand_window) >= 2:
+                std_val = float(statistics.pstdev([float(x) for x in demand_window]))
+                if std_val > 0:
+                    forecast_std_vec = [std_val] * lead_time
+
+            forecast = Forecast(mean=forecast_mean_vec, std=forecast_std_vec)
+            params = RoleParams(
+                lead_time=lead_time,
+                service_level=0.95,
+                capacity_cap=None,
+                smoothing_lambda=0.0,
+            )
+
+            attribution = self._daybreak_actor_attribution(context, base_order, backlog_level)
+            whatifs = self._daybreak_whatifs(inventory_level, backlog_level)
+
+            explanation = explain_role_decision(
+                role=self.agent_type.name.title(),
+                week=week,
+                obs=obs,
+                action_qty=action_qty,
+                forecast=forecast,
+                params=params,
+                shadow_policy="base_stock",
+                actor_attribution=attribution,
+                whatif_cfg=whatifs,
+                prev_action_qty=prev_action,
+            )
+            return explanation
+        except Exception:
+            return f"Decision (Week {week}, {self.agent_type.name.title()}): order **{action_qty}** units upstream."
+
+    def _format_daybreak_notes(self, context: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not context:
+            return None
+        notes: List[str] = []
+        upstream_avg = context.get("upstream_avg")
+        if upstream_avg is not None:
+            notes.append(f"upstream avg {float(upstream_avg):.1f}")
+        local_avg = context.get("local_avg")
+        if local_avg is not None:
+            notes.append(f"recent order avg {float(local_avg):.1f}")
+        return "; ".join(notes) if notes else None
+
+    def _daybreak_actor_attribution(
+        self,
+        context: Optional[Dict[str, Any]],
+        base_order: float,
+        backlog_level: int,
+    ) -> Optional[Dict[str, float]]:
+        if not base_order:
+            return None
+        denom = max(1.0, abs(float(base_order)))
+        attribution: Dict[str, float] = {}
+
+        forecast_val = float(context.get("forecast", 0.0)) if context else 0.0
+        if forecast_val:
+            attribution["forecast_pull"] = max(-1.0, min(forecast_val / denom, 1.0))
+
+        pipeline_val = float(context.get("pipeline", 0.0)) if context else 0.0
+        if pipeline_val:
+            attribution["pipeline_cover"] = max(-1.0, min(-pipeline_val / denom, 1.0))
+
+        if backlog_level:
+            attribution["backlog_pressure"] = max(-1.0, min(backlog_level / denom, 1.0))
+
+        return attribution or None
+
+    def _daybreak_whatifs(
+        self,
+        inventory_level: int,
+        backlog_level: int,
+    ) -> Optional[Dict[str, float]]:
+        whatifs: Dict[str, float] = {}
+        if backlog_level > inventory_level:
+            whatifs["demand_scale"] = 1.2
+        elif inventory_level > backlog_level * 2 and inventory_level > 0:
+            whatifs["demand_scale"] = 0.8
+        return whatifs or None
+
+    def get_last_explanation_comment(self) -> Optional[str]:
+        if not self.last_explanation:
+            return None
+        flattened = " | ".join(part.strip() for part in self.last_explanation.splitlines() if part.strip())
+        if len(flattened) > 255:
+            return f"{flattened[:252]}..."
+        return flattened
 
     def update_inventory(self, incoming_shipment: int, outgoing_shipment: int):
         """Update inventory and backlog based on incoming and outgoing shipments."""

@@ -429,7 +429,8 @@ class MixedGameService:
                 inventory_before=inventory.current_stock,
                 inventory_after=inventory.current_stock,  # Will be updated after processing
                 backorders_before=inventory.backorders,
-                backorders_after=inventory.backorders  # Will be updated after processing
+                backorders_after=inventory.backorders,  # Will be updated after processing
+                comment=agent.get_last_explanation_comment(),
             )
             self.db.add(player_round)
     
