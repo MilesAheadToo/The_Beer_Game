@@ -59,7 +59,7 @@ A comprehensive simulation of the Beer Distribution Game featuring AI-powered su
 
 2. Copy the example environment files:
    ```bash
-   cp .env.example .env
+   make init-env
    cp frontend/.env.example frontend/.env
    ```
 
@@ -118,7 +118,7 @@ beer-game/
 ### Installation
 
 1. Clone the repository
-2. Set up environment variables (copy `.env.example` to `.env` and configure)
+2. Set up environment variables (`make init-env` copies `.env.example` to `.env` or, if present, copies `.env.<hostname>` for machine-specific settings)
 3. Run `docker-compose up --build`
 
 ### Development
