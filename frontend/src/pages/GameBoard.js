@@ -2,13 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 import RoundTimer from '../components/RoundTimer';
-import { 
-  Box, 
-  Button, 
-  VStack, 
-  HStack, 
-  Text, 
-  Badge, 
+import {
+  Box,
+  Button,
+  VStack,
+  HStack,
+  Text,
+  Badge,
   useToast,
   useColorModeValue,
   Tabs,
@@ -31,8 +31,15 @@ import {
   ModalBody,
   ModalCloseButton,
   useDisclosure,
-  Select as ChakraSelect
+  Select as ChakraSelect,
+  Table,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td
 } from '@chakra-ui/react';
+import { LineChart, Line, XAxis, YAxis, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useWebSocket } from '../contexts/WebSocketContext';
 import { useAuth } from '../contexts/AuthContext';
 import mixedGameApi from '../services/api';
@@ -53,6 +60,8 @@ const GameBoard = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [isPlayerTurn, setIsPlayerTurn] = useState(false);
   const [myGames, setMyGames] = useState([]);
+  const [orderComment, setOrderComment] = useState('');
+  const [orderHistory, setOrderHistory] = useState([]);
   
   const { isOpen, onClose } = useDisclosure();
   const { gameStatus } = useWebSocket();
@@ -97,6 +106,32 @@ const GameBoard = () => {
       }
     })();
   }, [user?.id]);
+
+  // Load order history and rounds data
+  useEffect(() => {
+    const fetchRounds = async () => {
+      if (gameId && playerId) {
+        try {
+          const rounds = await mixedGameApi.getRounds(gameId);
+          const history = rounds.map(r => {
+            const pr = (r.player_rounds || []).find(p => p.player_id === playerId);
+            if (!pr) return null;
+            return {
+              round: r.round_number,
+              inventory: pr.inventory_after,
+              backlog: pr.backorders_after,
+              order: pr.order_placed,
+              comment: pr.comment || ''
+            };
+          }).filter(Boolean);
+          setOrderHistory(history);
+        } catch (e) {
+          console.error('Failed to load rounds', e);
+        }
+      }
+    };
+    fetchRounds();
+  }, [gameId, playerId, gameStatus]);
   
   // Fetch game details on component mount
   useEffect(() => {
@@ -155,16 +190,31 @@ const GameBoard = () => {
   }, [gameState, playerRole, toast]);
   
   // Handle order submission
-  const handleOrderSubmit = async (quantity) => {
+  const handleOrderSubmit = async (quantity, comment) => {
+    const qty = parseInt(quantity, 10) || 0;
     try {
-      await mixedGameApi.submitOrder(gameId, playerId, quantity);
+      await mixedGameApi.submitOrder(gameId, playerId, qty, comment);
       toast({
         title: 'Order submitted!',
-        description: `Order of ${quantity} units has been placed.`,
+        description: `Order of ${qty} units has been placed.`,
         status: 'success',
         duration: 3000,
         isClosable: true,
       });
+      setOrderComment('');
+      const rounds = await mixedGameApi.getRounds(gameId);
+      const history = rounds.map(r => {
+        const pr = (r.player_rounds || []).find(p => p.player_id === playerId);
+        if (!pr) return null;
+        return {
+          round: r.round_number,
+          inventory: pr.inventory_after,
+          backlog: pr.backorders_after,
+          order: pr.order_placed,
+          comment: pr.comment || ''
+        };
+      }).filter(Boolean);
+      setOrderHistory(history);
     } catch (error) {
       console.error('Error submitting order:', error);
       toast({
@@ -236,11 +286,11 @@ const GameBoard = () => {
               {/* Round timer component */}
               {gameStatus === 'in_progress' && playerId && (
                 <Box width="400px">
-                  <RoundTimer 
+                  <RoundTimer
                     gameId={gameId}
                     playerId={playerId}
                     roundNumber={gameState?.current_round || 1}
-                    onOrderSubmit={handleOrderSubmit}
+                    onOrderSubmit={(q) => handleOrderSubmit(q, orderComment)}
                     isPlayerTurn={isPlayerTurn}
                   />
                 </Box>
@@ -249,7 +299,48 @@ const GameBoard = () => {
             
             {/* Rest of the game board content */}
             <Box p={4} bg={cardBg} borderRadius="lg" borderWidth="1px" borderColor={borderColor}>
-              <Text>Game content goes here...</Text>
+              <VStack align="stretch" spacing={4}>
+                <Text fontWeight="bold">Round {gameState?.current_round || 1}</Text>
+                <FormControl>
+                  <FormLabel>Comment</FormLabel>
+                  <Input
+                    value={orderComment}
+                    onChange={(e) => setOrderComment(e.target.value)}
+                    placeholder="Why are you ordering this amount?"
+                  />
+                </FormControl>
+                <Box height="300px">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={orderHistory}>
+                      <XAxis dataKey="round" />
+                      <YAxis />
+                      <RechartsTooltip />
+                      <Legend />
+                      <Line type="monotone" dataKey="inventory" stroke="#8884d8" name="Inventory" />
+                      <Line type="monotone" dataKey="backlog" stroke="#82ca9d" name="Backlog" />
+                      <Line type="monotone" dataKey="order" stroke="#ff7300" name="Order" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </Box>
+                <Table size="sm">
+                  <Thead>
+                    <Tr>
+                      <Th>Round</Th>
+                      <Th>Order</Th>
+                      <Th>Comment</Th>
+                    </Tr>
+                  </Thead>
+                  <Tbody>
+                    {orderHistory.map(h => (
+                      <Tr key={h.round}>
+                        <Td>{h.round}</Td>
+                        <Td>{h.order}</Td>
+                        <Td>{h.comment}</Td>
+                      </Tr>
+                    ))}
+                  </Tbody>
+                </Table>
+              </VStack>
             </Box>
             
             {/* Game settings modal */}

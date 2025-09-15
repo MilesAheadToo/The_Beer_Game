@@ -12,7 +12,8 @@ def get_order():
         f"Expected deliveries: {data['expected_deliveries']}, Demand: {data['demand']}"
     )
     order, parsed = call_beer_game_gpt(user_message)
-    return jsonify({"order": order, "data": parsed})
+    comment = parsed.get("comment") if parsed else None
+    return jsonify({"order": order, "comment": comment, "data": parsed})
 
 if __name__ == "__main__":
     app.run(debug=True)

@@ -376,7 +376,7 @@ async def submit_order(
     """
     game_service = GameService(db)
     try:
-        player_round = await game_service.submit_order(game_id, player_id, order_in.quantity)
+        player_round = await game_service.submit_order(game_id, player_id, order_in.quantity, order_in.comment)
         return player_round
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

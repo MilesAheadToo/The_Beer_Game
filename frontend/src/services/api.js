@@ -192,8 +192,13 @@ export const mixedGameApi = {
     return data;
   },
 
-  async submitOrder(gameId, playerId, quantity) {
-    const { data } = await http.post(`/games/${gameId}/players/${playerId}/orders`, { quantity });
+  async submitOrder(gameId, playerId, quantity, comment) {
+    const { data } = await http.post(`/games/${gameId}/players/${playerId}/orders`, { quantity, comment });
+    return data;
+  },
+
+  async getRounds(gameId) {
+    const { data } = await http.get(`/games/${gameId}/rounds`);
     return data;
   },
 
