@@ -4,7 +4,7 @@ import { FaTrash, FaPlus, FaUserShield, FaUser, FaEdit } from 'react-icons/fa';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../contexts/AuthContext';
 import { api, mixedGameApi } from '../../services/api';
-import { normalizeRoles } from '../../utils/authUtils';
+import { normalizeRoles, isSystemAdmin as isSystemAdminUser } from '../../utils/authUtils';
 
 const USER_TYPE_OPTIONS = [
   { value: 'player', label: 'Player' },
@@ -18,7 +18,7 @@ const USER_TYPE_LABELS = {
   system_admin: 'System Admin',
 };
 
-const DEFAULT_FORM = {
+const BASE_FORM = {
   username: '',
   email: '',
   password: '',
@@ -73,16 +73,37 @@ function UserManagement() {
   const [isLoading, setIsLoading] = useState(true);
   const [showAddUser, setShowAddUser] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [form, setForm] = useState({ ...DEFAULT_FORM });
+  const [form, setForm] = useState({ ...BASE_FORM });
   const [replacementPrompt, setReplacementPrompt] = useState({ ...DEFAULT_REPLACEMENT_PROMPT });
 
   const navigate = useNavigate();
-  const { isGroupAdmin } = useAuth();
+  const { isGroupAdmin, user } = useAuth();
+  const systemAdmin = useMemo(() => isSystemAdminUser(user), [user]);
+  const defaultGroupId = useMemo(() => (user?.group_id ? String(user.group_id) : ''), [user]);
+
+  const resetForm = useCallback(() => {
+    setForm({
+      ...BASE_FORM,
+      userType: 'player',
+      groupId: systemAdmin ? '' : defaultGroupId,
+    });
+  }, [defaultGroupId, systemAdmin]);
+
+  useEffect(() => {
+    if (!showAddUser) {
+      resetForm();
+    }
+  }, [resetForm, showAddUser]);
 
   const groupMap = useMemo(() => {
     const entries = (groups || []).map((group) => [group.id, group.name]);
     return Object.fromEntries(entries);
   }, [groups]);
+
+  const pageTitle = systemAdmin ? 'User Management' : 'Player Management';
+  const addButtonLabel = systemAdmin ? 'Add User' : 'Add Player';
+  const modalTitle = editingUser ? (systemAdmin ? 'Edit User' : 'Edit Player') : (systemAdmin ? 'Add New User' : 'Add New Player');
+  const submitButtonLabel = editingUser ? 'Save Changes' : addButtonLabel;
 
   const loadGroups = useCallback(async () => {
     const response = await api.get('/groups');
@@ -118,24 +139,26 @@ function UserManagement() {
 
   const handleOpenModal = () => {
     setEditingUser(null);
-    setForm({ ...DEFAULT_FORM });
+    resetForm();
     setShowAddUser(true);
   };
 
   const handleCloseModal = () => {
     setShowAddUser(false);
     setEditingUser(null);
-    setForm({ ...DEFAULT_FORM });
+    resetForm();
   };
 
-  const handleEditUser = (user) => {
-    setEditingUser(user);
+  const handleEditUser = (userToEdit) => {
+    setEditingUser(userToEdit);
     setForm({
-      username: user.username || '',
-      email: user.email || '',
+      username: userToEdit.username || '',
+      email: userToEdit.email || '',
       password: '',
-      userType: getUserType(user),
-      groupId: user.group_id ? String(user.group_id) : '',
+      userType: systemAdmin ? getUserType(userToEdit) : 'player',
+      groupId: systemAdmin
+        ? userToEdit.group_id ? String(userToEdit.group_id) : ''
+        : userToEdit.group_id ? String(userToEdit.group_id) : defaultGroupId,
     });
     setShowAddUser(true);
   };
@@ -153,24 +176,27 @@ function UserManagement() {
 
     const trimmedUsername = form.username.trim();
     const trimmedEmail = form.email.trim();
-    const requiresGroup = form.userType !== 'system_admin';
 
     if (!trimmedUsername || !trimmedEmail) {
       toast.error('Username and email are required.');
       return;
     }
 
-    if (requiresGroup && !form.groupId) {
-      toast.error('Please select a group for this user.');
-      return;
-    }
-
     const payload = {
       username: trimmedUsername,
       email: trimmedEmail,
-      user_type: form.userType,
-      group_id: requiresGroup ? Number(form.groupId) : null,
     };
+
+    if (systemAdmin) {
+      const requiresGroup = form.userType !== 'system_admin';
+      if (requiresGroup && !form.groupId) {
+        toast.error('Please select a group for this user.');
+        return;
+      }
+
+      payload.user_type = form.userType;
+      payload.group_id = requiresGroup ? Number(form.groupId) : null;
+    }
 
     if (!editingUser || form.password) {
       if (!editingUser && !form.password) {
@@ -279,12 +305,12 @@ function UserManagement() {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold text-gray-800">User Management</h1>
+        <h1 className="text-3xl font-bold text-gray-800">{pageTitle}</h1>
         <button
           onClick={handleOpenModal}
           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center"
         >
-          <FaPlus className="mr-2" /> Add User
+          <FaPlus className="mr-2" /> {addButtonLabel}
         </button>
       </div>
 
@@ -292,7 +318,7 @@ function UserManagement() {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg p-6 w-full max-w-lg">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">{editingUser ? 'Edit User' : 'Add New User'}</h2>
+              <h2 className="text-xl font-semibold">{modalTitle}</h2>
               <button onClick={handleCloseModal} className="text-gray-500 hover:text-gray-700">
                 ✕
               </button>
@@ -334,31 +360,37 @@ function UserManagement() {
                 />
               </div>
 
-              <div>
-                <span className="block text-sm font-medium text-gray-700 mb-2">User Type</span>
-                <div className="flex flex-wrap gap-3">
-                  {USER_TYPE_OPTIONS.map((option) => (
-                    <label
-                      key={option.value}
-                      className={`flex items-center gap-2 px-3 py-2 border rounded-md cursor-pointer ${
-                        form.userType === option.value ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="userType"
-                        value={option.value}
-                        checked={form.userType === option.value}
-                        onChange={() => handleTypeChange(option.value)}
-                        className="h-4 w-4"
-                      />
-                      <span className="text-sm font-medium text-gray-700">{option.label}</span>
-                    </label>
-                  ))}
+              {systemAdmin && (
+                <div>
+                  <span className="block text-sm font-medium text-gray-700 mb-2">User Type</span>
+                  <div className="flex flex-wrap gap-3">
+                    {USER_TYPE_OPTIONS.map((option) => (
+                      <label
+                        key={option.value}
+                        className={`flex items-center gap-2 px-3 py-2 border rounded-md cursor-pointer ${
+                          form.userType === option.value ? 'border-blue-500 bg-blue-50' : 'border-gray-300'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="userType"
+                          value={option.value}
+                          checked={form.userType === option.value}
+                          onChange={() => handleTypeChange(option.value)}
+                          className="h-4 w-4"
+                        />
+                        <span className="text-sm font-medium text-gray-700">{option.label}</span>
+                      </label>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {form.userType !== 'system_admin' && (
+              {!systemAdmin && (
+                <p className="text-sm text-gray-500">Players will automatically be added to your group.</p>
+              )}
+
+              {systemAdmin && form.userType !== 'system_admin' && (
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Group</label>
                   <select
@@ -394,7 +426,7 @@ function UserManagement() {
                   type="submit"
                   className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
                 >
-                  {editingUser ? 'Save Changes' : 'Add User'}
+                  {submitButtonLabel}
                 </button>
               </div>
             </form>

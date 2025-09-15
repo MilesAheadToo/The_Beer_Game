@@ -164,6 +164,15 @@ class UserService:
         normalized_roles = set(self._normalized_roles(user.roles))
         return "groupadmin" in normalized_roles or "admin" in normalized_roles
 
+    def _get_user_type(self, user: models.User) -> str:
+        return self._resolve_user_type(
+            user_type=None,
+            roles=user.roles,
+            is_superuser=user.is_superuser,
+            existing_roles=user.roles,
+            default_is_superuser=user.is_superuser,
+        )
+
     def _find_group_admins(
         self,
         group_id: Optional[int],
@@ -241,10 +250,68 @@ class UserService:
     def get_users(self, skip: int = 0, limit: int = 100) -> List[models.User]:
         return self.db.query(models.User).offset(skip).limit(limit).all()
 
+    def list_group_players(
+        self,
+        group_id: Optional[int],
+        skip: int = 0,
+        limit: Optional[int] = 100,
+    ) -> List[models.User]:
+        if not group_id:
+            return []
+
+        query = (
+            self.db.query(models.User)
+            .filter(models.User.group_id == group_id)
+            .order_by(models.User.username.asc())
+        )
+        users = query.all()
+        players = [user for user in users if self._get_user_type(user) == "player"]
+
+        if skip or (limit is not None and limit >= 0):
+            end = skip + limit if limit is not None else None
+            return players[skip:end]
+        return players
+
+    def list_accessible_users(
+        self,
+        current_user: models.User,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[models.User]:
+        if current_user.is_superuser:
+            return self.get_users(skip=skip, limit=limit)
+
+        if self._is_group_admin_user(current_user):
+            return self.list_group_players(current_user.group_id, skip=skip, limit=limit)
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not enough permissions",
+        )
+
+    def is_group_admin(self, user: models.User) -> bool:
+        return self._is_group_admin_user(user)
+
+    def get_user_type(self, user: models.User) -> str:
+        return self._get_user_type(user)
+
     # ------------------------------------------------------------------
     # Mutations
     # ------------------------------------------------------------------
-    def create_user(self, user: user_schemas.UserCreate) -> models.User:
+    def create_user(
+        self,
+        user: user_schemas.UserCreate,
+        current_user: models.User,
+    ) -> models.User:
+        acting_is_superuser = bool(current_user and current_user.is_superuser)
+        acting_is_group_admin = self._is_group_admin_user(current_user) if current_user else False
+
+        if not acting_is_superuser and not acting_is_group_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not enough permissions",
+            )
+
         existing = self.get_user_by_email(user.email)
         if existing:
             raise HTTPException(
@@ -259,17 +326,57 @@ class UserService:
                 detail="Username already taken",
             )
 
-        desired_type = self._resolve_user_type(
-            user_type=user.user_type,
-            roles=user.roles,
-            is_superuser=user.is_superuser,
-            existing_roles=user.roles,
-            default_is_superuser=bool(user.is_superuser),
-        )
-
-        group, normalized_group_id = self._validate_group_assignment(user.group_id, desired_type)
-        roles = self._prepare_roles_for_type(user.roles, desired_type)
         hashed_password = get_password_hash(user.password)
+
+        if acting_is_superuser:
+            desired_type = self._resolve_user_type(
+                user_type=user.user_type,
+                roles=user.roles,
+                is_superuser=user.is_superuser,
+                existing_roles=user.roles,
+                default_is_superuser=bool(user.is_superuser),
+            )
+            group, normalized_group_id = self._validate_group_assignment(user.group_id, desired_type)
+            roles_source = user.roles
+            is_superuser_flag = desired_type == "system_admin"
+        else:
+            if not current_user or not current_user.group_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Group admins must belong to a group",
+                )
+
+            if user.group_id is not None and user.group_id != current_user.group_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Group admins can only assign users to their own group",
+                )
+
+            if user.user_type and user.user_type != "player":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Group admins can only create players",
+                )
+
+            if user.is_superuser:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Group admins cannot grant system permissions",
+                )
+
+            normalized_roles = set(self._normalized_roles(user.roles))
+            if normalized_roles - {"player"}:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Group admins cannot assign custom roles",
+                )
+
+            desired_type = "player"
+            group, normalized_group_id = self._validate_group_assignment(current_user.group_id, desired_type)
+            roles_source = []
+            is_superuser_flag = False
+
+        roles = self._prepare_roles_for_type(roles_source, desired_type)
 
         db_user = models.User(
             username=user.username,
@@ -277,7 +384,7 @@ class UserService:
             hashed_password=hashed_password,
             full_name=user.full_name,
             is_active=True,
-            is_superuser=(desired_type == "system_admin"),
+            is_superuser=is_superuser_flag,
             group_id=normalized_group_id,
             roles=roles,
         )
@@ -306,13 +413,97 @@ class UserService:
         user_update: user_schemas.UserUpdate,
         current_user: models.User,
     ) -> models.User:
-        if user_id != current_user.id and not current_user.is_superuser:
+        db_user = self.get_user(user_id)
+        acting_is_superuser = bool(current_user.is_superuser)
+        acting_is_group_admin = self._is_group_admin_user(current_user)
+        target_type = self._get_user_type(db_user)
+
+        is_group_admin_managing_player = (
+            acting_is_group_admin
+            and not acting_is_superuser
+            and user_id != current_user.id
+            and target_type == "player"
+            and db_user.group_id == current_user.group_id
+        )
+
+        if (
+            user_id != current_user.id
+            and not acting_is_superuser
+            and not is_group_admin_managing_player
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not enough permissions",
             )
 
-        db_user = self.get_user(user_id)
+        if is_group_admin_managing_player:
+            if user_update.group_id is not None and user_update.group_id != current_user.group_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Group admins cannot change a player's group",
+                )
+
+            if user_update.user_type and user_update.user_type != "player":
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Group admins can only manage players",
+                )
+
+            if user_update.is_superuser is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Group admins cannot modify system permissions",
+                )
+
+            if user_update.roles is not None:
+                normalized_roles = set(self._normalized_roles(user_update.roles))
+                disallowed_roles = normalized_roles - {"player"}
+                if disallowed_roles:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Group admins cannot modify player roles",
+                    )
+
+            if user_update.is_active is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Group admins cannot change activation status",
+                )
+
+            if user_update.email is not None:
+                existing = self.get_user_by_email(user_update.email)
+                if existing and existing.id != user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Email already registered",
+                    )
+                db_user.email = user_update.email
+
+            if user_update.username is not None:
+                existing = self.get_user_by_username(user_update.username)
+                if existing and existing.id != user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Username already taken",
+                    )
+                db_user.username = user_update.username
+
+            if user_update.full_name is not None:
+                db_user.full_name = user_update.full_name
+
+            if user_update.password:
+                db_user.hashed_password = get_password_hash(user_update.password)
+
+            try:
+                self.db.commit()
+                self.db.refresh(db_user)
+                return db_user
+            except SQLAlchemyError:
+                self.db.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Error updating user",
+                )
 
         if user_update.email is not None:
             existing = self.get_user_by_email(user_update.email)
@@ -335,17 +526,11 @@ class UserService:
         if user_update.full_name is not None:
             db_user.full_name = user_update.full_name
 
-        if user_update.is_active is not None and current_user.is_superuser:
+        if user_update.is_active is not None and acting_is_superuser:
             db_user.is_active = user_update.is_active
 
         previous_group_id = db_user.group_id
-        previous_type = self._resolve_user_type(
-            user_type=None,
-            roles=db_user.roles,
-            is_superuser=db_user.is_superuser,
-            existing_roles=db_user.roles,
-            default_is_superuser=db_user.is_superuser,
-        )
+        previous_type = target_type
 
         proposed_group_id = (
             user_update.group_id
@@ -358,10 +543,39 @@ class UserService:
             roles=user_update.roles if user_update.roles is not None else db_user.roles,
             is_superuser=user_update.is_superuser,
             existing_roles=db_user.roles,
-            default_is_superuser=user_update.is_superuser if user_update.is_superuser is not None else db_user.is_superuser,
+            default_is_superuser=(
+                user_update.is_superuser
+                if user_update.is_superuser is not None
+                else db_user.is_superuser
+            ),
         )
 
         group, normalized_group_id = self._validate_group_assignment(proposed_group_id, desired_type)
+
+        if not acting_is_superuser:
+            if normalized_group_id != previous_group_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not enough permissions to change group",
+                )
+
+            if desired_type != previous_type:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not enough permissions to change user type",
+                )
+
+            if user_update.roles is not None:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not enough permissions to change roles",
+                )
+
+            if user_update.is_superuser is not None and user_update.is_superuser != db_user.is_superuser:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Not enough permissions to change system privileges",
+                )
 
         # Prevent removing the last group admin from a group via update
         if previous_type == "group_admin":
@@ -410,20 +624,34 @@ class UserService:
         current_user: models.User,
         replacement_admin_id: Optional[int] = None,
     ) -> Dict[str, Any]:
-        if user_id != current_user.id and not current_user.is_superuser:
+        db_user = self.get_user(user_id)
+        acting_is_superuser = bool(current_user.is_superuser)
+        acting_is_group_admin = self._is_group_admin_user(current_user)
+        user_type = self._get_user_type(db_user)
+
+        can_group_admin_delete = (
+            acting_is_group_admin
+            and not acting_is_superuser
+            and user_id != current_user.id
+            and user_type == "player"
+            and db_user.group_id == current_user.group_id
+        )
+
+        if (
+            user_id != current_user.id
+            and not acting_is_superuser
+            and not can_group_admin_delete
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not enough permissions",
             )
 
-        db_user = self.get_user(user_id)
-        user_type = self._resolve_user_type(
-            user_type=None,
-            roles=db_user.roles,
-            is_superuser=db_user.is_superuser,
-            existing_roles=db_user.roles,
-            default_is_superuser=db_user.is_superuser,
-        )
+        if can_group_admin_delete and replacement_admin_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Replacement admin is not required when deleting a player",
+            )
 
         promoted_user: Optional[models.User] = None
 
