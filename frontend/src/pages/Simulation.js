@@ -1,16 +1,14 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Box,
   Button,
   Typography,
   Grid,
-  TextField,
   FormControl,
   InputLabel,
   Select,
   MenuItem,
   Slider,
-  Divider,
   Card,
   CardContent,
   Paper,
@@ -19,6 +17,7 @@ import {
   Stepper,
   IconButton,
   Tooltip,
+  Switch,
 } from '@mui/material';
 import {
   PlayArrow as PlayIcon,
@@ -55,23 +54,138 @@ const simulationSteps = [
   'Analyze Results',
 ];
 
+const demandPatternOptions = [
+  { value: 'classic_step', label: 'Classic (Step Change)' },
+  { value: 'random', label: 'Random' },
+  { value: 'seasonal', label: 'Seasonal' },
+  { value: 'custom', label: 'Custom Scenario' },
+];
+
+const llmModelOptions = [
+  { value: 'opt-66-mini', label: 'opt-66-mini' },
+  { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
+  { value: 'llama-3.1-8b', label: 'Llama 3.1 8B' },
+];
+
+const ParameterSlider = ({
+  label,
+  description,
+  value,
+  min,
+  max,
+  step = 1,
+  onChange,
+  valueFormatter,
+  disabled = false,
+  sx,
+}) => (
+  <Box sx={{ ...sx, opacity: disabled ? 0.6 : 1 }}>
+    <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <Box>
+        <Typography variant="subtitle2" color="text.primary">
+          {label}
+        </Typography>
+        {description && (
+          <Typography variant="caption" color="text.secondary">
+            {description}
+          </Typography>
+        )}
+      </Box>
+      <Typography variant="subtitle2" color="text.secondary">
+        {valueFormatter ? valueFormatter(value) : value}
+      </Typography>
+    </Box>
+    <Slider
+      value={value}
+      min={min}
+      max={max}
+      step={step}
+      onChange={onChange}
+      sx={{ mt: 2 }}
+      valueLabelDisplay="off"
+      disabled={disabled}
+    />
+  </Box>
+);
+
+const ToggleControl = ({ label, description, checked, onChange, disabled = false }) => (
+  <Box
+    sx={{
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      py: 0.5,
+      opacity: disabled ? 0.6 : 1,
+    }}
+  >
+    <Box sx={{ pr: 2 }}>
+      <Typography variant="subtitle2" color="text.primary">
+        {label}
+      </Typography>
+      {description && (
+        <Typography variant="caption" color="text.secondary">
+          {description}
+        </Typography>
+      )}
+    </Box>
+    <Switch checked={checked} onChange={onChange} color="primary" disabled={disabled} />
+  </Box>
+);
+
+const SummaryItem = ({ label, value }) => (
+  <Box>
+    <Typography variant="caption" color="text.secondary">
+      {label}
+    </Typography>
+    <Typography variant="subtitle1" color="text.primary">
+      {value}
+    </Typography>
+  </Box>
+);
+
+const SummaryRow = ({ label, value }) => (
+  <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', py: 0.75 }}>
+    <Typography variant="body2" color="text.secondary">
+      {label}
+    </Typography>
+    <Typography variant="body2" color="text.primary">
+      {value}
+    </Typography>
+  </Box>
+);
+
+const formatBoolean = (value) => (value ? 'Enabled' : 'Disabled');
+const formatWeeks = (value) => `${value} week${value === 1 ? '' : 's'}`;
+const formatUnits = (value) => `${value} unit${value === 1 ? '' : 's'}`;
+const formatCurrencyPerUnit = (value) => `$${value.toFixed(2)}/unit/week`;
+
 const Simulation = () => {
   const [activeStep, setActiveStep] = useState(0);
   const [simulationState, setSimulationState] = useState('idle'); // 'idle', 'running', 'paused', 'completed'
   const [currentWeek, setCurrentWeek] = useState(0);
   // Simulation speed state (commented out as it's not currently used)
   // const [simulationSpeed, setSimulationSpeed] = useState(1);
-  const [parameters, setParameters] = useState({
-    duration: 26, // weeks
-    demandDistribution: 'normal',
-    demandMean: 3000,
-    demandStdDev: 500,
-    leadTimeDistribution: 'lognormal',
-    leadTimeMean: 2,
-    leadTimeStdDev: 0.5,
-    initialInventory: 10000,
-    reorderPoint: 2000,
-    orderQuantity: 5000,
+  const [config, setConfig] = useState({
+    duration: 40,
+    orderLeadTime: 2,
+    shippingLeadTime: 1,
+    productionDelay: 2,
+    initialInventory: 12,
+    holdingCost: 0.5,
+    backorderCost: 1.0,
+    infoSharing: true,
+    historicalWeeks: 6,
+    demandVolatility: true,
+    confidenceThreshold: 60,
+    pipelineInventory: true,
+    centralizedForecast: false,
+    supplierVisibility: false,
+    demandPattern: 'classic_step',
+    initialDemand: 4,
+    newDemand: 8,
+    demandChangeWeek: 6,
+    llmModel: 'opt-66-mini',
+    useRlModel: false,
   });
 
   const handleNext = () => {
@@ -82,13 +196,31 @@ const Simulation = () => {
     setActiveStep((prevStep) => prevStep - 1);
   };
 
-  const handleParameterChange = (param) => (event) => {
-    const value = event.target ? event.target.value : event;
-    setParameters((prev) => ({
+  const updateConfig = (field, value) => {
+    setConfig((prev) => ({
       ...prev,
-      [param]: value,
+      [field]: value,
     }));
   };
+
+  const handleSliderChange = (field) => (_, value) => {
+    const resolvedValue = Array.isArray(value) ? value[0] : value;
+    updateConfig(field, Number(resolvedValue));
+  };
+
+  const handleToggleChange = (field) => (event) => {
+    updateConfig(field, event.target.checked);
+  };
+
+  const handleSelectChange = (field) => (event) => {
+    updateConfig(field, event.target.value);
+  };
+
+  useEffect(() => {
+    if (currentWeek > config.duration - 1) {
+      setCurrentWeek(Math.max(0, config.duration - 1));
+    }
+  }, [config.duration, currentWeek]);
 
   const handleStartSimulation = () => {
     setSimulationState('running');
@@ -105,7 +237,7 @@ const Simulation = () => {
   };
 
   const handleStepForward = () => {
-    if (currentWeek < parameters.duration - 1) {
+    if (currentWeek < config.duration - 1) {
       setCurrentWeek(currentWeek + 1);
     } else {
       setSimulationState('completed');
@@ -123,153 +255,337 @@ const Simulation = () => {
       case 0:
         return (
           <Grid container spacing={3}>
-            <Grid item xs={12} md={6}>
-              <Typography variant="h6" gutterBottom>
-                Demand Parameters
-              </Typography>
-              <FormControl fullWidth sx={{ mb: 3 }}>
-                <InputLabel>Demand Distribution</InputLabel>
-                <Select
-                  value={parameters.demandDistribution}
-                  onChange={handleParameterChange('demandDistribution')}
-                  label="Demand Distribution"
-                >
-                  <MenuItem value="normal">Normal</MenuItem>
-                  <MenuItem value="lognormal">Log-normal</MenuItem>
-                  <MenuItem value="poisson">Poisson</MenuItem>
-                  <MenuItem value="constant">Constant</MenuItem>
-                </Select>
-              </FormControl>
-              <TextField
-                fullWidth
-                type="number"
-                label="Mean Demand (units/week)"
-                value={parameters.demandMean}
-                onChange={handleParameterChange('demandMean')}
-                sx={{ mb: 3 }}
-              />
-              <TextField
-                fullWidth
-                type="number"
-                label="Standard Deviation"
-                value={parameters.demandStdDev}
-                onChange={handleParameterChange('demandStdDev')}
-                sx={{ mb: 3 }}
-              />
+            <Grid item xs={12} lg={7}>
+              <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom>
+                  Simulation Parameters
+                </Typography>
+                <Grid container spacing={3}>
+                  <Grid item xs={12}>
+                    <ParameterSlider
+                      label="Number of weeks"
+                      description="Duration of the simulation"
+                      value={config.duration}
+                      min={10}
+                      max={52}
+                      step={1}
+                      onChange={handleSliderChange('duration')}
+                      valueFormatter={formatWeeks}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <ParameterSlider
+                      label="Order lead time (weeks)"
+                      description="Time for players to receive orders"
+                      value={config.orderLeadTime}
+                      min={0}
+                      max={8}
+                      step={1}
+                      onChange={handleSliderChange('orderLeadTime')}
+                      valueFormatter={formatWeeks}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <ParameterSlider
+                      label="Shipping lead time (weeks)"
+                      description="Time for shipments to reach downstream partners"
+                      value={config.shippingLeadTime}
+                      min={0}
+                      max={6}
+                      step={1}
+                      onChange={handleSliderChange('shippingLeadTime')}
+                      valueFormatter={formatWeeks}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <ParameterSlider
+                      label="Production delay (weeks)"
+                      description="Time required to produce factory orders"
+                      value={config.productionDelay}
+                      min={0}
+                      max={6}
+                      step={1}
+                      onChange={handleSliderChange('productionDelay')}
+                      valueFormatter={formatWeeks}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <ParameterSlider
+                      label="Initial inventory"
+                      description="Starting inventory for each player"
+                      value={config.initialInventory}
+                      min={0}
+                      max={50}
+                      step={1}
+                      onChange={handleSliderChange('initialInventory')}
+                      valueFormatter={formatUnits}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <ParameterSlider
+                      label="Holding cost"
+                      description="Cost per unit of inventory per week"
+                      value={config.holdingCost}
+                      min={0}
+                      max={5}
+                      step={0.1}
+                      onChange={handleSliderChange('holdingCost')}
+                      valueFormatter={formatCurrencyPerUnit}
+                    />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <ParameterSlider
+                      label="Backorder cost"
+                      description="Penalty per unit of unmet demand"
+                      value={config.backorderCost}
+                      min={0}
+                      max={5}
+                      step={0.1}
+                      onChange={handleSliderChange('backorderCost')}
+                      valueFormatter={formatCurrencyPerUnit}
+                    />
+                  </Grid>
+                </Grid>
+              </Paper>
             </Grid>
-            <Grid item xs={12} md={6}>
-              <Typography variant="h6" gutterBottom>
-                Lead Time Parameters
-              </Typography>
-              <FormControl fullWidth sx={{ mb: 3 }}>
-                <InputLabel>Lead Time Distribution</InputLabel>
-                <Select
-                  value={parameters.leadTimeDistribution}
-                  onChange={handleParameterChange('leadTimeDistribution')}
-                  label="Lead Time Distribution"
-                >
-                  <MenuItem value="lognormal">Log-normal</MenuItem>
-                  <MenuItem value="normal">Normal</MenuItem>
-                  <MenuItem value="constant">Constant</MenuItem>
-                </Select>
-              </FormControl>
-              <TextField
-                fullWidth
-                type="number"
-                label="Mean Lead Time (weeks)"
-                value={parameters.leadTimeMean}
-                onChange={handleParameterChange('leadTimeMean')}
-                sx={{ mb: 3 }}
-              />
-              <TextField
-                fullWidth
-                type="number"
-                label="Standard Deviation"
-                value={parameters.leadTimeStdDev}
-                onChange={handleParameterChange('leadTimeStdDev')}
-                step={0.1}
-                sx={{ mb: 3 }}
-              />
-            </Grid>
-            <Grid item xs={12}>
-              <Typography variant="h6" gutterBottom>
-                Inventory Policy
-              </Typography>
+            <Grid item xs={12} lg={5}>
               <Grid container spacing={3}>
-                <Grid item xs={12} md={4}>
-                  <TextField
-                    fullWidth
-                    type="number"
-                    label="Initial Inventory (units)"
-                    value={parameters.initialInventory}
-                    onChange={handleParameterChange('initialInventory')}
-                  />
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 3 }}>
+                    <Typography variant="h6" gutterBottom>
+                      Decision Support Features
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <ToggleControl
+                        label="Enable information sharing"
+                        description="Share customer demand updates with all players"
+                        checked={config.infoSharing}
+                        onChange={handleToggleChange('infoSharing')}
+                      />
+                      <ParameterSlider
+                        label="Historical weeks to share"
+                        description="Amount of past demand data included in updates"
+                        value={config.historicalWeeks}
+                        min={0}
+                        max={12}
+                        step={1}
+                        onChange={handleSliderChange('historicalWeeks')}
+                        valueFormatter={formatWeeks}
+                        disabled={!config.infoSharing}
+                      />
+                      <ToggleControl
+                        label="Demand analysis with volatility insights"
+                        description="Provide volatility commentary based on demand changes"
+                        checked={config.demandVolatility}
+                        onChange={handleToggleChange('demandVolatility')}
+                      />
+                      <ParameterSlider
+                        label="Confidence threshold"
+                        description="Minimum confidence required to surface volatility guidance"
+                        value={config.confidenceThreshold}
+                        min={0}
+                        max={100}
+                        step={5}
+                        onChange={handleSliderChange('confidenceThreshold')}
+                        valueFormatter={(value) => `${value}%`}
+                        disabled={!config.demandVolatility}
+                      />
+                      <ToggleControl
+                        label="Pipeline inventory sharing"
+                        description="Show upstream orders and shipments to all players"
+                        checked={config.pipelineInventory}
+                        onChange={handleToggleChange('pipelineInventory')}
+                      />
+                      <ToggleControl
+                        label="Centralized demand forecast"
+                        description="Share a central demand forecast with each player"
+                        checked={config.centralizedForecast}
+                        onChange={handleToggleChange('centralizedForecast')}
+                      />
+                      <ToggleControl
+                        label="Supplier inventory visibility"
+                        description="Reveal upstream supplier inventory levels"
+                        checked={config.supplierVisibility}
+                        onChange={handleToggleChange('supplierVisibility')}
+                      />
+                    </Box>
+                  </Paper>
                 </Grid>
-                <Grid item xs={12} md={4}>
-                  <TextField
-                    fullWidth
-                    type="number"
-                    label="Reorder Point (units)"
-                    value={parameters.reorderPoint}
-                    onChange={handleParameterChange('reorderPoint')}
-                  />
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 3 }}>
+                    <Typography variant="h6" gutterBottom>
+                      Demand Pattern
+                    </Typography>
+                    <FormControl fullWidth margin="normal">
+                      <InputLabel>Demand Pattern</InputLabel>
+                      <Select
+                        value={config.demandPattern}
+                        onChange={handleSelectChange('demandPattern')}
+                        label="Demand Pattern"
+                      >
+                        {demandPatternOptions.map((option) => (
+                          <MenuItem key={option.value} value={option.value}>
+                            {option.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+                      <ParameterSlider
+                        label="Initial demand"
+                        description="Customer demand before any change"
+                        value={config.initialDemand}
+                        min={0}
+                        max={20}
+                        step={1}
+                        onChange={handleSliderChange('initialDemand')}
+                        valueFormatter={formatUnits}
+                      />
+                      <ParameterSlider
+                        label="New demand after change"
+                        description="Customer demand after the step change"
+                        value={config.newDemand}
+                        min={0}
+                        max={30}
+                        step={1}
+                        onChange={handleSliderChange('newDemand')}
+                        valueFormatter={formatUnits}
+                        disabled={config.demandPattern !== 'classic_step'}
+                      />
+                      <ParameterSlider
+                        label="Weeks before new demand"
+                        description="Time before the demand shift takes effect"
+                        value={config.demandChangeWeek}
+                        min={1}
+                        max={20}
+                        step={1}
+                        onChange={handleSliderChange('demandChangeWeek')}
+                        valueFormatter={formatWeeks}
+                        disabled={config.demandPattern !== 'classic_step'}
+                      />
+                    </Box>
+                  </Paper>
                 </Grid>
-                <Grid item xs={12} md={4}>
-                  <TextField
-                    fullWidth
-                    type="number"
-                    label="Order Quantity (units)"
-                    value={parameters.orderQuantity}
-                    onChange={handleParameterChange('orderQuantity')}
-                  />
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 3 }}>
+                    <Typography variant="h6" gutterBottom>
+                      Model Selection
+                    </Typography>
+                    <FormControl fullWidth margin="normal">
+                      <InputLabel>LLM Model</InputLabel>
+                      <Select
+                        value={config.llmModel}
+                        onChange={handleSelectChange('llmModel')}
+                        label="LLM Model"
+                      >
+                        {llmModelOptions.map((option) => (
+                          <MenuItem key={option.value} value={option.value}>
+                            {option.label}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                    <ToggleControl
+                      label="Enable RL model for decision making"
+                      description="Use reinforcement learning support during the game"
+                      checked={config.useRlModel}
+                      onChange={handleToggleChange('useRlModel')}
+                    />
+                  </Paper>
                 </Grid>
               </Grid>
             </Grid>
           </Grid>
         );
-      case 1:
+      case 1: {
+        const demandPatternLabel =
+          demandPatternOptions.find((option) => option.value === config.demandPattern)?.label || config.demandPattern;
+        const llmModelLabel =
+          llmModelOptions.find((option) => option.value === config.llmModel)?.label || config.llmModel;
+        const newDemandSummary =
+          config.demandPattern === 'classic_step' ? formatUnits(config.newDemand) : 'N/A';
+        const demandChangeSummary =
+          config.demandPattern === 'classic_step' ? formatWeeks(config.demandChangeWeek) : 'N/A';
+
         return (
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Simulation Parameters Summary
-            </Typography>
-            <Grid container spacing={3}>
-              <Grid item xs={12} md={6}>
-                <Typography variant="subtitle1">Demand Parameters</Typography>
-                <Typography>Distribution: {parameters.demandDistribution}</Typography>
-                <Typography>Mean: {parameters.demandMean} units/week</Typography>
-                <Typography>Std Dev: {parameters.demandStdDev}</Typography>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <Typography variant="subtitle1">Lead Time Parameters</Typography>
-                <Typography>Distribution: {parameters.leadTimeDistribution}</Typography>
-                <Typography>Mean: {parameters.leadTimeMean} weeks</Typography>
-                <Typography>Std Dev: {parameters.leadTimeStdDev}</Typography>
-              </Grid>
-              <Grid item xs={12}>
-                <Divider sx={{ my: 2 }} />
-                <Typography variant="subtitle1">Inventory Policy</Typography>
-                <Typography>Initial Inventory: {parameters.initialInventory} units</Typography>
-                <Typography>Reorder Point: {parameters.reorderPoint} units</Typography>
-                <Typography>Order Quantity: {parameters.orderQuantity} units</Typography>
-              </Grid>
-              <Grid item xs={12}>
-                <Divider sx={{ my: 2 }} />
-                <Typography variant="subtitle1">Simulation Duration</Typography>
-                <Typography>{parameters.duration} weeks</Typography>
-                <Slider
-                  value={parameters.duration}
-                  onChange={handleParameterChange('duration')}
-                  min={4}
-                  max={52}
-                  valueLabelDisplay="auto"
-                  valueLabelFormat={(value) => `${value} weeks`}
-                  sx={{ mt: 3 }}
-                />
+          <Grid container spacing={3}>
+            <Grid item xs={12} lg={7}>
+              <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom>
+                  Simulation Parameters Summary
+                </Typography>
+                <Grid container spacing={2}>
+                  <Grid item xs={12} sm={6}>
+                    <SummaryItem label="Number of weeks" value={formatWeeks(config.duration)} />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <SummaryItem label="Order lead time" value={formatWeeks(config.orderLeadTime)} />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <SummaryItem label="Shipping lead time" value={formatWeeks(config.shippingLeadTime)} />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <SummaryItem label="Production delay" value={formatWeeks(config.productionDelay)} />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <SummaryItem label="Initial inventory" value={formatUnits(config.initialInventory)} />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <SummaryItem label="Holding cost" value={formatCurrencyPerUnit(config.holdingCost)} />
+                  </Grid>
+                  <Grid item xs={12} sm={6}>
+                    <SummaryItem label="Backorder cost" value={formatCurrencyPerUnit(config.backorderCost)} />
+                  </Grid>
+                </Grid>
+              </Paper>
+            </Grid>
+            <Grid item xs={12} lg={5}>
+              <Grid container spacing={3}>
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 3 }}>
+                    <Typography variant="h6" gutterBottom>
+                      Decision Support Features
+                    </Typography>
+                    <SummaryRow label="Information sharing" value={formatBoolean(config.infoSharing)} />
+                    <SummaryRow
+                      label="Historical weeks"
+                      value={config.infoSharing ? formatWeeks(config.historicalWeeks) : 'Not shared'}
+                    />
+                    <SummaryRow label="Volatility analysis" value={formatBoolean(config.demandVolatility)} />
+                    <SummaryRow
+                      label="Confidence threshold"
+                      value={config.demandVolatility ? `${config.confidenceThreshold}%` : 'N/A'}
+                    />
+                    <SummaryRow label="Pipeline inventory" value={formatBoolean(config.pipelineInventory)} />
+                    <SummaryRow label="Centralized forecast" value={formatBoolean(config.centralizedForecast)} />
+                    <SummaryRow label="Supplier visibility" value={formatBoolean(config.supplierVisibility)} />
+                  </Paper>
+                </Grid>
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 3 }}>
+                    <Typography variant="h6" gutterBottom>
+                      Demand Pattern
+                    </Typography>
+                    <SummaryRow label="Pattern" value={demandPatternLabel} />
+                    <SummaryRow label="Initial demand" value={formatUnits(config.initialDemand)} />
+                    <SummaryRow label="New demand" value={newDemandSummary} />
+                    <SummaryRow label="Change occurs after" value={demandChangeSummary} />
+                  </Paper>
+                </Grid>
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 3 }}>
+                    <Typography variant="h6" gutterBottom>
+                      Models
+                    </Typography>
+                    <SummaryRow label="LLM model" value={llmModelLabel} />
+                    <SummaryRow label="RL model" value={formatBoolean(config.useRlModel)} />
+                  </Paper>
+                </Grid>
               </Grid>
             </Grid>
-          </Paper>
+          </Grid>
         );
+      }
       case 2:
         return (
           <Box>
@@ -327,7 +643,7 @@ const Simulation = () => {
                   <span>
                     <IconButton
                       onClick={handleStepForward}
-                      disabled={currentWeek >= parameters.duration - 1 || simulationState === 'running'}
+                      disabled={currentWeek >= config.duration - 1 || simulationState === 'running'}
                     >
                       <NextIcon />
                     </IconButton>
@@ -401,15 +717,15 @@ const Simulation = () => {
                     <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
                       <Typography variant="h6">Simulation Progress</Typography>
                       <Typography variant="body2" color="textSecondary">
-                        Week {currentWeek + 1} of {parameters.duration}
+                        Week {currentWeek + 1} of {config.duration}
                       </Typography>
                     </Box>
                     <Box sx={{ width: '100%' }}>
                       <Slider
                         value={currentWeek}
                         min={0}
-                        max={parameters.duration - 1}
-                        onChange={(e, value) => setCurrentWeek(value)}
+                        max={config.duration - 1}
+                        onChange={(e, value) => setCurrentWeek(Array.isArray(value) ? value[0] : value)}
                         valueLabelDisplay="auto"
                         valueLabelFormat={(value) => `Week ${value + 1}`}
                         disabled={simulationState === 'running'}
