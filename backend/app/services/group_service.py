@@ -31,6 +31,15 @@ class GroupService:
     def get_groups(self):
         return self.db.query(Group).all()
 
+    def get_group(self, group_id: int) -> Group:
+        group = self.db.query(Group).filter(Group.id == group_id).first()
+        if not group:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Group not found",
+            )
+        return group
+
     def create_group(self, group_in: GroupCreate) -> Group:
         admin_data = group_in.admin
         hashed_password = get_password_hash(admin_data.password)

@@ -23,12 +23,11 @@ async def read_users(
     """
     Retrieve all users (admin only).
     """
-    if not current_user.is_superuser:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
-    return user_service.get_users(skip=skip, limit=limit)
+    return user_service.list_accessible_users(
+        current_user=current_user,
+        skip=skip,
+        limit=limit,
+    )
 
 @router.post("/", response_model=User, status_code=status.HTTP_201_CREATED)
 async def create_user(
@@ -39,12 +38,7 @@ async def create_user(
     """
     Create new user (admin only).
     """
-    if not current_user.is_superuser:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
-    return user_service.create_user(user_in)
+    return user_service.create_user(user_in, current_user)
 
 @router.delete("/{user_id}", response_model=dict)
 async def delete_user(
@@ -56,11 +50,6 @@ async def delete_user(
     """
     Delete a user (admin only).
     """
-    if not current_user.is_superuser:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
     return user_service.delete_user(user_id, current_user, replacement_admin_id)
 
 @router.put("/{user_id}", response_model=User)
@@ -110,9 +99,16 @@ async def read_user(
     """
     Get a specific user by ID (admin only).
     """
-    if not current_user.is_superuser and current_user.id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not enough permissions"
-        )
-    return user_service.get_user(user_id)
+    user = user_service.get_user(user_id)
+
+    if current_user.is_superuser or current_user.id == user_id:
+        return user
+
+    if user_service.is_group_admin(current_user):
+        if user.group_id == current_user.group_id and user_service.get_user_type(user) == "player":
+            return user
+
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Not enough permissions",
+    )
