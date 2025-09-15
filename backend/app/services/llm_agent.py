@@ -13,14 +13,20 @@ class LLMStrategy(Enum):
 
 class LLMAgent:
     """LLM-based agent for the Beer Game that uses OpenAI's API."""
-    
-    def __init__(self, role: str, strategy: LLMStrategy = LLMStrategy.BALANCED):
+
+    def __init__(
+        self,
+        role: str,
+        strategy: LLMStrategy = LLMStrategy.BALANCED,
+        model: str = "gpt-4",
+    ):
         self.role = role
         self.strategy = strategy
+        self.model = model
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         if not self.openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable not set")
-        
+
         openai.api_key = self.openai_api_key
         self.conversation_history = []
         self.initialize_agent()
@@ -117,7 +123,7 @@ class LLMAgent:
             
             # Call OpenAI API
             response = openai.ChatCompletion.create(
-                model="gpt-4",  # or "gpt-3.5-turbo" for faster/cheaper but potentially less reliable responses
+                model=self.model,
                 messages=self.conversation_history,
                 temperature=0.7 if self.strategy == LLMStrategy.ADAPTIVE else 0.3,
                 max_tokens=200,
@@ -174,7 +180,7 @@ if __name__ == "__main__":
     load_dotenv()
     
     # Example usage
-    agent = LLMAgent(role="retailer", strategy=LLMStrategy.BALANCED)
+    agent = LLMAgent(role="retailer", strategy=LLMStrategy.BALANCED, model="gpt-4o-mini")
     
     # Example game state
     order = agent.make_decision(

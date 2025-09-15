@@ -2,6 +2,13 @@ from typing import List, Dict, Optional
 import random
 from enum import Enum
 
+# Import the LLM agent only when needed to avoid unnecessary dependencies
+try:  # pragma: no cover - optional import
+    from .llm_agent import LLMAgent, LLMStrategy
+except Exception:  # pragma: no cover - tests may not have openai deps
+    LLMAgent = None  # type: ignore
+    LLMStrategy = None  # type: ignore
+
 class AgentType(Enum):
     RETAILER = "retailer"
     WHOLESALER = "wholesaler"
@@ -23,7 +30,8 @@ class BeerGameAgent:
         strategy: AgentStrategy = AgentStrategy.NAIVE,
         can_see_demand: bool = False,
         initial_inventory: int = 12,
-        initial_orders: int = 4
+        initial_orders: int = 4,
+        llm_model: Optional[str] = None,
     ):
         self.agent_id = agent_id
         self.agent_type = agent_type
@@ -35,6 +43,9 @@ class BeerGameAgent:
         self.order_history = []
         self.demand_history = []
         self.last_order = initial_orders
+        # LLM specific configuration
+        self.llm_model = llm_model
+        self._llm_agent: Optional[LLMAgent] = None
         
     def make_decision(
         self, 
@@ -65,7 +76,7 @@ class BeerGameAgent:
         elif self.strategy == AgentStrategy.CONSERVATIVE:
             order = self._conservative_strategy(current_demand)
         elif self.strategy == AgentStrategy.LLM:
-            order = self._llm_strategy(current_demand)
+            order = self._llm_strategy(current_round, current_demand, upstream_data)
         else:  # RANDOM
             order = self._random_strategy()
             
@@ -104,6 +115,43 @@ class BeerGameAgent:
     def _random_strategy(self) -> int:
         """Make random orders for baseline testing."""
         return random.randint(1, 8)
+
+    def _llm_strategy(
+        self,
+        current_round: int,
+        current_demand: Optional[int],
+        upstream_data: Optional[Dict],
+    ) -> int:
+        """Use an LLM-backed agent to decide the order quantity."""
+        if LLMAgent is None:  # LLM dependencies not available
+            return self._naive_strategy(current_demand)
+
+        if self._llm_agent is None:
+            try:
+                model = self.llm_model or "gpt-4"
+                self._llm_agent = LLMAgent(
+                    role=self.agent_type.value,
+                    strategy=LLMStrategy.BALANCED if LLMStrategy else None,
+                    model=model,
+                )
+            except Exception:
+                # Fallback to simple strategy if initialization fails
+                return self._naive_strategy(current_demand)
+
+        try:
+            return self._llm_agent.make_decision(
+                current_round=current_round,
+                current_inventory=self.inventory,
+                backorders=self.backlog,
+                incoming_shipments=self.pipeline,
+                demand_history=self.demand_history,
+                order_history=self.order_history,
+                current_demand=current_demand,
+                upstream_data=upstream_data,
+            )
+        except Exception:
+            # Fallback if the LLM call fails for any reason
+            return self._naive_strategy(current_demand)
     
     def update_inventory(self, incoming_shipment: int, outgoing_shipment: int):
         """Update inventory and backlog based on incoming and outgoing shipments."""
@@ -129,38 +177,50 @@ class AgentManager:
             agent_id=1,
             agent_type=AgentType.RETAILER,
             strategy=AgentStrategy.NAIVE,
-            can_see_demand=True  # Retailer can always see demand
+            can_see_demand=True,  # Retailer can always see demand
+            llm_model="gpt-4o-mini",
         )
         
         self.agents[AgentType.WHOLESALER] = BeerGameAgent(
             agent_id=2,
             agent_type=AgentType.WHOLESALER,
             strategy=AgentStrategy.NAIVE,
-            can_see_demand=self.can_see_demand
+            can_see_demand=self.can_see_demand,
+            llm_model="gpt-4o-mini",
         )
         
         self.agents[AgentType.DISTRIBUTOR] = BeerGameAgent(
             agent_id=3,
             agent_type=AgentType.DISTRIBUTOR,
             strategy=AgentStrategy.NAIVE,
-            can_see_demand=self.can_see_demand
+            can_see_demand=self.can_see_demand,
+            llm_model="gpt-4o-mini",
         )
         
         self.agents[AgentType.FACTORY] = BeerGameAgent(
             agent_id=4,
             agent_type=AgentType.FACTORY,
             strategy=AgentStrategy.NAIVE,
-            can_see_demand=self.can_see_demand
+            can_see_demand=self.can_see_demand,
+            llm_model="gpt-4o-mini",
         )
     
     def get_agent(self, agent_type: AgentType) -> BeerGameAgent:
         """Get agent by type."""
         return self.agents.get(agent_type)
     
-    def set_agent_strategy(self, agent_type: AgentType, strategy: AgentStrategy):
-        """Set strategy for a specific agent."""
+    def set_agent_strategy(
+        self,
+        agent_type: AgentType,
+        strategy: AgentStrategy,
+        llm_model: Optional[str] = None,
+    ):
+        """Set strategy and optional LLM model for a specific agent."""
         if agent_type in self.agents:
-            self.agents[agent_type].strategy = strategy
+            agent = self.agents[agent_type]
+            agent.strategy = strategy
+            if llm_model is not None:
+                agent.llm_model = llm_model
     
     def set_demand_visibility(self, visible: bool):
         """Set whether agents can see the actual customer demand."""
