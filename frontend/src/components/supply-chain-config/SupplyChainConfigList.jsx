@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -46,6 +46,7 @@ import api from '../../services/api';
 const SupplyChainConfigList = ({
   title = 'Supply Chain Configurations',
   basePath = '/supply-chain-config',
+  restrictToGroupId = null,
 } = {}) => {
 
   const [configs, setConfigs] = useState([]);
@@ -69,11 +70,27 @@ const SupplyChainConfigList = ({
     }
   };
 
-  const fetchConfigs = async () => {
+  const fetchConfigs = useCallback(async () => {
     try {
       setLoading(true);
       const response = await api.get('/api/v1/supply-chain-config');
-      setConfigs(response.data || []);
+      const data = response.data || [];
+      const targetGroupId =
+        restrictToGroupId !== null && restrictToGroupId !== undefined
+          ? String(restrictToGroupId)
+          : null;
+
+      const filteredConfigs =
+        targetGroupId !== null
+          ? data.filter(
+              (config) =>
+                config?.group_id !== undefined &&
+                config?.group_id !== null &&
+                String(config.group_id) === targetGroupId,
+            )
+          : data;
+
+      setConfigs(filteredConfigs);
       setError(null);
     } catch (err) {
       console.warn('Supply chain configs endpoint unavailable; showing empty list.', err?.response?.status);
@@ -82,11 +99,11 @@ const SupplyChainConfigList = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [restrictToGroupId]);
 
   useEffect(() => {
     fetchConfigs();
-  }, []);
+  }, [fetchConfigs]);
 
   const handleCreateNew = () => {
     navigate(`${basePath}/new`);
@@ -180,8 +197,11 @@ const SupplyChainConfigList = ({
             {loading ? (
               <CircularProgress size={24} />
             ) : (
-              <Typography variant="body2" color="text.secondary">
-                No supply chain configurations found. Create your first configuration to get started.
+              <Typography
+                variant="body2"
+                color={error ? 'error.main' : 'text.secondary'}
+              >
+                {error || 'No supply chain configurations found. Create your first configuration to get started.'}
               </Typography>
             )}
           </TableCell>
@@ -285,8 +305,11 @@ const SupplyChainConfigList = ({
         <CardContent>
           {configs.length === 0 ? (
             <Box textAlign="center" py={4}>
-              <Typography variant="body1" color="textSecondary">
-                No supply chain configurations found. Create your first configuration to get started.
+              <Typography
+                variant="body1"
+                color={error ? 'error.main' : 'text.secondary'}
+              >
+                {error || 'No supply chain configurations found. Create your first configuration to get started.'}
               </Typography>
               <Box mt={2}>
                 <Button
