@@ -112,9 +112,22 @@ class MixedGameService:
             if is_ai:
                 try:
                     agent_type = AgentType(assignment.role.lower())
-                    strategy_value = (assignment.strategy.value if hasattr(assignment.strategy, 'value') else str(assignment.strategy))
-                    strategy = AgentStrategyEnum(strategy_value.lower())
-                    self.agent_manager.set_agent_strategy(agent_type, strategy)
+                    strategy_value = (
+                        assignment.strategy.value
+                        if hasattr(assignment.strategy, "value")
+                        else str(assignment.strategy)
+                    )
+                    try:
+                        strategy = AgentStrategyEnum(strategy_value.lower())
+                    except ValueError:
+                        # Map any llm_* strategy to generic LLM
+                        if strategy_value.lower().startswith("llm"):
+                            strategy = AgentStrategyEnum.LLM
+                        else:
+                            raise
+                    self.agent_manager.set_agent_strategy(
+                        agent_type, strategy, llm_model=assignment.llm_model
+                    )
                 except Exception:
                     # Fallback: ignore if mapping not supported
                     pass
@@ -584,23 +597,24 @@ class MixedGameService:
             demand_pattern = json.loads(game_result[7]) if game_result[7] else {}
         except (json.JSONDecodeError, TypeError):
             demand_pattern = {}
-            # Unpack optional config
-            node_policies = {}
-            system_config = {}
-            pricing_config = {}
-            global_policy = {}
-            try:
-                cfg = json.loads(game_result[8]) if len(game_result) > 8 and game_result[8] else {}
-                if isinstance(cfg, dict):
-                    node_policies = cfg.get('node_policies', {})
-                    system_config = cfg.get('system_config', {})
-                    pricing_config = cfg.get('pricing_config', {})
-                    global_policy = cfg.get('global_policy', {})
-                # Also surface nested in demand_pattern.params if present
-                if not node_policies:
-                    node_policies = demand_pattern.get('params', {}).get('node_policies', {}) if isinstance(demand_pattern, dict) else {}
-                if not system_config:
-                    system_config = demand_pattern.get('params', {}).get('system_config', {}) if isinstance(demand_pattern, dict) else {}
+
+        # Unpack optional config
+        node_policies = {}
+        system_config = {}
+        pricing_config = {}
+        global_policy = {}
+        try:
+            cfg = json.loads(game_result[8]) if len(game_result) > 8 and game_result[8] else {}
+            if isinstance(cfg, dict):
+                node_policies = cfg.get('node_policies', {})
+                system_config = cfg.get('system_config', {})
+                pricing_config = cfg.get('pricing_config', {})
+                global_policy = cfg.get('global_policy', {})
+            # Also surface nested in demand_pattern.params if present
+            if not node_policies:
+                node_policies = demand_pattern.get('params', {}).get('node_policies', {}) if isinstance(demand_pattern, dict) else {}
+            if not system_config:
+                system_config = demand_pattern.get('params', {}).get('system_config', {}) if isinstance(demand_pattern, dict) else {}
         except Exception:
             pass
             

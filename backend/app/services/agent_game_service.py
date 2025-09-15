@@ -253,12 +253,14 @@ class AgentGameService:
             'demand_pattern': game.demand_pattern
         }
     
-    def set_agent_strategy(self, role: str, strategy: str):
+    def set_agent_strategy(self, role: str, strategy: str, llm_model: Optional[str] = None):
         """Set the strategy for an AI agent."""
         try:
             agent_type = AgentType(role.lower())
             strategy_enum = AgentStrategy(strategy.lower())
-            self.agent_manager.set_agent_strategy(agent_type, strategy_enum)
+            self.agent_manager.set_agent_strategy(
+                agent_type, strategy_enum, llm_model=llm_model
+            )
         except ValueError as e:
             raise ValueError(f"Invalid role or strategy: {e}")
     
