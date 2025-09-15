@@ -1,18 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Box, 
-  Button, 
-  Card, 
-  CardContent, 
-  CardHeader, 
-  Divider,
-  IconButton,
-  List,
-  ListItem,
-  Tooltip,
-  Typography,
-
+import {
+  Box,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
   Chip,
   CircularProgress,
   Dialog,
@@ -20,7 +13,10 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
+  Divider,
   IconButton,
+  List,
+  ListItem,
   Menu,
   MenuItem,
   Paper,
@@ -63,6 +59,15 @@ const SupplyChainConfigList = ({
 
   const navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar();
+
+  const formatDate = (value) => {
+    if (!value) return '—';
+    try {
+      return format(new Date(value), 'MMM d, yyyy');
+    } catch (error) {
+      return value;
+    }
+  };
 
   const fetchConfigs = async () => {
     try {

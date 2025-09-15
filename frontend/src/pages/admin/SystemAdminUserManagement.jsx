@@ -9,7 +9,12 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  FormControl,
+  FormHelperText,
   IconButton,
+  InputLabel,
+  MenuItem,
+  Select,
   Table,
   TableBody,
   TableCell,
@@ -28,6 +33,7 @@ const BASE_FORM = {
   username: '',
   email: '',
   password: '',
+  groupId: '',
 };
 
 const getUserType = (user) => {
@@ -52,12 +58,12 @@ const parseErrorMessage = (error, fallback) => {
   return fallback;
 };
 
-function GroupPlayerManagement() {
+function SystemAdminUserManagement() {
   const navigate = useNavigate();
-  const { isGroupAdmin, user } = useAuth();
+  const { user } = useAuth();
   const systemAdmin = isSystemAdminUser(user);
 
-  const [players, setPlayers] = useState([]);
+  const [admins, setAdmins] = useState([]);
   const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -66,14 +72,10 @@ function GroupPlayerManagement() {
   const [form, setForm] = useState({ ...BASE_FORM });
 
   useEffect(() => {
-    if (!isGroupAdmin) {
+    if (!systemAdmin) {
       navigate('/unauthorized');
-      return;
     }
-    if (systemAdmin) {
-      navigate('/system/users', { replace: true });
-    }
-  }, [isGroupAdmin, navigate, systemAdmin]);
+  }, [systemAdmin, navigate]);
 
   const loadGroups = useCallback(async () => {
     try {
@@ -88,38 +90,38 @@ function GroupPlayerManagement() {
     }
   }, []);
 
-  const loadPlayers = useCallback(async () => {
+  const loadAdmins = useCallback(async () => {
     try {
-      const response = await api.get('/api/v1/users', { params: { limit: 250 } });
+      const response = await api.get('/api/v1/users', { params: { user_type: 'group_admin', limit: 250 } });
       const data = Array.isArray(response.data) ? response.data : [];
-      const filtered = data.filter((item) => getUserType(item) === 'player');
-      setPlayers(filtered);
+      const filtered = data.filter((item) => getUserType(item) === 'group_admin');
+      setAdmins(filtered);
       return filtered;
     } catch (error) {
-      console.error('Error loading players:', error);
-      setPlayers([]);
+      console.error('Error loading group administrators:', error);
+      setAdmins([]);
       throw error;
     }
   }, []);
 
   useEffect(() => {
-    if (!isGroupAdmin || systemAdmin) {
+    if (!systemAdmin) {
       return;
     }
 
     const fetchAll = async () => {
       setLoading(true);
       try {
-        await Promise.all([loadGroups(), loadPlayers()]);
+        await Promise.all([loadGroups(), loadAdmins()]);
       } catch (error) {
-        toast.error('Failed to load player information');
+        toast.error('Failed to load user information');
       } finally {
         setLoading(false);
       }
     };
 
     fetchAll();
-  }, [isGroupAdmin, systemAdmin, loadGroups, loadPlayers]);
+  }, [systemAdmin, loadGroups, loadAdmins]);
 
   const groupMap = useMemo(() => {
     const map = {};
@@ -130,8 +132,9 @@ function GroupPlayerManagement() {
   }, [groups]);
 
   const handleOpenDialog = () => {
+    const defaultGroupId = groups.length === 1 ? String(groups[0].id) : '';
     setEditingUser(null);
-    setForm({ ...BASE_FORM });
+    setForm({ ...BASE_FORM, groupId: defaultGroupId });
     setDialogOpen(true);
   };
 
@@ -142,77 +145,88 @@ function GroupPlayerManagement() {
     setForm({ ...BASE_FORM });
   };
 
-  const handleEditUser = (player) => {
-    setEditingUser(player);
+  const handleEditUser = (admin) => {
+    setEditingUser(admin);
     setForm({
-      username: player.username || '',
-      email: player.email || '',
+      username: admin.username || '',
+      email: admin.email || '',
       password: '',
+      groupId: admin.group_id ? String(admin.group_id) : '',
     });
     setDialogOpen(true);
   };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+
     const trimmedUsername = form.username.trim();
     const trimmedEmail = form.email.trim();
+    const trimmedPassword = form.password.trim();
+    const trimmedGroup = form.groupId.trim();
 
     if (!trimmedUsername || !trimmedEmail) {
       toast.error('Username and email are required.');
       return;
     }
 
+    if (!trimmedGroup) {
+      toast.error('Please select a group for this administrator.');
+      return;
+    }
+
     const payload = {
       username: trimmedUsername,
       email: trimmedEmail,
+      group_id: Number(trimmedGroup),
+      user_type: 'group_admin',
     };
 
     if (!editingUser) {
-      if (!form.password.trim()) {
-        toast.error('Password is required for new players.');
+      if (!trimmedPassword) {
+        toast.error('Password is required for new administrators.');
         return;
       }
-      payload.password = form.password;
-    } else if (form.password.trim()) {
-      payload.password = form.password.trim();
+      payload.password = trimmedPassword;
+    } else if (trimmedPassword) {
+      payload.password = trimmedPassword;
     }
 
     setSaving(true);
     try {
       if (editingUser) {
         await api.put(`/api/v1/users/${editingUser.id}`, payload);
-        toast.success('Player updated successfully');
+        toast.success('Group administrator updated successfully');
       } else {
         await api.post('/api/v1/users', payload);
-        toast.success('Player created successfully');
+        toast.success('Group administrator created successfully');
       }
 
       handleCloseDialog();
-      await loadPlayers();
+      await loadAdmins();
     } catch (error) {
-      const message = parseErrorMessage(error, 'Failed to save player');
+      const message = parseErrorMessage(error, 'Failed to save administrator');
       toast.error(message);
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDeleteUser = async (player) => {
-    if (!player) return;
-    const confirmMessage = `Are you sure you want to delete ${player.username || 'this player'}?`;
+  const handleDeleteUser = async (admin) => {
+    if (!admin) return;
+    const confirmMessage = `Are you sure you want to delete ${admin.username || 'this group administrator'}?`;
     if (!window.confirm(confirmMessage)) return;
 
     try {
-      await api.delete(`/api/v1/users/${player.id}`);
-      toast.success('Player deleted');
-      await loadPlayers();
+      await api.delete(`/api/v1/users/${admin.id}`);
+      toast.success('Group administrator deleted');
+      await loadAdmins();
     } catch (error) {
-      const message = parseErrorMessage(error, 'Failed to delete player');
+      const message = parseErrorMessage(error, 'Failed to delete administrator');
       toast.error(message);
     }
   };
 
-  if (!isGroupAdmin || systemAdmin) {
+  if (!systemAdmin) {
     return null;
   }
 
@@ -229,14 +243,14 @@ function GroupPlayerManagement() {
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Box>
           <Typography variant="h4" component="h1" sx={{ fontWeight: 600, color: 'text.primary' }}>
-            Player Management
+            Group Administrator Management
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Manage the players within your group.
+            Create and manage group administrators across the platform.
           </Typography>
         </Box>
         <Button variant="contained" startIcon={<AddIcon />} onClick={handleOpenDialog}>
-          Add Player
+          Add Group Admin
         </Button>
       </Box>
 
@@ -252,41 +266,38 @@ function GroupPlayerManagement() {
             </TableRow>
           </TableHead>
           <TableBody>
-            {players.length === 0 ? (
+            {admins.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={5} align="center">
-                  <Typography color="text.secondary">No players found for your group yet.</Typography>
+                  <Typography color="text.secondary">No group administrators found yet.</Typography>
                 </TableCell>
               </TableRow>
             ) : (
-              players.map((player) => {
-                const type = getUserType(player);
-                return (
-                  <TableRow key={player.id} hover>
-                    <TableCell>{player.username}</TableCell>
-                    <TableCell>{player.email}</TableCell>
-                    <TableCell>{groupMap[player.group_id] || '—'}</TableCell>
-                    <TableCell>
-                      <Chip label={type === 'player' ? 'Player' : 'User'} color={type === 'player' ? 'success' : 'default'} size="small" />
-                    </TableCell>
-                    <TableCell align="right">
-                      <IconButton color="primary" onClick={() => handleEditUser(player)}>
-                        <EditIcon fontSize="small" />
-                      </IconButton>
-                      <IconButton color="error" onClick={() => handleDeleteUser(player)}>
-                        <DeleteIcon fontSize="small" />
-                      </IconButton>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
+              admins.map((admin) => (
+                <TableRow key={admin.id} hover>
+                  <TableCell>{admin.username}</TableCell>
+                  <TableCell>{admin.email}</TableCell>
+                  <TableCell>{groupMap[admin.group_id] || '—'}</TableCell>
+                  <TableCell>
+                    <Chip label="Group Admin" color="primary" size="small" />
+                  </TableCell>
+                  <TableCell align="right">
+                    <IconButton color="primary" onClick={() => handleEditUser(admin)}>
+                      <EditIcon fontSize="small" />
+                    </IconButton>
+                    <IconButton color="error" onClick={() => handleDeleteUser(admin)}>
+                      <DeleteIcon fontSize="small" />
+                    </IconButton>
+                  </TableCell>
+                </TableRow>
+              ))
             )}
           </TableBody>
         </Table>
       </Box>
 
       <Dialog open={dialogOpen} onClose={handleCloseDialog} fullWidth maxWidth="sm">
-        <DialogTitle>{editingUser ? 'Edit Player' : 'Add Player'}</DialogTitle>
+        <DialogTitle>{editingUser ? 'Edit Group Admin' : 'Add Group Admin'}</DialogTitle>
         <form onSubmit={handleSubmit}>
           <DialogContent dividers>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -313,6 +324,27 @@ function GroupPlayerManagement() {
                 required={!editingUser}
                 fullWidth
               />
+              <FormControl fullWidth required error={!form.groupId}>
+                <InputLabel id="group-select-label">Group</InputLabel>
+                <Select
+                  labelId="group-select-label"
+                  label="Group"
+                  value={form.groupId}
+                  onChange={(event) => setForm((prev) => ({ ...prev, groupId: event.target.value }))}
+                >
+                  <MenuItem value="">
+                    <em>Select a group</em>
+                  </MenuItem>
+                  {groups.map((group) => (
+                    <MenuItem key={group.id} value={String(group.id)}>
+                      {group.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+                {groups.length === 0 && (
+                  <FormHelperText>No groups available. Create a group before adding administrators.</FormHelperText>
+                )}
+              </FormControl>
             </Box>
           </DialogContent>
           <DialogActions>
@@ -320,7 +352,7 @@ function GroupPlayerManagement() {
               Cancel
             </Button>
             <Button type="submit" variant="contained" disabled={saving}>
-              {saving ? 'Saving…' : editingUser ? 'Save Changes' : 'Add Player'}
+              {saving ? 'Saving…' : editingUser ? 'Save Changes' : 'Add Group Admin'}
             </Button>
           </DialogActions>
         </form>
@@ -329,4 +361,4 @@ function GroupPlayerManagement() {
   );
 }
 
-export default GroupPlayerManagement;
+export default SystemAdminUserManagement;

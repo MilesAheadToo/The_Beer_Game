@@ -15,8 +15,9 @@ def get_user_service(db: Session = Depends(get_db)) -> UserService:
 
 @router.get("/", response_model=List[User])
 async def read_users(
-    skip: int = 0, 
+    skip: int = 0,
     limit: int = 100,
+    user_type: Optional[str] = None,
     user_service: UserService = Depends(get_user_service),
     current_user: models.User = Depends(get_current_active_user)
 ):
@@ -27,6 +28,7 @@ async def read_users(
         current_user=current_user,
         skip=skip,
         limit=limit,
+        user_type=user_type,
     )
 
 @router.post("/", response_model=User, status_code=status.HTTP_201_CREATED)
