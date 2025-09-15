@@ -20,7 +20,11 @@ export const isSuperAdmin = (user) => {
   const normalizedEmail = getNormalizedEmail(user);
   const roles = normalizeRoles(user?.roles);
 
-  return normalizedEmail === 'superadmin@daybreak.ai' || roles.includes('superadmin');
+  return (
+    Boolean(user?.is_superuser) ||
+    normalizedEmail === 'superadmin@daybreak.ai' ||
+    roles.includes('superadmin')
+  );
 };
 
 export const isAdmin = (user) => {
@@ -41,7 +45,7 @@ export const isAdmin = (user) => {
 
 export const getDefaultLandingPath = (user) => {
   if (isSuperAdmin(user)) {
-    return '/system-config';
+    return '/admin/groups';
   }
 
   if (isAdmin(user)) {
