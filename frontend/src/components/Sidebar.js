@@ -28,6 +28,7 @@ import {
 } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
 import { useAuth } from '../contexts/AuthContext';
+import { isAdmin as isAdminUser, isSuperAdmin as isSuperAdminUser } from '../utils/authUtils';
 
 const drawerWidth = 240;
 
@@ -63,13 +64,8 @@ const superAdminMenuItems = [
 const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
   const [adminOpen, setAdminOpen] = React.useState(false);
   const { user: currentUser } = useAuth() || {};
-  const isSuperAdmin =
-    currentUser?.email?.toLowerCase() === 'superadmin@daybreak.ai' ||
-    (Array.isArray(currentUser?.roles) && currentUser.roles.includes('superadmin'));
-  const isAdmin =
-    currentUser?.email?.toLowerCase() === 'admin@daybreak.ai' ||
-    currentUser?.is_superuser ||
-    (Array.isArray(currentUser?.roles) && currentUser.roles.includes('admin'));
+  const isSuperAdmin = isSuperAdminUser(currentUser);
+  const isAdmin = isAdminUser(currentUser);
   const location = useLocation();
   
   // If we're still loading the user, don't render anything

@@ -25,6 +25,7 @@ import SupplyChainConfigList from "./components/supply-chain-config/SupplyChainC
 import SupplyChainConfigForm from "./components/supply-chain-config/SupplyChainConfigForm";
 import Players from "./pages/Players.jsx";
 import DebugBanner from "./components/DebugBanner.jsx";
+import { getDefaultLandingPath } from "./utils/authUtils";
 
 window.onerror = function (message, source, lineno, colno, error) {
   console.error("Global error:", { message, source, lineno, colno, error });
@@ -52,6 +53,13 @@ function RequireAuth() {
   }
 
   return <Outlet />;
+}
+
+function LandingRedirect() {
+  const { user } = useAuth();
+  const destination = getDefaultLandingPath(user);
+
+  return <Navigate to={destination} replace />;
 }
 
 const AppContent = () => {
@@ -256,7 +264,7 @@ const AppContent = () => {
               }
             />
 
-            <Route path="/" element={<Navigate to="/games" replace />} />
+            <Route path="/" element={<LandingRedirect />} />
             <Route path="*" element={<Navigate to="/games" replace />} />
           </Route>
         </Routes>
