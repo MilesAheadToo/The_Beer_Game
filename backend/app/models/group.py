@@ -21,5 +21,16 @@ class Group(Base):
 
     admin: Mapped["User"] = relationship("User", back_populates="admin_of_group", foreign_keys=[admin_id])
     users: Mapped[List["User"]] = relationship("User", back_populates="group", foreign_keys="User.group_id", cascade="all, delete-orphan")
-    supply_chain_configs: Mapped[List["SupplyChainConfig"]] = relationship("SupplyChainConfig", back_populates="group", cascade="all, delete-orphan")
+    
+    # Make supply_chain_configs relationship optional
+    if TYPE_CHECKING:
+        supply_chain_configs: Mapped[List["SupplyChainConfig"]]
+    else:
+        supply_chain_configs = relationship(
+            "SupplyChainConfig", 
+            back_populates="group", 
+            cascade="all, delete-orphan",
+            lazy='dynamic'
+        )
+        
     games: Mapped[List["Game"]] = relationship("Game", back_populates="group", cascade="all, delete-orphan")
