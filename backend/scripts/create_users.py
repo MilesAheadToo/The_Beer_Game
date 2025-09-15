@@ -87,7 +87,7 @@ def get_db_connection_string():
     server = os.getenv("MYSQL_SERVER", "db")
     port = os.getenv("MYSQL_PORT", "3306")
     user = os.getenv("MYSQL_USER", "beer_user")
-    password = os.getenv("MYSQL_PASSWORD", "Daybreak@2025")
+    password = os.getenv("MYSQL_PASSWORD", "change-me-user")
     db_name = os.getenv("MYSQL_DB", "beer_game")
     
     # URL encode the password to handle special characters
