@@ -23,17 +23,15 @@ def call_beer_game_gpt(user_message: str):
     gpt_id = os.getenv("GPT_ID", "gpt-50")
 
     request_args = {
-        "model": "gpt-4o",
+        "model": "gpt-4.1-mini",
         "gpt": gpt_id,
-        "messages": [
-            {"role": "system", "content": "You are Daybreak Beer Game Strategist."},
-            {"role": "user", "content": user_message},
-        ],
-        "tool_choice": "auto",
+        "instructions": "You are Daybreak Beer Game Strategist.",
+        "input": user_message,
+        "tools": [{"type": "code_interpreter"}],
     }
 
-    response = client.chat.completions.create(**request_args)
-    reply = response.choices[0].message.content
+    response = client.responses.create(**request_args)
+    reply = response.output_text
     print("FULL RESPONSE:\n", reply)
 
     order_match = re.search(r"ORDER:\s*(\d+)", reply)
