@@ -39,6 +39,10 @@ class SupplyChainConfigBase(BaseModel):
     name: str = Field(..., max_length=100, description="Name of the configuration")
     description: Optional[str] = Field(None, max_length=500, description="Description of the configuration")
     is_active: bool = Field(False, description="Whether this is the active configuration")
+    group_id: Optional[int] = Field(
+        None,
+        description="ID of the group that owns this configuration"
+    )
 
 class ItemBase(BaseModel):
     name: str = Field(..., max_length=100, description="Name of the item")
@@ -99,6 +103,7 @@ class SupplyChainConfigUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100, description="Name of the configuration")
     description: Optional[str] = Field(None, max_length=500, description="Description of the configuration")
     is_active: Optional[bool] = Field(None, description="Whether this is the active configuration")
+    group_id: Optional[int] = Field(None, description="ID of the group that owns this configuration")
 
 class ItemUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=100, description="Name of the item")

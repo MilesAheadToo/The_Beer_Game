@@ -40,6 +40,38 @@ def get_node_or_404(db: Session, node_id: int, config_id: int):
         )
     return node
 
+
+def _get_user_admin_group_id(db: Session, user: models.User) -> Optional[int]:
+    """Return the group ID managed by the provided user, if any."""
+    if user.is_superuser:
+        return None
+
+    result = (
+        db.query(models.Group)
+        .filter(models.Group.admin_id == user.id)
+        .first()
+    )
+    if result:
+        return result.id
+    return None
+
+
+def _ensure_user_can_manage_config(
+    db: Session,
+    user: models.User,
+    config: SupplyChainConfig,
+):
+    """Ensure the current user can manage the provided configuration."""
+    if user.is_superuser:
+        return
+
+    admin_group_id = _get_user_admin_group_id(db, user)
+    if not admin_group_id or config.group_id != admin_group_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this configuration",
+        )
+
 # --- Configuration Endpoints ---
 
 @router.get("/", response_model=List[schemas.SupplyChainConfig])
@@ -47,18 +79,55 @@ def read_configs(
     db: Session = Depends(deps.get_db),
     skip: int = 0,
     limit: int = 100,
+    current_user: models.User = Depends(deps.get_current_active_user),
 ):
     """Retrieve all supply chain configurations."""
-    return crud.supply_chain_config.get_multi(db, skip=skip, limit=limit)
+    if current_user.is_superuser:
+        return crud.supply_chain_config.get_multi(db, skip=skip, limit=limit)
+
+    admin_group_id = _get_user_admin_group_id(db, current_user)
+    if not admin_group_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to view these configurations",
+        )
+
+    return crud.supply_chain_config.get_multi(
+        db,
+        skip=skip,
+        limit=limit,
+        group_id=admin_group_id,
+    )
 
 @router.get("/active", response_model=schemas.SupplyChainConfig)
-def read_active_config(db: Session = Depends(deps.get_db)):
+def read_active_config(
+    db: Session = Depends(deps.get_db),
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
     """Get the active supply chain configuration."""
-    config = crud.supply_chain_config.get_active(db)
+    if current_user.is_superuser:
+        config = crud.supply_chain_config.get_active(db)
+    else:
+        admin_group_id = _get_user_admin_group_id(db, current_user)
+        if not admin_group_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to view this configuration",
+            )
+
+        config = (
+            db.query(SupplyChainConfig)
+            .filter(
+                SupplyChainConfig.group_id == admin_group_id,
+                SupplyChainConfig.is_active == True,
+            )
+            .first()
+        )
+
     if not config:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No active configuration found"
+            detail="No active configuration found",
         )
     return config
 
@@ -67,10 +136,36 @@ def create_config(
     *,
     db: Session = Depends(deps.get_db),
     config_in: schemas.SupplyChainConfigCreate,
-    current_user: models.User = Depends(deps.get_current_active_superuser),
+    current_user: models.User = Depends(deps.get_current_active_user),
 ):
     """Create a new supply chain configuration."""
-    cfg = crud.supply_chain_config.create(db, obj_in=config_in)
+    admin_group_id = _get_user_admin_group_id(db, current_user)
+
+    if current_user.is_superuser:
+        target_group_id = config_in.group_id
+        if target_group_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Group is required to create a configuration",
+            )
+
+        if not db.query(models.Group).filter(models.Group.id == target_group_id).first():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Specified group not found",
+            )
+
+        payload = config_in
+    else:
+        if not admin_group_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to create configurations",
+            )
+
+        payload = config_in.copy(update={"group_id": admin_group_id})
+
+    cfg = crud.supply_chain_config.create(db, obj_in=payload)
     # Attach creator if column exists
     try:
         cfg.created_by = current_user.id
@@ -85,9 +180,12 @@ def create_config(
 def read_config(
     config_id: int,
     db: Session = Depends(deps.get_db),
+    current_user: models.User = Depends(deps.get_current_active_user),
 ):
     """Get a specific configuration by ID."""
-    return get_config_or_404(db, config_id)
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    return config
 
 @router.put("/{config_id}", response_model=schemas.SupplyChainConfig)
 def update_config(
@@ -95,21 +193,47 @@ def update_config(
     db: Session = Depends(deps.get_db),
     config_id: int,
     config_in: schemas.SupplyChainConfigUpdate,
-    current_user: models.User = Depends(deps.get_current_active_superuser),
+    current_user: models.User = Depends(deps.get_current_active_user),
 ):
     """Update a configuration."""
     config = get_config_or_404(db, config_id)
-    return crud.supply_chain_config.update(db, db_obj=config, obj_in=config_in)
+    _ensure_user_can_manage_config(db, current_user, config)
+
+    update_data = config_in.dict(exclude_unset=True)
+
+    if current_user.is_superuser:
+        if "group_id" in update_data:
+            new_group_id = update_data["group_id"]
+            if new_group_id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Group cannot be null",
+                )
+            if not db.query(models.Group).filter(models.Group.id == new_group_id).first():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Specified group not found",
+                )
+    else:
+        if "group_id" in update_data and update_data["group_id"] != config.group_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You cannot reassign this configuration to another group",
+            )
+        update_data.pop("group_id", None)
+
+    return crud.supply_chain_config.update(db, db_obj=config, obj_in=update_data)
 
 @router.delete("/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_config(
     *,
     db: Session = Depends(deps.get_db),
     config_id: int,
-    current_user: models.User = Depends(deps.get_current_active_superuser),
+    current_user: models.User = Depends(deps.get_current_active_user),
 ):
     """Delete a configuration."""
     config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
     crud.supply_chain_config.remove(db, id=config_id)
     return None
 
@@ -121,9 +245,11 @@ def read_items(
     db: Session = Depends(deps.get_db),
     skip: int = 0,
     limit: int = 100,
+    current_user: models.User = Depends(deps.get_current_active_user),
 ):
     """Get all items for a configuration."""
-    get_config_or_404(db, config_id)  # Verify config exists
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
     return crud.item.get_multi_by_config(db, config_id=config_id, skip=skip, limit=limit)
 
 @router.post("/{config_id}/items/", response_model=schemas.Item, status_code=status.HTTP_201_CREATED)
@@ -132,18 +258,19 @@ def create_item(
     db: Session = Depends(deps.get_db),
     config_id: int,
     item_in: schemas.ItemCreate,
-    current_user: models.User = Depends(deps.get_current_active_superuser),
+    current_user: models.User = Depends(deps.get_current_active_user),
 ):
     """Create a new item in a configuration."""
-    get_config_or_404(db, config_id)  # Verify config exists
-    
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+
     # Check for duplicate name
     if crud.item.get_by_name(db, name=item_in.name, config_id=config_id):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="An item with this name already exists in this configuration"
         )
-    
+
     return crud.item.create_with_config(db, obj_in=item_in, config_id=config_id)
 
 # ... (Additional endpoints for items, nodes, lanes, item_node_configs, and market_demands)
@@ -157,10 +284,12 @@ def read_nodes(
     config_id: int,
     node_type: Optional[NodeType] = None,
     db: Session = Depends(deps.get_db),
+    current_user: models.User = Depends(deps.get_current_active_user),
 ):
     """Get all nodes for a configuration, optionally filtered by type."""
-    get_config_or_404(db, config_id)  # Verify config exists
-    
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+
     if node_type:
         return crud.node.get_by_type(db, node_type=node_type, config_id=config_id)
     return crud.node.get_multi_by_config(db, config_id=config_id)
@@ -171,11 +300,12 @@ def create_node(
     db: Session = Depends(deps.get_db),
     config_id: int,
     node_in: schemas.NodeCreate,
-    current_user: models.User = Depends(deps.get_current_active_superuser),
+    current_user: models.User = Depends(deps.get_current_active_user),
 ):
     """Create a new node in a configuration."""
-    get_config_or_404(db, config_id)  # Verify config exists
-    
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+
     # Check for duplicate name and type
     if crud.node.get_by_name_and_type(
         db, name=node_in.name, node_type=node_in.type, config_id=config_id
@@ -226,7 +356,9 @@ def create_game_from_config(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Supply chain configuration with ID {config_id} not found"
         )
-    
+
+    _ensure_user_can_manage_config(db, current_user, config)
+
     # Use the service to create the game configuration
     service = SupplyChainConfigService(db)
     try:

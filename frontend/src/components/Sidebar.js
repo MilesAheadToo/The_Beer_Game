@@ -53,6 +53,7 @@ const menuItems = [
 ];
 
 const groupAdminMenuItems = [
+  { text: 'Supply Chain Configs', icon: <SupplyChainIcon />, path: '/admin/group/supply-chain-configs' },
   { text: 'Group Management', icon: <GroupsIcon />, path: '/admin/groups' },
   { text: 'User Management', icon: <UsersIcon />, path: '/admin/users' },
 ];

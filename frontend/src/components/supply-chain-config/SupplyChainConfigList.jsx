@@ -6,13 +6,10 @@ import {
   Card, 
   CardContent, 
   CardHeader, 
-  Divider, 
-  Grid, 
-  IconButton, 
-  List, 
-  ListItem, 
-  ListItemSecondaryAction, 
-  ListItemText, 
+  Divider,
+  IconButton,
+  List,
+  ListItem,
   Tooltip,
   Typography,
   Chip,
@@ -40,7 +37,10 @@ import { useSnackbar } from 'notistack';
 import { format } from 'date-fns';
 import api from '../../services/api';
 
-const SupplyChainConfigList = () => {
+const SupplyChainConfigList = ({
+  title = 'Supply Chain Configurations',
+  basePath = '/supply-chain-config',
+} = {}) => {
   const [configs, setConfigs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -75,11 +75,11 @@ const SupplyChainConfigList = () => {
   }, []);
 
   const handleCreateNew = () => {
-    navigate('/supply-chain-config/new');
+    navigate(`${basePath}/new`);
   };
 
   const handleEdit = (id) => {
-    navigate(`/supply-chain-config/edit/${id}`);
+    navigate(`${basePath}/edit/${id}`);
   };
 
   const handleDeleteClick = (config) => {
@@ -142,6 +142,7 @@ const SupplyChainConfigList = () => {
       const { id, created_at, updated_at, is_active, ...configData } = config;
       const newConfig = {
         ...configData,
+        group_id: config.group_id ?? configData.group_id ?? null,
         name: `${config.name} (Copy)`,
         is_active: false
       };
@@ -175,7 +176,7 @@ const SupplyChainConfigList = () => {
     <>
       <Card>
         <CardHeader 
-          title="Supply Chain Configurations"
+          title={title}
           action={
             <Button
               variant="contained"
