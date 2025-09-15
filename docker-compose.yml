@@ -25,7 +25,8 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: beer-game-frontend
-    # No host port binding; access via proxy on 8088 (or TLS 8443)
+    ports:
+      - "3000:80"  # Expose frontend directly for testing
     environment:
       - NODE_ENV=production
       - REACT_APP_API_BASE_URL=${REACT_APP_API_BASE_URL:-/api/v1}
@@ -148,7 +149,7 @@ services:
       - MYSQL_SERVER=db
       - MYSQL_PORT=3306
       - MYSQL_USER=beer_user
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-beer_password}
+      - MYSQL_PASSWORD=D${MYSQL_PASSWORD:-beer_password}
       - MYSQL_DB=beer_game
     depends_on:
       db:
