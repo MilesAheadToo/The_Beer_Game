@@ -85,6 +85,8 @@ class MixedGameService:
             _check_range('variable_cost', pol.variable_cost)
             _check_range('min_order_qty', pol.min_order_qty)
 
+        cfg = game.config if game.config else {}
+
         for i, assignment in enumerate(game_data.player_assignments):
             is_ai = assignment.player_type == PlayerType.AGENT
             player = Player(
@@ -125,12 +127,23 @@ class MixedGameService:
                             strategy = AgentStrategyEnum.LLM
                         else:
                             raise
+                    override_pct = None
+                    if strategy == AgentStrategyEnum.DAYBREAK_DTCE_CENTRAL:
+                        override_pct = assignment.daybreak_override_pct
+                        if override_pct is not None:
+                            overrides = cfg.setdefault("daybreak_overrides", {})
+                            overrides[assignment.role.value] = override_pct
                     self.agent_manager.set_agent_strategy(
-                        agent_type, strategy, llm_model=assignment.llm_model
+                        agent_type,
+                        strategy,
+                        llm_model=assignment.llm_model,
+                        override_pct=override_pct,
                     )
                 except Exception:
                     # Fallback: ignore if mapping not supported
                     pass
+
+        game.config = cfg
 
         self.db.commit()
         self.db.refresh(game)
@@ -351,8 +364,29 @@ class MixedGameService:
         for player in players:
             # Get the AI agent for this player
             agent_type = AgentType(player.role.lower())
+            strategy_value = player.ai_strategy or "naive"
+            try:
+                strategy_enum = AgentStrategyEnum(strategy_value.lower())
+            except ValueError:
+                if strategy_value.lower().startswith("llm"):
+                    strategy_enum = AgentStrategyEnum.LLM
+                else:
+                    strategy_enum = AgentStrategyEnum.NAIVE
+
+            override_pct = None
+            if strategy_enum == AgentStrategyEnum.DAYBREAK_DTCE_CENTRAL:
+                overrides = (game.config or {}).get("daybreak_overrides", {})
+                role_key = player.role.value if hasattr(player.role, "value") else str(player.role).lower()
+                override_pct = overrides.get(role_key)
+
+            self.agent_manager.set_agent_strategy(
+                agent_type,
+                strategy_enum,
+                llm_model=player.llm_model,
+                override_pct=override_pct,
+            )
             agent = self.agent_manager.get_agent(agent_type)
-            
+
             # Get player's current state
             inventory = self.db.query(PlayerInventory).filter(
                 PlayerInventory.player_id == player.id
@@ -364,15 +398,28 @@ class MixedGameService:
                 GameRound.round_number == game_round.round_number - 1
             ).first()
             
+            incoming_shipments = []
+            if hasattr(inventory, "incoming_shipments") and inventory.incoming_shipments:
+                incoming_shipments = inventory.incoming_shipments
+                if not isinstance(incoming_shipments, list):
+                    incoming_shipments = []
+
+            local_state = {
+                "inventory": getattr(inventory, "current_stock", getattr(inventory, "current_inventory", 0)),
+                "backlog": getattr(inventory, "backorders", getattr(inventory, "current_backlog", 0)),
+                "incoming_shipments": incoming_shipments,
+            }
+
             # Make decision based on agent's strategy
             order_quantity = agent.make_decision(
                 current_round=game_round.round_number,
                 current_demand=game_round.customer_demand if player.can_see_demand else None,
                 upstream_data={
                     'previous_orders': [pr.order_placed for pr in previous_round.player_rounds] if previous_round else []
-                }
+                },
+                local_state=local_state,
             )
-            
+
             # Create player round record
             player_round = PlayerRound(
                 player_id=player.id,

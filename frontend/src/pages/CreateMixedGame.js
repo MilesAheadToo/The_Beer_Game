@@ -72,7 +72,8 @@ const agentStrategies = [
   {
     group: 'Daybreak',
     options: [
-      { value: 'DAYBREAK', label: 'Daybreak Agent' },
+      { value: 'DAYBREAK_DTCE', label: 'Daybreak Agent - Decentralized (DTCE)', requiresModel: true },
+      { value: 'DAYBREAK_DTCE_CENTRAL', label: 'Daybreak Agent - DTCE + Central Override', requiresModel: true },
     ]
   }
 ];
@@ -83,6 +84,14 @@ const demandPatterns = [
   { value: 'seasonal', label: 'Seasonal' },
   { value: 'constant', label: 'Constant' },
 ];
+
+const clampOverridePercent = (value) => {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) {
+    return 5;
+  }
+  return Math.min(50, Math.max(5, numeric));
+};
 
 // Controlled per-node policy editor
 const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
@@ -296,7 +305,8 @@ const CreateMixedGame = () => {
       strategy: 'NAIVE',
       canSeeDemand: role.value === 'retailer',
       userId: role.value === 'retailer' && user ? user.id : null,
-      llmModel: 'gpt-4o-mini'
+      llmModel: 'gpt-4o-mini',
+      daybreakOverridePct: 5,
     }))
   );
   const [isLoading, setIsLoading] = useState(false);
@@ -429,6 +439,9 @@ const handleStrategyChange = (index, strategy) => {
       if (String(strategy).startsWith('LLM_') && !player.llmModel) {
         updated.llmModel = 'gpt-4o-mini';
       }
+      if (strategy === 'DAYBREAK_DTCE_CENTRAL') {
+        updated.daybreakOverridePct = clampOverridePercent(player.daybreakOverridePct);
+      }
       return updated;
     }));
   };
@@ -514,16 +527,25 @@ const handleStrategyChange = (index, strategy) => {
             standard_cost: parseFloat(pricingConfig.factory.standard_cost)
           }
         },
-        player_assignments: players.map(player => ({
-          role: player.role.toUpperCase(),
-          player_type: player.playerType,
-          strategy: player.strategy,
-          can_see_demand: player.canSeeDemand,
-          user_id: player.userId || null,
-          llm_model: (player.playerType === 'ai' && String(player.strategy).startsWith('LLM_'))
-            ? player.llmModel
-            : null
-        }))
+        player_assignments: players.map(player => {
+          const isAi = player.playerType === 'ai';
+          const strategyValue = player.strategy ? player.strategy.toLowerCase() : null;
+          const overridePercent = player.strategy === 'DAYBREAK_DTCE_CENTRAL'
+            ? clampOverridePercent(player.daybreakOverridePct) / 100
+            : null;
+
+          return {
+            role: player.role.toUpperCase(),
+            player_type: isAi ? 'agent' : 'human',
+            strategy: strategyValue,
+            can_see_demand: player.canSeeDemand,
+            user_id: player.userId || null,
+            llm_model: (isAi && String(player.strategy).startsWith('LLM_'))
+              ? player.llmModel
+              : null,
+            daybreak_override_pct: overridePercent,
+          };
+        })
       };
       
       const newGame = await mixedGameApi.createGame(gameData);
@@ -1031,7 +1053,11 @@ const handleStrategyChange = (index, strategy) => {
                         {agentStrategies.map((group, groupIndex) => (
                           <optgroup key={groupIndex} label={group.group}>
                             {group.options.map((option) => (
-                              <option key={option.value} value={option.value} disabled={option.value === 'DAYBREAK' && !(modelStatus && modelStatus.is_trained)}>
+                              <option
+                                key={option.value}
+                                value={option.value}
+                                disabled={option.requiresModel && !(modelStatus && modelStatus.is_trained)}
+                              >
                                 {option.label}
                               </option>
                             ))}
@@ -1065,8 +1091,37 @@ const handleStrategyChange = (index, strategy) => {
                         {player.strategy === 'LLM_BALANCED' && 'Advanced AI with learning capabilities'}
                         {player.strategy === 'LLM_AGGRESSIVE' && 'Aggressive AI strategy'}
                         {player.strategy === 'LLM_ADAPTIVE' && 'Adaptive AI strategy'}
-                        {player.strategy === 'DAYBREAK' && !(modelStatus && modelStatus.is_trained) && 'Daybreak agent is not trained yet and cannot be used'}
+                        {['DAYBREAK_DTCE', 'DAYBREAK_DTCE_CENTRAL'].includes(player.strategy) && !(modelStatus && modelStatus.is_trained) && 'Daybreak agent is not trained yet and cannot be used'}
+                        {player.strategy === 'DAYBREAK_DTCE' && modelStatus && modelStatus.is_trained && 'Daybreak DTCE uses decentralized agents at each node.'}
+                        {player.strategy === 'DAYBREAK_DTCE_CENTRAL' && modelStatus && modelStatus.is_trained && 'Daybreak DTCE + Central applies a network override bounded by the configured percentage.'}
                       </FormHelperText>
+                      {player.strategy === 'DAYBREAK_DTCE_CENTRAL' && (
+                        <Box mt={3}>
+                          <FormLabel>Central Override (±%)</FormLabel>
+                          <NumberInput
+                            min={5}
+                            max={50}
+                            step={1}
+                            value={clampOverridePercent(player.daybreakOverridePct)}
+                            onChange={(valueString, valueNumber) => {
+                              const raw = Number.isFinite(valueNumber)
+                                ? valueNumber
+                                : parseFloat(valueString);
+                              const next = clampOverridePercent(Number.isFinite(raw) ? raw : player.daybreakOverridePct);
+                              setPlayers(prev => prev.map((p, i) => i === index ? { ...p, daybreakOverridePct: next } : p));
+                            }}
+                          >
+                            <NumberInputField />
+                            <NumberInputStepper>
+                              <NumberIncrementStepper />
+                              <NumberDecrementStepper />
+                            </NumberInputStepper>
+                          </NumberInput>
+                          <FormHelperText>
+                            Central Daybreak agent may adjust the decentralized recommendation by up to this percentage.
+                          </FormHelperText>
+                        </Box>
+                      )}
                     </FormControl>
                   )}
 
