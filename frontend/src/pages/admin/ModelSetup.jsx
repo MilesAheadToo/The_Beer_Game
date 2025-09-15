@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box,
@@ -13,8 +13,23 @@ import {
   InputLabel,
   OutlinedInput,
   Tooltip,
+  CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  List,
+  ListItem,
+  ListItemIcon,
+  Typography,
 } from '@mui/material';
-import { Delete as DeleteIcon, Add as AddIcon, AutoFixHigh as AutoFixIcon, Link as LinkIcon } from '@mui/icons-material';
+import {
+  Delete as DeleteIcon,
+  Add as AddIcon,
+  AutoFixHigh as AutoFixIcon,
+  CheckCircle,
+  ErrorOutline,
+} from '@mui/icons-material';
 import PageLayout from '../../components/PageLayout';
 import { mixedGameApi } from '../../services/api';
 import { useSystemConfig } from '../../contexts/SystemConfigContext.jsx';
@@ -58,6 +73,9 @@ export default function ModelSetup() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [processDialogOpen, setProcessDialogOpen] = useState(false);
+  const [processSteps, setProcessSteps] = useState([]);
+  const autoCloseRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -186,21 +204,69 @@ export default function ModelSetup() {
     return errs;
   }, [cfg, ranges, items, sites]);
 
+  const closeProcessDialog = () => {
+    if (autoCloseRef.current) {
+      clearTimeout(autoCloseRef.current);
+      autoCloseRef.current = null;
+    }
+    setProcessDialogOpen(false);
+    setProcessSteps([]);
+  };
+
+  useEffect(() => () => {
+    if (autoCloseRef.current) {
+      clearTimeout(autoCloseRef.current);
+    }
+  }, []);
+
   const save = async () => {
     setSaving(true);
     setError(null);
+    setProcessSteps([
+      {
+        id: 'save-model-config',
+        label: 'Saving model configuration',
+        status: 'running',
+        message: 'Submitting your latest changes to the server.',
+      },
+    ]);
+    setProcessDialogOpen(true);
     try {
       const saved = await mixedGameApi.saveModelConfig(cfg);
       setCfg(saved);
+      setProcessSteps((prev) =>
+        prev.map((step) =>
+          step.id === 'save-model-config'
+            ? { ...step, status: 'success', message: 'Configuration saved successfully.' }
+            : step
+        )
+      );
+      if (autoCloseRef.current) {
+        clearTimeout(autoCloseRef.current);
+      }
+      autoCloseRef.current = setTimeout(() => {
+        closeProcessDialog();
+      }, 1200);
     } catch (e) {
       const detail = e?.response?.data?.detail;
-      setError(typeof detail === 'string' ? detail : (detail?.message || 'Failed to save'));
+      const message = typeof detail === 'string' ? detail : detail?.message || 'Failed to save configuration.';
+      setError(message);
+      setProcessSteps((prev) =>
+        prev.map((step) =>
+          step.id === 'save-model-config'
+            ? { ...step, status: 'error', message }
+            : step
+        )
+      );
     } finally {
       setSaving(false);
     }
   };
 
   if (loading) return <PageLayout title="Model Setup"><div className="pad-6">Loading...</div></PageLayout>;
+
+  const hasActiveProcess = processSteps.some((step) => step.status === 'running');
+  const canCloseProcessDialog = processSteps.length > 0 && !hasActiveProcess;
 
   return (
     <PageLayout title="Model Setup">
@@ -347,6 +413,51 @@ export default function ModelSetup() {
           )}
         </Box>
       </Box>
+      <Dialog
+        open={processDialogOpen}
+        onClose={(_, reason) => {
+          if (hasActiveProcess && (reason === 'backdropClick' || reason === 'escapeKeyDown')) {
+            return;
+          }
+          if (canCloseProcessDialog) {
+            closeProcessDialog();
+          }
+        }}
+        fullWidth
+        maxWidth="xs"
+      >
+        <DialogTitle>Processing updates</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            We'll keep this window open while we finish saving your model configuration.
+          </Typography>
+          <List disablePadding>
+            {processSteps.map((step) => (
+              <ListItem key={step.id} disableGutters>
+                <ListItemIcon sx={{ minWidth: 36 }}>
+                  {step.status === 'success' ? (
+                    <CheckCircle color="success" />
+                  ) : step.status === 'error' ? (
+                    <ErrorOutline color="error" />
+                  ) : (
+                    <CircularProgress size={20} />
+                  )}
+                </ListItemIcon>
+                <ListItemText
+                  primary={step.label}
+                  secondary={step.message}
+                  primaryTypographyProps={{ fontWeight: 500 }}
+                />
+              </ListItem>
+            ))}
+          </List>
+        </DialogContent>
+        {canCloseProcessDialog && (
+          <DialogActions>
+            <Button onClick={closeProcessDialog}>Close</Button>
+          </DialogActions>
+        )}
+      </Dialog>
     </PageLayout>
   );
 }
