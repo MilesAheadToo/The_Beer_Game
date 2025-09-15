@@ -1,5 +1,11 @@
 SHELL := /bin/bash
 
+ifeq ($(OS),Windows_NT)
+    SETUP_ENV := powershell -ExecutionPolicy Bypass -File scripts/setup_env.ps1
+else
+    SETUP_ENV := bash scripts/setup_env.sh
+endif
+
 # Default to localhost for local development
 HOST = localhost
 REMOTE_HOST = 172.29.20.187
@@ -16,7 +22,7 @@ DOCKER_BUILD_ARGS_GPU = --build-arg FORCE_GPU=1
 # Docker runtime arguments
 DOCKER_RUN_ARGS = -e FORCE_GPU=$(FORCE_GPU)
 
-.PHONY: up gpu-up up-dev down ps logs seed reset-admin help
+.PHONY: up gpu-up up-dev down ps logs seed reset-admin help init-env
 
 # Default CPU target
 up:
@@ -148,16 +154,20 @@ help:
 	echo "  make rebuild-backend  - rebuild and restart only backend"; \
         echo "  make seed          - run user seeder (superadmin user)"; \
         echo "  make reset-admin   - reset superadmin password to Daybreak@2025"; \
-	echo "  make proxy-url     - print URLs and login info"; \
-	echo ""; \
-	echo "Advanced Training:"; \
+        echo "  make proxy-url     - print URLs and login info"; \
+        echo "  make init-env      - set up .env from template or host-specific file"; \
+        echo ""; \
+        echo "Advanced Training:"; \
 	echo "  make train-setup   - create Python venv and install training deps"; \
 	echo "  make train-cpu     - run local CPU training"; \
 	echo "  make train-gpu     - run local GPU training"; \
 	echo "  make remote-train  - train on remote server"; \
 	echo ""; \
 	echo "Environment Variables:"; \
-	echo "  FORCE_GPU=1        - Enable GPU support (e.g., make up FORCE_GPU=1)";
+        echo "  FORCE_GPU=1        - Enable GPU support (e.g., make up FORCE_GPU=1)";
+
+init-env:
+	@$(SETUP_ENV)
 
 # Remote training wrappers (see scripts/remote_train.sh for full help)
 REMOTE        ?=
