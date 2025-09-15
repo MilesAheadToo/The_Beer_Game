@@ -295,7 +295,8 @@ const CreateMixedGame = () => {
       playerType: 'ai', // Default to AI for all roles initially
       strategy: 'NAIVE',
       canSeeDemand: role.value === 'retailer',
-      userId: role.value === 'retailer' && user ? user.id : null
+      userId: role.value === 'retailer' && user ? user.id : null,
+      llmModel: 'gpt-4o-mini'
     }))
   );
   const [isLoading, setIsLoading] = useState(false);
@@ -402,26 +403,34 @@ const CreateMixedGame = () => {
   const handlePlayerTypeChange = (index, type) => {
     setPlayers(players.map((player, i) => {
       if (i === index) {
-        const updatedPlayer = { 
-          ...player, 
+        const updatedPlayer = {
+          ...player,
           playerType: type,
           // Reset strategy when changing to human, set user ID if current user is available
-          ...(type === 'human' && { 
+          ...(type === 'human' && {
             strategy: agentStrategies[0].options[0].value,
             // Only set the current user if this is the retailer or no user is selected yet
             ...(player.role === 'retailer' && !player.userId && user && { userId: user.id })
           })
         };
+        if (type === 'ai' && !updatedPlayer.llmModel) {
+          updatedPlayer.llmModel = 'gpt-4o-mini';
+        }
         return updatedPlayer;
       }
       return player;
     }));
   };
 
-  const handleStrategyChange = (index, strategy) => {
-    setPlayers(players.map((player, i) => 
-      i === index ? { ...player, strategy } : player
-    ));
+const handleStrategyChange = (index, strategy) => {
+    setPlayers(players.map((player, i) => {
+      if (i !== index) return player;
+      const updated = { ...player, strategy };
+      if (String(strategy).startsWith('LLM_') && !player.llmModel) {
+        updated.llmModel = 'gpt-4o-mini';
+      }
+      return updated;
+    }));
   };
 
   const handleUserChange = (index, userId) => {
@@ -511,7 +520,9 @@ const CreateMixedGame = () => {
           strategy: player.strategy,
           can_see_demand: player.canSeeDemand,
           user_id: player.userId || null,
-          llm_model: player.llmModel || null
+          llm_model: (player.playerType === 'ai' && String(player.strategy).startsWith('LLM_'))
+            ? player.llmModel
+            : null
         }))
       };
       
@@ -1032,8 +1043,7 @@ const CreateMixedGame = () => {
                         <Box mt={3}>
                           <FormLabel>Choose LLM</FormLabel>
                           <Select
-                            placeholder="Select LLM"
-                            value={player.llmModel || ''}
+                            value={player.llmModel}
                             onChange={(e) => setPlayers(players.map((p,i)=> i===index? { ...p, llmModel: e.target.value }: p))}
                           >
                             <option value="gpt-4o">GPT-4o</option>

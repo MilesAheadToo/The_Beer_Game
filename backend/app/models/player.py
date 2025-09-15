@@ -46,6 +46,10 @@ class Player(Base):
     role: Mapped[PlayerRole] = mapped_column(SQLEnum(PlayerRole), nullable=False)
     type: Mapped[PlayerType] = mapped_column(SQLEnum(PlayerType), default=PlayerType.HUMAN)
     strategy: Mapped[PlayerStrategy] = mapped_column(SQLEnum(PlayerStrategy), default=PlayerStrategy.MANUAL)
+    is_ai: Mapped[bool] = mapped_column(Boolean, default=False)
+    ai_strategy: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    can_see_demand: Mapped[bool] = mapped_column(Boolean, default=False)
+    llm_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, default="gpt-4o-mini")
     
     # Inventory and order tracking
     inventory: Mapped[int] = mapped_column(Integer, default=0)
