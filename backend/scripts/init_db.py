@@ -218,13 +218,13 @@ def init_db():
         SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
         db = SessionLocal()
         
-        # Create default superadmin if it doesn't exist
+        # Create default system administrator if it doesn't exist
         default_users = [
             {
-                "username": "superadmin",
-                "email": "superadmin@daybreak.ai",
+                "username": "systemadmin",
+                "email": "systemadmin@daybreak.ai",
                 "password": "Daybreak@2025",
-                "full_name": "Super Admin",
+                "full_name": "System Admin",
                 "is_superuser": True,
                 "is_active": True
             }

@@ -14,19 +14,19 @@ function UserManagement() {
     username: '',
     email: '',
     password: '',
-    isAdmin: false
+    isSystemAdmin: false
   });
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  const { isGroupAdmin } = useAuth();
 
   // Check if current user is admin
   useEffect(() => {
-    if (!isAdmin) {
+    if (!isGroupAdmin) {
       navigate('/unauthorized');
       return;
     }
     fetchUsers();
-  }, [navigate, isAdmin]);
+  }, [navigate, isGroupAdmin]);
 
   const fetchUsers = async () => {
     try {
@@ -35,7 +35,11 @@ function UserManagement() {
       const res = await fetch('/api/v1/auth/users/', { credentials: 'include' });
       if (!res.ok) throw new Error('Failed to fetch users');
       const list = await res.json();
-      setUsers(list);
+      const normalized = (Array.isArray(list) ? list : []).map((user) => ({
+        ...user,
+        isSystemAdmin: Boolean(user.is_superuser),
+      }));
+      setUsers(normalized);
     } catch (error) {
       toast.error('Error loading users');
       console.error('Error:', error);
@@ -65,7 +69,7 @@ function UserManagement() {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ username: newUser.username, email: newUser.email, is_superuser: newUser.isAdmin })
+          body: JSON.stringify({ username: newUser.username, email: newUser.email, is_superuser: newUser.isSystemAdmin })
         });
         toast.success('User updated');
       } else {
@@ -73,7 +77,7 @@ function UserManagement() {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           credentials: 'include',
-          body: JSON.stringify({ username: newUser.username, email: newUser.email, password: newUser.password, is_superuser: newUser.isAdmin })
+          body: JSON.stringify({ username: newUser.username, email: newUser.email, password: newUser.password, is_superuser: newUser.isSystemAdmin })
         });
         toast.success('User added');
       }
@@ -88,7 +92,7 @@ function UserManagement() {
 
   const handleEditUser = (user) => {
     setEditingUser(user);
-    setNewUser({ username: user.username, email: user.email, password: '', isAdmin: user.isAdmin });
+    setNewUser({ username: user.username, email: user.email, password: '', isSystemAdmin: user.isSystemAdmin });
     setShowAddUser(true);
   };
 
@@ -105,7 +109,7 @@ function UserManagement() {
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold text-gray-800">User Management</h1>
         <button
-          onClick={() => { setEditingUser(null); setNewUser({ username: '', email: '', password: '', isAdmin: false }); setShowAddUser(true); }}
+          onClick={() => { setEditingUser(null); setNewUser({ username: '', email: '', password: '', isSystemAdmin: false }); setShowAddUser(true); }}
           className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center"
         >
           <FaPlus className="mr-2" /> Add User
@@ -165,13 +169,13 @@ function UserManagement() {
               <div className="flex items-center">
                 <input
                   type="checkbox"
-                  id="isAdmin"
-                  checked={newUser.isAdmin}
-                  onChange={(e) => setNewUser({...newUser, isAdmin: e.target.checked})}
+                  id="isSystemAdmin"
+                  checked={newUser.isSystemAdmin}
+                  onChange={(e) => setNewUser({...newUser, isSystemAdmin: e.target.checked})}
                   className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                 />
-                <label htmlFor="isAdmin" className="ml-2 block text-sm text-gray-700">
-                  Admin User
+                <label htmlFor="isSystemAdmin" className="ml-2 block text-sm text-gray-700">
+                  System Administrator
                 </label>
               </div>
               
@@ -221,7 +225,7 @@ function UserManagement() {
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
                       <div className="flex-shrink-0 h-10 w-10 rounded-full bg-blue-100 flex items-center justify-center">
-                        {user.isAdmin ? (
+                        {user.isSystemAdmin ? (
                           <FaUserShield className="h-5 w-5 text-blue-600" />
                         ) : (
                           <FaUser className="h-5 w-5 text-gray-400" />
@@ -236,12 +240,12 @@ function UserManagement() {
                     {user.email}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${user.isAdmin ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
-                      {user.isAdmin ? 'Admin' : 'User'}
+                    <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${user.isSystemAdmin ? 'bg-purple-100 text-purple-800' : 'bg-green-100 text-green-800'}`}>
+                      {user.isSystemAdmin ? 'System Admin' : 'User'}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    {user.email !== 'admin@daybreak.ai' && (
+                    {user.email !== 'systemadmin@daybreak.ai' && (
                       <>
                         <button
                           onClick={() => handleEditUser(user)}

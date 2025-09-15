@@ -28,7 +28,7 @@ import {
 } from '@mui/icons-material';
 import { styled } from '@mui/material/styles';
 import { useAuth } from '../contexts/AuthContext';
-import { isAdmin as isAdminUser, isSuperAdmin as isSuperAdminUser } from '../utils/authUtils';
+import { isGroupAdmin as isGroupAdminUser, isSystemAdmin as isSystemAdminUser } from '../utils/authUtils';
 
 const drawerWidth = 240;
 
@@ -52,20 +52,22 @@ const menuItems = [
   { text: 'Settings', icon: <SettingsIcon />, path: '/settings' },
 ];
 
-const adminMenuItems = [
+const groupAdminMenuItems = [
   { text: 'Group Management', icon: <GroupsIcon />, path: '/admin/groups' },
   { text: 'User Management', icon: <UsersIcon />, path: '/admin/users' },
 ];
 
-const superAdminMenuItems = [
+const systemAdminMenuItems = [
+  { text: 'System Config', icon: <SettingsIcon />, path: '/system-config' },
   { text: 'Group Management', icon: <GroupsIcon />, path: '/admin/groups' },
+  { text: 'User Management', icon: <UsersIcon />, path: '/admin/users' },
 ];
 
 const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
   const [adminOpen, setAdminOpen] = React.useState(false);
   const { user: currentUser } = useAuth() || {};
-  const isSuperAdmin = isSuperAdminUser(currentUser);
-  const isAdmin = isAdminUser(currentUser);
+  const isSystemAdmin = isSystemAdminUser(currentUser);
+  const isGroupAdmin = isGroupAdminUser(currentUser);
   const location = useLocation();
   
   // If we're still loading the user, don't render anything
@@ -85,7 +87,7 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
       </Toolbar>
       <Divider />
       <List>
-        {!isSuperAdmin && menuItems.map((item) => (
+        {!isSystemAdmin && menuItems.map((item) => (
           <ListItem key={item.text} disablePadding>
             <ListItemButton
               component={Link}
@@ -112,8 +114,8 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
           </ListItem>
         ))}
 
-        {/* Admin Section for regular admin */}
-        {!isSuperAdmin && isAdmin && (
+        {/* Admin Section for group administrators */}
+        {!isSystemAdmin && isGroupAdmin && (
           <>
             <Divider sx={{ my: 1 }} />
             <ListItemButton onClick={() => setAdminOpen(!adminOpen)}>
@@ -125,7 +127,7 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
             </ListItemButton>
             <Collapse in={adminOpen} timeout="auto" unmountOnExit>
               <List component="div" disablePadding>
-                {adminMenuItems.map((item) => (
+                {groupAdminMenuItems.map((item) => (
                   <ListItemButton
                     key={item.text}
                     component={Link}
@@ -156,8 +158,8 @@ const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
           </>
         )}
 
-        {/* Superadmin menu */}
-        {isSuperAdmin && superAdminMenuItems.map((item) => (
+        {/* System administrator menu */}
+        {isSystemAdmin && systemAdminMenuItems.map((item) => (
           <ListItem key={item.text} disablePadding>
             <ListItemButton
               component={Link}

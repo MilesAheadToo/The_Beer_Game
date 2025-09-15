@@ -128,7 +128,7 @@ const RangesModal = ({ visible, rangeEdits, onClose, onChange, onSave, originalC
 };
 
 const AdminDashboard = () => {
-  const { isAdmin } = useAuth();
+  const { isGroupAdmin } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -145,8 +145,8 @@ const AdminDashboard = () => {
   const [rangeEdits, setRangeEdits] = useState({});
 
   useEffect(() => {
-    if (!isAdmin) navigate('/unauthorized');
-  }, [isAdmin, navigate]);
+    if (!isGroupAdmin) navigate('/unauthorized');
+  }, [isGroupAdmin, navigate]);
 
   useEffect(() => {
     const fetchAll = async () => {

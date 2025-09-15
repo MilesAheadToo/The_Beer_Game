@@ -31,7 +31,7 @@ up:
 	docker-compose -f docker-compose.yml up -d proxy frontend backend db create-users; \
 	echo "\n[✓] Local development server started (CPU mode)."; \
 	echo "   URL:     http://$(HOST):8088"; \
-        echo "   Superadmin: superadmin@daybreak.ai / Daybreak@2025"
+        echo "   SystemAdmin: systemadmin@daybreak.ai / Daybreak@2025"
 
 # GPU target
 gpu-up:
@@ -40,7 +40,7 @@ gpu-up:
 	docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d proxy frontend backend db create-users; \
 	echo "\n[✓] Local development server started (GPU mode)."; \
 	echo "   URL:     http://$(HOST):8088"; \
-        echo "   Superadmin: superadmin@daybreak.ai / Daybreak@2025"; \
+        echo "   SystemAdmin: systemadmin@daybreak.ai / Daybreak@2025"; \
 	echo "   GPU:     $(shell nvidia-smi --query-gpu=gpu_name --format=csv,noheader 2>/dev/null || echo 'No GPU detected')"
 
 up-dev:
@@ -50,14 +50,14 @@ up-dev:
 	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d proxy frontend backend db create-users; \
 	echo "\n[✓] Local development server started with dev overrides (CPU mode)."; \
 	echo "   URL:     http://$(HOST):8088"; \
-        echo "   Superadmin: superadmin@daybreak.ai / Daybreak@2025"
+        echo "   SystemAdmin: systemadmin@daybreak.ai / Daybreak@2025"
 
 up-remote:
 	@echo "\n[+] Building and starting full system for remote access..."; \
 	docker-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build proxy frontend backend db create-users; \
 	echo "\n[✓] Remote server started."; \
 	echo "   URL:     http://$(REMOTE_HOST):8088"; \
-        echo "   Superadmin: superadmin@daybreak.ai / Daybreak@2025"; \
+        echo "   SystemAdmin: systemadmin@daybreak.ai / Daybreak@2025"; \
 	echo "\n   For local development, use: make up-dev"
 
 up-tls:
@@ -65,7 +65,7 @@ up-tls:
 	docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile tls up -d --build frontend backend db proxy-tls create-users; \
 	echo "\n[✓] Local HTTPS server started (self-signed)."; \
 	echo "   URL:     https://$(HOST):8443"; \
-        echo "   Superadmin: superadmin@daybreak.ai / Daybreak@2025"; \
+        echo "   SystemAdmin: systemadmin@daybreak.ai / Daybreak@2025"; \
 	echo "\n   For remote HTTPS access, use: make up-remote-tls"
 
 up-remote-tls:
@@ -73,13 +73,13 @@ up-remote-tls:
 	docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile tls up -d --build frontend backend db proxy-tls create-users; \
 	echo "\n[✓] Remote HTTPS server started (self-signed)."; \
 	echo "   URL:     https://$(REMOTE_HOST):8443"; \
-        echo "   Superadmin: superadmin@daybreak.ai / Daybreak@2025"
+        echo "   SystemAdmin: systemadmin@daybreak.ai / Daybreak@2025"
 
 up-tls-only:
 	@echo "\n[+] Starting TLS-only proxy (no HTTP proxy on 8088)..."; \
 	docker-compose -f docker-compose.yml -f docker-compose.dev.yml --profile tls up -d --build frontend backend db proxy-tls create-users; \
 	echo "\n[✓] Started. Open https://172.29.20.187:8443 in your browser (self-signed)."; \
-        echo "   Superadmin login: superadmin@daybreak.ai / Daybreak@2025"
+        echo "   SystemAdmin login: systemadmin@daybreak.ai / Daybreak@2025"
 
 rebuild-frontend:
 	@echo "\n[+] Rebuilding frontend image with dev overrides..."; \
@@ -117,14 +117,14 @@ seed:
 	docker-compose run --rm create-users
 
 reset-admin:
-	@echo "\n[+] Resetting superadmin password to Daybreak@2025..."; \
-	docker compose exec backend python scripts/reset_admin_password.py
+        @echo "\n[+] Resetting system administrator password to Daybreak@2025..."; \
+        docker compose exec backend python scripts/reset_admin_password.py
 
 proxy-url:
 	@echo "Current host: $(HOST) (set with HOST=ip make ...)"; \
 	echo "HTTP:  http://$(HOST):8088"; \
 	echo "HTTPS: https://$(HOST):8443 (enable with: make up-tls)"; \
-        echo "Login: superadmin@daybreak.ai / Daybreak@2025"; \
+        echo "Login: systemadmin@daybreak.ai / Daybreak@2025"; \
 	echo "To change host: HOST=your-ip make ..."
 
 help:
@@ -152,8 +152,8 @@ help:
 	echo "  make logs          - tail logs"; \
 	echo "  make rebuild-frontend - rebuild and restart only frontend"; \
 	echo "  make rebuild-backend  - rebuild and restart only backend"; \
-        echo "  make seed          - run user seeder (superadmin user)"; \
-        echo "  make reset-admin   - reset superadmin password to Daybreak@2025"; \
+        echo "  make seed          - run user seeder (system administrator user)"; \
+        echo "  make reset-admin   - reset system administrator password to Daybreak@2025"; \
         echo "  make proxy-url     - print URLs and login info"; \
         echo "  make init-env      - set up .env from template or host-specific file"; \
         echo ""; \

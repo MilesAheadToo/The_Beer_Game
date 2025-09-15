@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- Insert default users if they don't exist
 INSERT IGNORE INTO users (username, email, hashed_password, full_name, is_superuser, is_active) VALUES
-('superadmin', 'superadmin@daybreak.ai', '\$2b\$12\$/FAxQ94QmW1WFdMZd5nKzegYJZkZSi.JUSX/4IvImY3cE2vtleAu6', 'Super Admin', TRUE, TRUE);
+('systemadmin', 'systemadmin@daybreak.ai', '\$2b\$12\$/FAxQ94QmW1WFdMZd5nKzegYJZkZSi.JUSX/4IvImY3cE2vtleAu6', 'System Admin', TRUE, TRUE);
 
 -- Verify users were created
 SELECT id, username, email, is_superuser, is_active FROM users;

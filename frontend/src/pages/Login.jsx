@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import mixedGameApi from '../services/api';
-import { getDefaultLandingPath, isAdmin, isSuperAdmin } from '../utils/authUtils';
+import { getDefaultLandingPath, isGroupAdmin, isSystemAdmin } from '../utils/authUtils';
 import { toast } from 'react-toastify';
-import ContactSuperadminForm from '../components/ContactSuperadminForm';
+import ContactSystemAdminForm from '../components/ContactSystemAdminForm';
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -26,12 +26,12 @@ const Login = () => {
       if (!isAuthenticated) return;
       const redirectTo = searchParams.get('redirect');
 
-      // Handle superadmin separately (case-insensitive check, allow role flag)
-      if (isSuperAdmin(user)) {
+      // Handle system administrator separately (case-insensitive check, allow role flag)
+      if (isSystemAdmin(user)) {
         navigate(redirectTo || getDefaultLandingPath(user), { replace: true });
         return;
       }
-      if (isAdmin(user)) {
+      if (isGroupAdmin(user)) {
         navigate(redirectTo || getDefaultLandingPath(user), { replace: true });
         return;
       }
@@ -112,12 +112,12 @@ const Login = () => {
         setErrors({});
         // After successful login: if non-admin, try to jump directly to their assigned game
         const redirectTo = searchParams.get('redirect');
-        if (isSuperAdmin(loggedInUser)) {
+        if (isSystemAdmin(loggedInUser)) {
           navigate(redirectTo || getDefaultLandingPath(loggedInUser), { replace: true });
           return;
         }
 
-        if (!isAdmin(loggedInUser)) {
+        if (!isGroupAdmin(loggedInUser)) {
           try {
             const games = await mixedGameApi.getGames();
             const assigned = games.find(g => Array.isArray(g.players) && g.players.some(p => p.user_id === loggedInUser?.id));
@@ -142,7 +142,7 @@ const Login = () => {
         if (detail?.show_contact_form) {
           setContactPrompt({
             email: formData.email,
-            superadminEmail: detail?.superadmin_email,
+            systemAdminEmail: detail?.systemadmin_email || detail?.superadmin_email,
           });
           toast.info(message);
         } else {
@@ -281,9 +281,9 @@ const Login = () => {
         </form>
 
         {contactPrompt && (
-          <ContactSuperadminForm
+          <ContactSystemAdminForm
             email={contactPrompt.email}
-            superadminEmail={contactPrompt.superadminEmail}
+            systemAdminEmail={contactPrompt.systemAdminEmail}
             onClose={() => setContactPrompt(null)}
           />
         )}

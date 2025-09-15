@@ -1,11 +1,25 @@
+const ROLE_ALIASES = {
+  superadmin: 'systemadmin',
+  'system admin': 'systemadmin',
+  system_admin: 'systemadmin',
+  systemadmin: 'systemadmin',
+  admin: 'groupadmin',
+  groupadmin: 'groupadmin',
+  'group admin': 'groupadmin',
+  group_admin: 'groupadmin',
+};
+
 export const normalizeRoles = (roles) => {
   if (!Array.isArray(roles)) {
     return [];
   }
 
-  return roles
+  const normalized = roles
     .map((role) => (typeof role === 'string' ? role.trim().toLowerCase() : ''))
-    .filter(Boolean);
+    .filter(Boolean)
+    .map((role) => ROLE_ALIASES[role] || role.replace(/\s+/g, ''));
+
+  return Array.from(new Set(normalized));
 };
 
 export const getNormalizedEmail = (user) => {
@@ -16,41 +30,40 @@ export const getNormalizedEmail = (user) => {
   return String(user.email).trim().toLowerCase();
 };
 
-export const isSuperAdmin = (user) => {
+export const isSystemAdmin = (user) => {
   const normalizedEmail = getNormalizedEmail(user);
   const roles = normalizeRoles(user?.roles);
 
   return (
     Boolean(user?.is_superuser) ||
+    normalizedEmail === 'systemadmin@daybreak.ai' ||
     normalizedEmail === 'superadmin@daybreak.ai' ||
-    roles.includes('superadmin')
+    roles.includes('systemadmin')
   );
 };
 
-export const isAdmin = (user) => {
+export const isGroupAdmin = (user) => {
   const roles = normalizeRoles(user?.roles);
   const normalizedEmail = getNormalizedEmail(user);
 
-  if (isSuperAdmin(user)) {
-    return true;
+  if (isSystemAdmin(user)) {
+    return false;
   }
 
   return (
-    Boolean(user?.is_superuser) ||
-    roles.includes('admin') ||
-    roles.includes('group_admin') ||
-    normalizedEmail === 'admin@daybreak.ai'
+    roles.includes('groupadmin') ||
+    normalizedEmail === 'groupadmin@daybreak.ai'
   );
 };
 
 export const getDefaultLandingPath = (user) => {
-  if (isSuperAdmin(user)) {
-    return '/admin/groups';
+  if (isSystemAdmin(user)) {
+    return '/system-config';
   }
 
-  if (isAdmin(user)) {
-    return '/players';
+  if (isGroupAdmin(user)) {
+    return '/games';
   }
 
-  return '/games';
+  return '/dashboard';
 };
