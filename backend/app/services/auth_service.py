@@ -103,11 +103,26 @@ class AuthService:
         user = result.scalars().first()
         
         if not user:
-            # User not found - we don't want to reveal that the user doesn't exist
-            # So we'll just simulate password verification to prevent timing attacks
+            # User not found - perform dummy hash to maintain timing consistency
             get_password_hash("dummy_password")
-            return None
-            
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": "user_not_found",
+                    "message": (
+                        "We couldn't find an account with that email. "
+                        "Please contact your superadmin to request login credentials."
+                    ),
+                    "contact_role": "superadmin",
+                    "show_contact_form": True,
+                },
+            )
+
+        roles: List[str] = user.roles or []
+        is_superadmin = bool(user.is_superuser or "superadmin" in roles)
+        is_group_admin = "admin" in roles and not is_superadmin
+        is_player = "player" in roles
+
         # Check if the account is locked
         if user.failed_login_attempts >= settings.MAX_LOGIN_ATTEMPTS and \
            user.last_failed_login and \
@@ -123,7 +138,36 @@ class AuthService:
             user.failed_login_attempts += 1
             user.last_failed_login = datetime.utcnow()
             await self.db.commit()
-            return None
+
+            if is_group_admin:
+                message = (
+                    "Incorrect password. Please contact your superadmin for assistance."
+                )
+                contact_role = "superadmin"
+            elif is_player:
+                message = (
+                    "Incorrect password. Please contact your group admin for assistance."
+                )
+                contact_role = "group_admin"
+            elif is_superadmin:
+                message = (
+                    "Incorrect password. Please verify your credentials or reach out to a fellow superadmin for support."
+                )
+                contact_role = "superadmin"
+            else:
+                message = (
+                    "Incorrect password. Please contact your administrator for assistance."
+                )
+                contact_role = "administrator"
+
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={
+                    "code": "incorrect_password",
+                    "message": message,
+                    "contact_role": contact_role,
+                },
+            )
             
         # If we get here, the password is correct
         # Reset failed login attempts

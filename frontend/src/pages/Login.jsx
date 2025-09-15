@@ -4,6 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import mixedGameApi from '../services/api';
 import { getDefaultLandingPath, isAdmin, isSuperAdmin } from '../utils/authUtils';
 import { toast } from 'react-toastify';
+import ContactSuperadminForm from '../components/ContactSuperadminForm';
 
 const Login = () => {
   const [formData, setFormData] = useState({
@@ -11,8 +12,9 @@ const Login = () => {
     password: '',
     rememberMe: false,
   });
-  
+
   const [errors, setErrors] = useState({});
+  const [contactPrompt, setContactPrompt] = useState(null);
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   
@@ -59,7 +61,11 @@ const Login = () => {
       ...prev,
       [name]: type === 'checkbox' ? checked : value
     }));
-    
+
+    if (name === 'email' && contactPrompt) {
+      setContactPrompt(null);
+    }
+
     // Clear error when user types
     if (errors[name]) {
       setErrors(prev => ({
@@ -96,12 +102,14 @@ const Login = () => {
     }
     
     try {
-      const { success, error, user: loggedInUser } = await login({
+      const { success, error, detail, user: loggedInUser } = await login({
         username: formData.email, // Backend expects 'username' but we're using email as username
         password: formData.password,
       });
-      
+
       if (success) {
+        setContactPrompt(null);
+        setErrors({});
         // After successful login: if non-admin, try to jump directly to their assigned game
         const redirectTo = searchParams.get('redirect');
         if (isSuperAdmin(loggedInUser)) {
@@ -124,12 +132,33 @@ const Login = () => {
         } else {
           navigate(redirectTo || getDefaultLandingPath(loggedInUser), { replace: true });
         }
-      } else if (error) {
-        toast.error(error);
+      } else {
+        const message = error || 'Login failed. Please check your credentials.';
+        setErrors(prev => ({
+          ...prev,
+          form: message,
+        }));
+
+        if (detail?.show_contact_form) {
+          setContactPrompt({
+            email: formData.email,
+            superadminEmail: detail?.superadmin_email,
+          });
+          toast.info(message);
+        } else {
+          setContactPrompt(null);
+          toast.error(message);
+        }
       }
     } catch (error) {
       console.error('Login error:', error);
-      toast.error(error.message || 'An unexpected error occurred. Please try again.');
+      const fallbackMessage = error.message || 'An unexpected error occurred. Please try again.';
+      setErrors(prev => ({
+        ...prev,
+        form: fallbackMessage,
+      }));
+      setContactPrompt(null);
+      toast.error(fallbackMessage);
     }
   };
 
@@ -250,7 +279,15 @@ const Login = () => {
             </button>
           </div>
         </form>
-        
+
+        {contactPrompt && (
+          <ContactSuperadminForm
+            email={contactPrompt.email}
+            superadminEmail={contactPrompt.superadminEmail}
+            onClose={() => setContactPrompt(null)}
+          />
+        )}
+
         <div className="mt-6">
           <div className="relative">
             <div className="absolute inset-0 flex items-center">
