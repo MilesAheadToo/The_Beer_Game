@@ -1,25 +1,9 @@
-import React, { useEffect, useState } from 'react';
-import {
-  Box,
-  Button,
-  TextField,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Table,
-  TableHead,
-  TableRow,
-  TableCell,
-  TableBody,
-  IconButton,
-  Typography,
-} from '@mui/material';
-import { Edit, Delete } from '@mui/icons-material';
-import api from '../../services/api';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { FaEdit, FaPlus, FaTrash } from 'react-icons/fa';
+import { api } from '../../services/api';
 import { toast } from 'react-toastify';
 
-const defaultForm = {
+const DEFAULT_FORM = {
   name: 'Daybreak',
   description: '',
   logo: '/daybreak_logo.png',
@@ -27,77 +11,134 @@ const defaultForm = {
     username: 'groupadmin',
     email: 'groupadmin@daybreak.ai',
     password: 'Daybreak@2025',
-    full_name: 'Group Administrator'
-  }
+    full_name: 'Group Administrator',
+  },
 };
+
+const createDefaultForm = () => ({
+  ...DEFAULT_FORM,
+  admin: { ...DEFAULT_FORM.admin },
+});
 
 const GroupManagement = () => {
   const [groups, setGroups] = useState([]);
-  const [open, setOpen] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState(defaultForm);
-  const [logoPreview, setLogoPreview] = useState(defaultForm.logo || '');
+  const [selectedGroupId, setSelectedGroupId] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingGroupId, setEditingGroupId] = useState(null);
+  const [form, setForm] = useState(createDefaultForm());
+  const [logoPreview, setLogoPreview] = useState(DEFAULT_FORM.logo || '');
   const [logoFileName, setLogoFileName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
-  const fetchGroups = async () => {
-    try {
-      const res = await api.get('/api/v1/groups');
-      setGroups(res.data);
-      if (res.data.length === 0) {
-        handleOpen(null);
-      }
-    } catch (err) {
-      setGroups([]);
-    }
-  };
+  const selectedGroup = useMemo(
+    () => groups.find((group) => group.id === selectedGroupId) || null,
+    [groups, selectedGroupId]
+  );
 
-  useEffect(() => { fetchGroups(); }, []);
-
-  useEffect(() => {
-    setLogoPreview(form.logo || '');
-  }, [form.logo]);
-
-  const handleOpen = (group) => {
+  const openModal = useCallback((group = null) => {
     if (group) {
-      setEditing(group.id);
-      setForm({ name: group.name, description: group.description || '', logo: group.logo || '', admin: { username: '', email: '', password: '', full_name: '' } });
+      setEditingGroupId(group.id);
+      setForm({
+        name: group.name || '',
+        description: group.description || '',
+        logo: group.logo || '',
+        admin: {
+          username: '',
+          email: '',
+          password: '',
+          full_name: '',
+        },
+      });
       setLogoPreview(group.logo || '');
     } else {
-      setEditing(null);
-      setForm(defaultForm);
-      setLogoPreview(defaultForm.logo || '');
+      setEditingGroupId(null);
+      const defaults = createDefaultForm();
+      setForm(defaults);
+      setLogoPreview(defaults.logo || '');
     }
     setLogoFileName('');
-    setOpen(true);
-  };
+    setIsModalOpen(true);
+  }, []);
 
-  const handleClose = () => setOpen(false);
+  const closeModal = useCallback(() => {
+    setIsModalOpen(false);
+  }, []);
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
+  const fetchGroups = useCallback(
+    async (nextSelectedId = null) => {
+      setIsLoading(true);
+      try {
+        const response = await api.get('/api/v1/groups');
+        const data = Array.isArray(response.data) ? response.data : [];
+        setGroups(data);
+
+        if (data.length === 0) {
+          setSelectedGroupId(null);
+          openModal(null);
+          return;
+        }
+
+        if (nextSelectedId && data.some((group) => group.id === nextSelectedId)) {
+          setSelectedGroupId(nextSelectedId);
+        } else {
+          setSelectedGroupId((prev) =>
+            prev && data.some((group) => group.id === prev) ? prev : data[0]?.id || null
+          );
+        }
+      } catch (error) {
+        console.error('Failed to load groups:', error);
+        setGroups([]);
+        toast.error('Failed to load groups.');
+      } finally {
+        setIsLoading(false);
+      }
+    },
+    [openModal]
+  );
+
+  useEffect(() => {
+    fetchGroups();
+  }, [fetchGroups]);
+
+  const handleChange = (event) => {
+    const { name, value } = event.target;
+
     if (name.startsWith('admin.')) {
       const key = name.split('.')[1];
-      setForm({ ...form, admin: { ...form.admin, [key]: value } });
-    } else if (name === 'logo') {
-      setLogoFileName('');
-      setForm({ ...form, logo: value });
-      setLogoPreview(value);
-    } else {
-      setForm({ ...form, [name]: value });
+      setForm((prev) => ({
+        ...prev,
+        admin: {
+          ...prev.admin,
+          [key]: value,
+        },
+      }));
+      return;
     }
+
+    if (name === 'logo') {
+      setLogoFileName('');
+      setLogoPreview(value);
+    }
+
+    setForm((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
   };
 
   const handleLogoFileChange = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
     const reader = new FileReader();
     reader.onloadend = () => {
-      const result = reader.result || '';
+      const result = typeof reader.result === 'string' ? reader.result : '';
       setForm((prev) => ({ ...prev, logo: result }));
       setLogoPreview(result);
       setLogoFileName(file.name);
     };
+
     reader.readAsDataURL(file);
     event.target.value = '';
   };
@@ -108,136 +149,381 @@ const GroupManagement = () => {
     setLogoPreview('');
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (event) => {
+    event?.preventDefault();
+
+    const trimmedName = form.name.trim();
+    if (!trimmedName) {
+      toast.error('Group name is required.');
+      return;
+    }
+
     setSaving(true);
+
     try {
-      if (editing) {
-        await api.put(`/api/v1/groups/${editing}`, { name: form.name, description: form.description, logo: form.logo });
+      if (editingGroupId) {
+        await api.put(`/api/v1/groups/${editingGroupId}`, {
+          name: trimmedName,
+          description: form.description,
+          logo: form.logo,
+        });
         toast.success('Group updated successfully');
+        closeModal();
+        await fetchGroups(editingGroupId);
       } else {
-        await api.post('/api/v1/groups', form);
+        const { data } = await api.post('/api/v1/groups', {
+          ...form,
+          name: trimmedName,
+        });
         toast.success('Group created successfully');
+        closeModal();
+        await fetchGroups(data?.id);
       }
-      handleClose();
-      await fetchGroups();
-    } catch (err) {
-      console.error(err);
+    } catch (error) {
+      console.error('Failed to save group:', error);
       toast.error('Failed to save group. Please try again.');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleDelete = async (id) => {
+  const handleDeleteGroup = async (group) => {
+    if (!group) return;
+
+    const confirmMessage = `Are you sure you want to delete ${group.name || 'this group'}?`;
+    if (!window.confirm(confirmMessage)) return;
+
     try {
-      await api.delete(`/api/v1/groups/${id}`);
-      fetchGroups();
-    } catch (err) {
-      console.error(err);
+      await api.delete(`/api/v1/groups/${group.id}`);
+      toast.success('Group deleted');
+      await fetchGroups();
+    } catch (error) {
+      console.error('Failed to delete group:', error);
+      toast.error('Failed to delete group. Please try again.');
     }
   };
 
+  const handleEditSelected = () => {
+    if (!selectedGroup) return;
+    openModal(selectedGroup);
+  };
+
+  const handleDeleteSelected = () => {
+    if (!selectedGroup) return;
+    handleDeleteGroup(selectedGroup);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500" />
+      </div>
+    );
+  }
+
   return (
-    <Box p={2}>
-      <Button variant="contained" onClick={() => handleOpen(null)}>Add Group</Button>
-      {groups.length > 0 && (
-        <Table sx={{ mt: 2 }}>
-          <TableHead>
-            <TableRow>
-              <TableCell>Name</TableCell>
-              <TableCell>Description</TableCell>
-              <TableCell>Admin</TableCell>
-              <TableCell>Actions</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {groups.map(g => (
-              <TableRow key={g.id}>
-                <TableCell>{g.name}</TableCell>
-                <TableCell>{g.description}</TableCell>
-                <TableCell>{g.admin?.email}</TableCell>
-                <TableCell>
-                  <IconButton onClick={() => handleOpen(g)}><Edit /></IconButton>
-                  <IconButton onClick={() => handleDelete(g.id)}><Delete /></IconButton>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+    <div className="container mx-auto px-4 py-8">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between mb-8">
+        <h1 className="text-3xl font-bold text-gray-800">Group Management</h1>
+        <div className="flex flex-wrap gap-3">
+          <button
+            type="button"
+            onClick={() => openModal(null)}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+          >
+            <FaPlus /> Add Group
+          </button>
+          <button
+            type="button"
+            onClick={handleEditSelected}
+            disabled={!selectedGroup}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+              selectedGroup
+                ? 'border border-gray-300 text-gray-700 bg-white hover:bg-gray-50'
+                : 'border border-gray-200 text-gray-400 bg-gray-100 cursor-not-allowed'
+            }`}
+          >
+            <FaEdit /> Edit Group
+          </button>
+          <button
+            type="button"
+            onClick={handleDeleteSelected}
+            disabled={!selectedGroup}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
+              selectedGroup
+                ? 'border border-red-200 text-red-600 bg-white hover:bg-red-50'
+                : 'border border-gray-200 text-gray-400 bg-gray-100 cursor-not-allowed'
+            }`}
+          >
+            <FaTrash /> Delete Group
+          </button>
+        </div>
+      </div>
+
+      {groups.length === 0 ? (
+        <div className="table-surface p-8 text-center">
+          <h2 className="text-lg font-semibold text-gray-800">No groups yet</h2>
+          <p className="mt-2 text-sm text-gray-600">
+            Create your first group to get started.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="table-surface overflow-hidden sm:rounded-lg">
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Group
+                    </th>
+                    <th
+                      scope="col"
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Group Admin
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {groups.map((group) => {
+                    const isSelected = group.id === selectedGroupId;
+                    const adminName =
+                      group.admin?.full_name || group.admin?.username || '—';
+                    const adminEmail = group.admin?.email;
+
+                    return (
+                      <tr
+                        key={group.id}
+                        onClick={() => setSelectedGroupId(group.id)}
+                        onDoubleClick={() => openModal(group)}
+                        className={`cursor-pointer transition-colors ${
+                          isSelected ? 'bg-blue-50' : 'hover:bg-gray-50'
+                        }`}
+                        aria-selected={isSelected}
+                      >
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">
+                            {group.name || '—'}
+                          </div>
+                          {group.description ? (
+                            <div className="text-sm text-gray-500 mt-1">
+                              {group.description}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          <div className="text-sm font-medium text-gray-900">
+                            {adminName}
+                          </div>
+                          {adminEmail ? (
+                            <div className="text-sm text-gray-500">{adminEmail}</div>
+                          ) : null}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <p className="mt-3 text-sm text-gray-500">
+            Select a group to enable editing or deletion.
+          </p>
+        </>
       )}
-      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
-        <DialogTitle>{editing ? 'Edit Group' : 'Create Group'}</DialogTitle>
-        <DialogContent>
-          <TextField margin="dense" label="Name" name="name" fullWidth value={form.name} onChange={handleChange} />
-          <TextField margin="dense" label="Description" name="description" fullWidth value={form.description} onChange={handleChange} />
-          <Box mt={2} mb={1}>
-            <Typography variant="subtitle2" gutterBottom>
-              Group Logo
-            </Typography>
-            <TextField
-              margin="dense"
-              label="Logo URL or data"
-              name="logo"
-              fullWidth
-              value={form.logo || ''}
-              onChange={handleChange}
-              placeholder="Paste a logo URL or upload a file below"
-            />
-            <Box display="flex" alignItems="center" mt={1} gap={1} flexWrap="wrap">
-              <Button variant="outlined" component="label" size="small">
-                Upload Logo
-                <input type="file" accept="image/*" hidden onChange={handleLogoFileChange} />
-              </Button>
-              <Typography variant="body2" color="text.secondary">
-                {logoFileName ? `Selected file: ${logoFileName}` : 'Upload an image (PNG, JPG, SVG) or paste a URL above.'}
-              </Typography>
-              {logoPreview && (
-                <Button size="small" onClick={handleRemoveLogo}>
-                  Remove
-                </Button>
-              )}
-            </Box>
-            {logoPreview && (
-              <Box mt={2} display="flex" alignItems="center" gap={2}>
-                <Box
-                  component="img"
-                  src={logoPreview}
-                  alt="Logo preview"
-                  sx={{
-                    width: 80,
-                    height: 80,
-                    objectFit: 'contain',
-                    borderRadius: 1,
-                    border: '1px solid',
-                    borderColor: 'divider',
-                    backgroundColor: 'background.default',
-                    p: 1,
-                  }}
+
+      {isModalOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h2 className="text-xl font-semibold text-gray-800">
+                {editingGroupId ? 'Edit Group' : 'Add New Group'}
+              </h2>
+              <button
+                type="button"
+                onClick={closeModal}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="px-6 py-6 space-y-6">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="group-name">
+                  Group Name
+                </label>
+                <input
+                  id="group-name"
+                  name="name"
+                  type="text"
+                  value={form.name}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
                 />
-                <Typography variant="body2" color="text.secondary">
-                  Preview of the logo that will be saved for this group.
-                </Typography>
-              </Box>
-            )}
-          </Box>
-          <TextField margin="dense" label="SC Config" name="sc_config" fullWidth value="Default TBG" disabled />
-          {!editing && (
-            <>
-              <TextField margin="dense" label="Admin Username" name="admin.username" fullWidth value={form.admin.username} onChange={handleChange} />
-              <TextField margin="dense" label="Admin Email" name="admin.email" fullWidth value={form.admin.email} onChange={handleChange} />
-              <TextField margin="dense" label="Admin Full Name" name="admin.full_name" fullWidth value={form.admin.full_name} onChange={handleChange} />
-              <TextField margin="dense" label="Admin Password" type="password" name="admin.password" fullWidth value={form.admin.password} onChange={handleChange} />
-            </>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose} disabled={saving}>Cancel</Button>
-          <Button onClick={handleSubmit} variant="contained" disabled={saving}>
-            {saving ? 'Saving…' : 'Save'}
-          </Button>
-        </DialogActions>
-      </Dialog>
-    </Box>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="group-description">
+                  Description
+                </label>
+                <textarea
+                  id="group-description"
+                  name="description"
+                  value={form.description}
+                  onChange={handleChange}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Add a short description for this group"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="group-logo">
+                  Group Logo
+                </label>
+                <input
+                  id="group-logo"
+                  name="logo"
+                  type="text"
+                  value={form.logo || ''}
+                  onChange={handleChange}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  placeholder="Paste a logo URL or upload a file below"
+                />
+                <div className="flex flex-wrap items-center gap-3 mt-2">
+                  <label className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white cursor-pointer hover:bg-gray-50">
+                    <input type="file" accept="image/*" className="hidden" onChange={handleLogoFileChange} />
+                    Upload Logo
+                  </label>
+                  <span className="text-sm text-gray-500">
+                    {logoFileName
+                      ? `Selected file: ${logoFileName}`
+                      : 'Upload an image (PNG, JPG, SVG) or provide a URL above.'}
+                  </span>
+                  {logoPreview && (
+                    <button
+                      type="button"
+                      onClick={handleRemoveLogo}
+                      className="text-sm text-red-600 hover:text-red-800"
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                {logoPreview && (
+                  <div className="mt-3 flex items-center gap-4">
+                    <img
+                      src={logoPreview}
+                      alt="Logo preview"
+                      className="h-20 w-20 rounded-md object-contain border border-gray-200 bg-gray-50 p-2"
+                    />
+                    <p className="text-sm text-gray-500">
+                      Preview of the logo that will be saved for this group.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="sc-config">
+                  SC Config
+                </label>
+                <input
+                  id="sc-config"
+                  type="text"
+                  value="Default TBG"
+                  disabled
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100 text-gray-500 cursor-not-allowed"
+                />
+              </div>
+
+              {!editingGroupId && (
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="md:col-span-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="admin-username">
+                      Admin Username
+                    </label>
+                    <input
+                      id="admin-username"
+                      name="admin.username"
+                      type="text"
+                      value={form.admin.username}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="md:col-span-1">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="admin-email">
+                      Admin Email
+                    </label>
+                    <input
+                      id="admin-email"
+                      name="admin.email"
+                      type="email"
+                      value={form.admin.email}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="admin-full-name">
+                      Admin Full Name
+                    </label>
+                    <input
+                      id="admin-full-name"
+                      name="admin.full_name"
+                      type="text"
+                      value={form.admin.full_name}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="admin-password">
+                      Admin Password
+                    </label>
+                    <input
+                      id="admin-password"
+                      name="admin.password"
+                      type="password"
+                      value={form.admin.password}
+                      onChange={handleChange}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+                <button
+                  type="button"
+                  onClick={closeModal}
+                  className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                  disabled={saving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className={`px-4 py-2 rounded-md text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 ${
+                    saving ? 'opacity-75 cursor-not-allowed' : ''
+                  }`}
+                  disabled={saving}
+                >
+                  {saving ? 'Saving…' : editingGroupId ? 'Save Changes' : 'Create Group'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
   );
 };
 

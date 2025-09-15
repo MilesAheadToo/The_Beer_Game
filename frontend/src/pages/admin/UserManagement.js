@@ -1,6 +1,29 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FaTrash, FaPlus, FaUserShield, FaUser, FaEdit } from 'react-icons/fa';
+import {
+  Box,
+  Button,
+  Chip,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControl,
+  FormHelperText,
+  IconButton,
+  InputLabel,
+  MenuItem,
+  Select,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableRow,
+  TextField,
+  Typography,
+} from '@mui/material';
+import { Add, Delete, Edit } from '@mui/icons-material';
 import { toast } from 'react-toastify';
 import { useAuth } from '../../contexts/AuthContext';
 import { api, mixedGameApi } from '../../services/api';
@@ -46,14 +69,14 @@ const getUserType = (user) => {
   return 'player';
 };
 
-const getTypeBadgeClass = (type) => {
+const getTypeChipColor = (type) => {
   switch (type) {
     case 'system_admin':
-      return 'bg-purple-100 text-purple-800';
+      return 'secondary';
     case 'group_admin':
-      return 'bg-blue-100 text-blue-800';
+      return 'primary';
     default:
-      return 'bg-green-100 text-green-800';
+      return 'success';
   }
 };
 
@@ -71,9 +94,11 @@ function UserManagement() {
   const [users, setUsers] = useState([]);
   const [groups, setGroups] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [showAddUser, setShowAddUser] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
+
   const [form, setForm] = useState({ ...BASE_FORM });
+
   const [replacementPrompt, setReplacementPrompt] = useState({ ...DEFAULT_REPLACEMENT_PROMPT });
 
   const navigate = useNavigate();
@@ -96,8 +121,11 @@ function UserManagement() {
   }, [resetForm, showAddUser]);
 
   const groupMap = useMemo(() => {
-    const entries = (groups || []).map((group) => [group.id, group.name]);
-    return Object.fromEntries(entries);
+    const map = {};
+    (groups || []).forEach((group) => {
+      map[group.id] = group.name;
+    });
+    return map;
   }, [groups]);
 
   const pageTitle = systemAdmin ? 'User Management' : 'Player Management';
@@ -106,13 +134,29 @@ function UserManagement() {
   const submitButtonLabel = editingUser ? 'Save Changes' : addButtonLabel;
 
   const loadGroups = useCallback(async () => {
-    const response = await api.get('/groups');
-    setGroups(Array.isArray(response.data) ? response.data : []);
+    try {
+      const response = await api.get('/api/v1/groups');
+      const data = Array.isArray(response.data) ? response.data : [];
+      setGroups(data);
+      return data;
+    } catch (error) {
+      console.error('Error loading groups:', error);
+      setGroups([]);
+      throw error;
+    }
   }, []);
 
   const loadUsers = useCallback(async () => {
-    const response = await api.get('/auth/users/');
-    setUsers(Array.isArray(response.data) ? response.data : []);
+    try {
+      const response = await api.get('/api/v1/users');
+      const data = Array.isArray(response.data) ? response.data : [];
+      setUsers(data);
+      return data;
+    } catch (error) {
+      console.error('Error loading users:', error);
+      setUsers([]);
+      throw error;
+    }
   }, []);
 
   useEffect(() => {
@@ -137,17 +181,20 @@ function UserManagement() {
     fetchAll();
   }, [isGroupAdmin, navigate, loadGroups, loadUsers]);
 
+
   const handleOpenModal = () => {
     setEditingUser(null);
     resetForm();
     setShowAddUser(true);
+
   };
 
   const handleCloseModal = () => {
-    setShowAddUser(false);
+    setDialogOpen(false);
     setEditingUser(null);
     resetForm();
   };
+
 
   const handleEditUser = (userToEdit) => {
     setEditingUser(userToEdit);
@@ -164,6 +211,7 @@ function UserManagement() {
   };
 
   const handleTypeChange = (value) => {
+
     setForm((prev) => ({
       ...prev,
       userType: value,
@@ -206,25 +254,23 @@ function UserManagement() {
       payload.password = form.password;
     }
 
+    setSaving(true);
     try {
       if (editingUser) {
-        await api.put(`/users/${editingUser.id}`, payload);
-        toast.success('User updated');
+        await api.put(`/api/v1/users/${editingUser.id}`, payload);
+        toast.success('User updated successfully');
       } else {
-        await api.post('/users/', payload);
-        toast.success('User created');
+        await api.post('/api/v1/users', payload);
+        toast.success('User created successfully');
       }
 
       handleCloseModal();
-      try {
-        await Promise.all([loadUsers(), loadGroups()]);
-      } catch (refreshError) {
-        console.error('Error refreshing user list:', refreshError);
-        toast.error('User saved, but the list could not be refreshed.');
-      }
+      await Promise.all([loadUsers(), loadGroups()]);
     } catch (error) {
       const message = parseErrorMessage(error, 'Failed to save user');
       toast.error(message);
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -234,14 +280,9 @@ function UserManagement() {
     if (!window.confirm(confirmMessage)) return;
 
     try {
-      await api.delete(`/users/${user.id}`);
+      await api.delete(`/api/v1/users/${user.id}`);
       toast.success('User deleted');
-      try {
-        await Promise.all([loadUsers(), loadGroups()]);
-      } catch (refreshError) {
-        console.error('Error refreshing user list:', refreshError);
-        toast.error('User deleted, but the list could not be refreshed.');
-      }
+      await Promise.all([loadUsers(), loadGroups()]);
     } catch (error) {
       const detail = error?.response?.data?.detail;
       if (detail && typeof detail === 'object' && detail.code === 'replacement_required') {
@@ -277,17 +318,12 @@ function UserManagement() {
     }
 
     try {
-      await api.delete(`/users/${replacementPrompt.user.id}`, {
+      await api.delete(`/api/v1/users/${replacementPrompt.user.id}`, {
         params: { replacement_admin_id: replacementPrompt.selected },
       });
       toast.success('User deleted and replacement promoted to system admin');
       closeReplacementPrompt();
-      try {
-        await Promise.all([loadUsers(), loadGroups()]);
-      } catch (refreshError) {
-        console.error('Error refreshing user list:', refreshError);
-        toast.error('Changes applied, but the list could not be refreshed.');
-      }
+      await Promise.all([loadUsers(), loadGroups()]);
     } catch (error) {
       const message = parseErrorMessage(error, 'Failed to delete user');
       toast.error(message);
@@ -296,13 +332,14 @@ function UserManagement() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500" />
-      </div>
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
+        <CircularProgress />
+      </Box>
     );
   }
 
   return (
+
     <div className="container mx-auto px-4 py-8">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold text-gray-800">{pageTitle}</h1>
@@ -525,36 +562,89 @@ function UserManagement() {
                   setReplacementPrompt((prev) => ({ ...prev, selected: event.target.value }))
                 }
                 className="w-full px-3 py-2 border border-gray-300 rounded-md"
+
               >
-                <option value="">Select a group admin</option>
-                {replacementPrompt.options.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.username || option.email}
-                    {option.group_name ? ` — ${option.group_name}` : ''}
-                  </option>
+                {USER_TYPE_OPTIONS.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuItem>
                 ))}
-              </select>
-            </div>
-            <div className="flex justify-end space-x-3">
-              <button
-                type="button"
-                onClick={closeReplacementPrompt}
-                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirmReplacement}
-                className="px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700"
-              >
-                Promote &amp; Delete
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+              </Select>
+            </FormControl>
+            {form.userType !== 'system_admin' && (
+              <FormControl fullWidth>
+                <InputLabel id="group-select-label">Group</InputLabel>
+                <Select
+                  labelId="group-select-label"
+                  label="Group"
+                  value={form.groupId}
+                  onChange={(event) => setForm((prev) => ({ ...prev, groupId: event.target.value }))}
+                  required
+                >
+                  <MenuItem value="">
+                    <em>Select a group</em>
+                  </MenuItem>
+                  {groups.map((group) => (
+                    <MenuItem key={group.id} value={String(group.id)}>
+                      {group.name}
+                    </MenuItem>
+                  ))}
+                </Select>
+                {groups.length === 0 && (
+                  <FormHelperText error>
+                    No groups available. Create a group before adding players or group admins.
+                  </FormHelperText>
+                )}
+              </FormControl>
+            )}
+          </Box>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={handleCloseModal} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" form="user-management-form" variant="contained" disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={replacementPrompt.open} onClose={closeReplacementPrompt} maxWidth="xs" fullWidth>
+        <DialogTitle>Promote a Group Admin</DialogTitle>
+        <DialogContent dividers>
+          <Typography variant="body2" color="text.secondary" mb={2}>
+            {replacementPrompt.message || 'Select a group admin to promote to system admin before deleting this user.'}
+          </Typography>
+          <FormControl fullWidth>
+            <InputLabel id="replacement-admin-label">Replacement System Admin</InputLabel>
+            <Select
+              labelId="replacement-admin-label"
+              label="Replacement System Admin"
+              value={replacementPrompt.selected}
+              onChange={(event) =>
+                setReplacementPrompt((prev) => ({ ...prev, selected: event.target.value }))
+              }
+            >
+              <MenuItem value="">
+                <em>Select a group admin</em>
+              </MenuItem>
+              {replacementPrompt.options.map((option) => (
+                <MenuItem key={option.id} value={String(option.id)}>
+                  {option.username || option.email}
+                  {option.group_name ? ` — ${option.group_name}` : ''}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeReplacementPrompt}>Cancel</Button>
+          <Button onClick={handleConfirmReplacement} variant="contained">
+            Promote & Delete
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </Box>
   );
 }
 
