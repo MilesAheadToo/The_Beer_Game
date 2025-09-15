@@ -28,7 +28,7 @@ const Login = () => {
 
       // Handle superadmin separately (case-insensitive check, allow role flag)
       if (isSuperAdmin(user)) {
-        navigate('/admin/groups', { replace: true });
+        navigate('/system-config', { replace: true });
         return;
       }
       if (isAdmin(user)) {
@@ -113,7 +113,7 @@ const Login = () => {
         // After successful login: if non-admin, try to jump directly to their assigned game
         const redirectTo = searchParams.get('redirect');
         if (isSuperAdmin(loggedInUser)) {
-          navigate('/admin/groups', { replace: true });
+          navigate('/system-config', { replace: true });
           return;
         }
 
