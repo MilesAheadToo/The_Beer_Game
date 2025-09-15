@@ -1,6 +1,7 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any, Tuple
 import random
 from enum import Enum
+from collections import deque
 
 # Import the LLM agent only when needed to avoid unnecessary dependencies
 try:  # pragma: no cover - optional import
@@ -21,6 +22,82 @@ class AgentStrategy(Enum):
     CONSERVATIVE = "conservative"  # Maintains stable orders
     RANDOM = "random"  # Random ordering for baseline
     LLM = "llm"  # Large Language Model strategy
+    DAYBREAK_DTCE = "daybreak_dtce"  # Decentralized twin coordinated ensemble
+    DAYBREAK_DTCE_CENTRAL = "daybreak_dtce_central"  # DTCE with central override
+
+
+class DaybreakCoordinator:
+    """Coordinates decentralized Daybreak agents with an optional override."""
+
+    def __init__(self, default_override: float = 0.05, history_length: int = 8):
+        self.default_override = self._clamp(default_override)
+        self.history_length = history_length
+        self.override_pct: Dict[AgentType, float] = {}
+        self.order_history: Dict[AgentType, deque] = {}
+
+    @staticmethod
+    def _clamp(pct: Optional[float]) -> float:
+        """Clamp override percentage to the 5%-50% range."""
+        try:
+            pct_val = float(pct) if pct is not None else 0.05
+        except (TypeError, ValueError):
+            pct_val = 0.05
+        pct_val = abs(pct_val)
+        pct_val = max(0.05, min(pct_val, 0.5))
+        return pct_val
+
+    def set_override_pct(self, agent_type: AgentType, pct: Optional[float]) -> None:
+        """Set an override percentage for a specific agent."""
+        if pct is None:
+            self.override_pct.pop(agent_type, None)
+            return
+        self.override_pct[agent_type] = self._clamp(pct)
+
+    def get_override_pct(self, agent_type: AgentType) -> float:
+        return self.override_pct.get(agent_type, self.default_override)
+
+    def _record_order(self, agent_type: AgentType, order: int) -> None:
+        history = self.order_history.setdefault(agent_type, deque(maxlen=self.history_length))
+        history.append(order)
+
+    def register_decision(self, agent_type: AgentType, order: int) -> None:
+        """Record the final decision from a decentralized agent."""
+        self._record_order(agent_type, order)
+
+    def _network_average(self, exclude: AgentType) -> Optional[float]:
+        values = [history[-1] for atype, history in self.order_history.items() if atype != exclude and history]
+        if values:
+            return sum(values) / len(values)
+        return None
+
+    def apply_override(self, agent_type: AgentType, base_order: float, context: Optional[Dict[str, Any]] = None) -> int:
+        """Apply the centralized override to the base order."""
+        base = max(0.0, float(base_order))
+        network_avg = self._network_average(agent_type)
+        target = base
+        if network_avg is not None:
+            target = (base + network_avg) / 2.0
+
+        backlog = float(context.get("backlog", 0)) if context else 0.0
+        inventory = float(context.get("inventory", 0)) if context else 0.0
+
+        if backlog > inventory:
+            target = max(target, base + (backlog - inventory))
+        elif inventory > backlog * 2:
+            target = min(target, base - (inventory - backlog) / 2.0)
+
+        pct = self.get_override_pct(agent_type)
+        max_adjustment = base * pct
+        adjustment = target - base
+        if adjustment > 0:
+            adjustment = min(adjustment, max_adjustment)
+        else:
+            adjustment = max(adjustment, -max_adjustment)
+
+        adjusted = max(0.0, base + adjustment)
+        final_order = int(round(adjusted))
+        self._record_order(agent_type, final_order)
+        return final_order
 
 class BeerGameAgent:
     def __init__(
@@ -32,6 +109,7 @@ class BeerGameAgent:
         initial_inventory: int = 12,
         initial_orders: int = 4,
         llm_model: Optional[str] = None,
+        central_coordinator: Optional[DaybreakCoordinator] = None,
     ):
         self.agent_id = agent_id
         self.agent_type = agent_type
@@ -46,12 +124,15 @@ class BeerGameAgent:
         # LLM specific configuration
         self.llm_model = llm_model
         self._llm_agent: Optional[LLMAgent] = None
+        # Optional centralized coordinator for Daybreak variants
+        self.central_coordinator = central_coordinator
         
     def make_decision(
-        self, 
+        self,
         current_round: int,
         current_demand: Optional[int] = None,
-        upstream_data: Optional[Dict] = None
+        upstream_data: Optional[Dict] = None,
+        local_state: Optional[Dict[str, Any]] = None,
     ) -> int:
         """
         Make an order decision based on the agent's strategy and available information.
@@ -67,7 +148,34 @@ class BeerGameAgent:
         # Update demand history if visible
         if current_demand is not None and (self.agent_type == AgentType.RETAILER or self.can_see_demand):
             self.demand_history.append(current_demand)
-        
+
+        # Normalize local state inputs for advanced strategies
+        local_state = local_state or {}
+        inventory_level = int(local_state.get("inventory", self.inventory))
+        backlog_level = int(local_state.get("backlog", self.backlog))
+        inventory_level = max(0, inventory_level)
+        backlog_level = max(0, backlog_level)
+
+        shipments_raw = local_state.get("incoming_shipments", self.pipeline)
+        processed_shipments: List[float] = []
+        if isinstance(shipments_raw, (list, tuple)):
+            for item in shipments_raw:
+                if isinstance(item, (int, float)):
+                    processed_shipments.append(float(item))
+                elif isinstance(item, dict):
+                    qty = item.get("quantity") or item.get("qty")
+                    if qty is not None:
+                        try:
+                            processed_shipments.append(float(qty))
+                        except (TypeError, ValueError):
+                            continue
+        if not processed_shipments:
+            processed_shipments = [float(x) for x in self.pipeline]
+
+        # Keep internal state aligned with the most recent observation
+        self.inventory = inventory_level
+        self.backlog = backlog_level
+
         # Make decision based on strategy
         if self.strategy == AgentStrategy.NAIVE:
             order = self._naive_strategy(current_demand)
@@ -77,9 +185,26 @@ class BeerGameAgent:
             order = self._conservative_strategy(current_demand)
         elif self.strategy == AgentStrategy.LLM:
             order = self._llm_strategy(current_round, current_demand, upstream_data)
-        else:  # RANDOM
+        elif self.strategy == AgentStrategy.DAYBREAK_DTCE:
+            order = self._daybreak_dtce_strategy(
+                current_demand,
+                upstream_data,
+                inventory_level,
+                backlog_level,
+                processed_shipments,
+            )
+        elif self.strategy == AgentStrategy.DAYBREAK_DTCE_CENTRAL:
+            order = self._daybreak_central_strategy(
+                current_demand,
+                upstream_data,
+                inventory_level,
+                backlog_level,
+                processed_shipments,
+            )
+        else:  # RANDOM fallback
             order = self._random_strategy()
-            
+
+        order = max(0, int(round(order)))
         self.last_order = order
         self.order_history.append(order)
         return order
@@ -152,7 +277,96 @@ class BeerGameAgent:
         except Exception:
             # Fallback if the LLM call fails for any reason
             return self._naive_strategy(current_demand)
-    
+
+    def _compute_daybreak_base(
+        self,
+        current_demand: Optional[int],
+        upstream_data: Optional[Dict],
+        inventory_level: int,
+        backlog_level: int,
+        incoming_shipments: List[float],
+    ) -> Tuple[float, Dict[str, Any]]:
+        """Compute the baseline Daybreak DTCE recommendation."""
+        alpha = 0.35
+        if self.demand_history:
+            forecast = float(self.demand_history[0])
+            for demand in self.demand_history[1:]:
+                forecast = alpha * float(demand) + (1 - alpha) * forecast
+        elif current_demand is not None:
+            forecast = float(current_demand)
+        else:
+            forecast = float(self.last_order or 4)
+
+        pipeline = sum(incoming_shipments[:2]) if incoming_shipments else 0.0
+        inventory_position = float(inventory_level) + pipeline - float(backlog_level)
+        safety_stock = max(0.0, forecast * 0.5)
+        base_target = forecast * 2.0 + safety_stock + float(backlog_level)
+        base_order = base_target - inventory_position
+
+        upstream_orders = (upstream_data or {}).get('previous_orders') if upstream_data else None
+        upstream_avg = None
+        if upstream_orders:
+            recent_upstream = upstream_orders[-3:]
+            if recent_upstream:
+                upstream_avg = sum(recent_upstream) / len(recent_upstream)
+
+        recent_local_orders = self.order_history[-3:] if self.order_history else []
+        local_avg = sum(recent_local_orders) / len(recent_local_orders) if recent_local_orders else float(self.last_order)
+
+        smoothing_anchor = upstream_avg if upstream_avg is not None else local_avg
+        if smoothing_anchor is not None:
+            base_order = 0.7 * base_order + 0.3 * float(smoothing_anchor)
+
+        base_order = max(0.0, base_order)
+        context = {
+            "forecast": forecast,
+            "inventory": float(inventory_level),
+            "backlog": float(backlog_level),
+            "pipeline": pipeline,
+            "upstream_avg": upstream_avg,
+            "local_avg": local_avg,
+        }
+        return base_order, context
+
+    def _daybreak_dtce_strategy(
+        self,
+        current_demand: Optional[int],
+        upstream_data: Optional[Dict],
+        inventory_level: int,
+        backlog_level: int,
+        incoming_shipments: List[float],
+    ) -> int:
+        base_order, context = self._compute_daybreak_base(
+            current_demand,
+            upstream_data,
+            inventory_level,
+            backlog_level,
+            incoming_shipments,
+        )
+        order = max(0, int(round(base_order)))
+        if self.central_coordinator:
+            self.central_coordinator.register_decision(self.agent_type, order)
+        return order
+
+    def _daybreak_central_strategy(
+        self,
+        current_demand: Optional[int],
+        upstream_data: Optional[Dict],
+        inventory_level: int,
+        backlog_level: int,
+        incoming_shipments: List[float],
+    ) -> int:
+        base_order, context = self._compute_daybreak_base(
+            current_demand,
+            upstream_data,
+            inventory_level,
+            backlog_level,
+            incoming_shipments,
+        )
+        if self.central_coordinator:
+            return self.central_coordinator.apply_override(self.agent_type, base_order, context)
+        return max(0, int(round(base_order)))
+
     def update_inventory(self, incoming_shipment: int, outgoing_shipment: int):
         """Update inventory and backlog based on incoming and outgoing shipments."""
         self.inventory = self.inventory + incoming_shipment - outgoing_shipment
@@ -165,12 +379,13 @@ class BeerGameAgent:
 
 class AgentManager:
     """Manages multiple agents in the supply chain."""
-    
+
     def __init__(self, can_see_demand: bool = False):
         self.agents: Dict[AgentType, BeerGameAgent] = {}
         self.can_see_demand = can_see_demand
+        self.daybreak_coordinator = DaybreakCoordinator()
         self.initialize_agents()
-    
+
     def initialize_agents(self):
         """Initialize agents for each role in the supply chain."""
         self.agents[AgentType.RETAILER] = BeerGameAgent(
@@ -179,48 +394,59 @@ class AgentManager:
             strategy=AgentStrategy.NAIVE,
             can_see_demand=True,  # Retailer can always see demand
             llm_model="gpt-4o-mini",
+            central_coordinator=self.daybreak_coordinator,
         )
-        
+
         self.agents[AgentType.WHOLESALER] = BeerGameAgent(
             agent_id=2,
             agent_type=AgentType.WHOLESALER,
             strategy=AgentStrategy.NAIVE,
             can_see_demand=self.can_see_demand,
             llm_model="gpt-4o-mini",
+            central_coordinator=self.daybreak_coordinator,
         )
-        
+
         self.agents[AgentType.DISTRIBUTOR] = BeerGameAgent(
             agent_id=3,
             agent_type=AgentType.DISTRIBUTOR,
             strategy=AgentStrategy.NAIVE,
             can_see_demand=self.can_see_demand,
             llm_model="gpt-4o-mini",
+            central_coordinator=self.daybreak_coordinator,
         )
-        
+
         self.agents[AgentType.FACTORY] = BeerGameAgent(
             agent_id=4,
             agent_type=AgentType.FACTORY,
             strategy=AgentStrategy.NAIVE,
             can_see_demand=self.can_see_demand,
             llm_model="gpt-4o-mini",
+            central_coordinator=self.daybreak_coordinator,
         )
-    
+
     def get_agent(self, agent_type: AgentType) -> BeerGameAgent:
         """Get agent by type."""
         return self.agents.get(agent_type)
-    
+
     def set_agent_strategy(
         self,
         agent_type: AgentType,
         strategy: AgentStrategy,
         llm_model: Optional[str] = None,
+        override_pct: Optional[float] = None,
     ):
         """Set strategy and optional LLM model for a specific agent."""
         if agent_type in self.agents:
             agent = self.agents[agent_type]
             agent.strategy = strategy
+            agent.central_coordinator = self.daybreak_coordinator
             if llm_model is not None:
                 agent.llm_model = llm_model
+            if strategy == AgentStrategy.DAYBREAK_DTCE_CENTRAL:
+                if override_pct is not None:
+                    self.daybreak_coordinator.set_override_pct(agent_type, override_pct)
+            else:
+                self.daybreak_coordinator.set_override_pct(agent_type, None)
     
     def set_demand_visibility(self, visible: bool):
         """Set whether agents can see the actual customer demand."""

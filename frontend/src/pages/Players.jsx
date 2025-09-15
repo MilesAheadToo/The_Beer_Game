@@ -89,6 +89,9 @@ const PlayersPage = () => {
         agent_type: form.type !== 'human' ? form.agent_type : undefined,
         user_id: form.type === 'human' ? Number(form.user_id) || null : null,
       };
+      if (payload.agent_type === 'DAYBREAK_DTCE_CENTRAL') {
+        payload.daybreak_override_pct = 0.05;
+      }
       await mixedGameApi.addPlayer(Number(selectedGameId), payload);
       toast({ title: 'Player added', status: 'success' });
       setForm(prev => ({ ...prev, name: '' }));
@@ -184,7 +187,8 @@ const PlayersPage = () => {
                   <FormControl>
                     <FormLabel>Agent Type</FormLabel>
                     <Select value={form.agent_type} onChange={(e) => setForm({ ...form, agent_type: e.target.value })}>
-                      <option value="DAYBREAK">Daybreak Agent</option>
+                      <option value="DAYBREAK_DTCE">Daybreak Agent - DTCE</option>
+                      <option value="DAYBREAK_DTCE_CENTRAL">Daybreak Agent - DTCE + Central Override</option>
                       <option value="LLM_BALANCED">LLM - Balanced</option>
                       <option value="LLM_CONSERVATIVE">LLM - Conservative</option>
                       <option value="LLM_AGGRESSIVE">LLM - Aggressive</option>

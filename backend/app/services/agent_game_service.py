@@ -140,12 +140,27 @@ class AgentGameService:
         )
         
         # Make decision based on agent's strategy
+        incoming_shipments = getattr(inventory, "incoming_shipments", None)
+        if incoming_shipments is None:
+            single = getattr(inventory, "incoming_shipment", None)
+            if single is not None:
+                incoming_shipments = [single]
+        if not isinstance(incoming_shipments, list):
+            incoming_shipments = []
+
+        local_state = {
+            "inventory": getattr(inventory, "current_inventory", getattr(inventory, "current_stock", 0)),
+            "backlog": getattr(inventory, "current_backlog", getattr(inventory, "backorders", 0)),
+            "incoming_shipments": incoming_shipments,
+        }
+
         order_quantity = agent.make_decision(
             current_round=game.current_round,
             current_demand=current_demand if player.role == PlayerRole.RETAILER else None,
             upstream_data={
                 'previous_orders': [pr.order_quantity for pr in previous_round.player_rounds] if previous_round else []
-            }
+            },
+            local_state=local_state,
         )
         
         # Create new game round if it doesn't exist
@@ -253,13 +268,22 @@ class AgentGameService:
             'demand_pattern': game.demand_pattern
         }
     
-    def set_agent_strategy(self, role: str, strategy: str, llm_model: Optional[str] = None):
+    def set_agent_strategy(
+        self,
+        role: str,
+        strategy: str,
+        llm_model: Optional[str] = None,
+        override_pct: Optional[float] = None,
+    ):
         """Set the strategy for an AI agent."""
         try:
             agent_type = AgentType(role.lower())
             strategy_enum = AgentStrategy(strategy.lower())
             self.agent_manager.set_agent_strategy(
-                agent_type, strategy_enum, llm_model=llm_model
+                agent_type,
+                strategy_enum,
+                llm_model=llm_model,
+                override_pct=override_pct,
             )
         except ValueError as e:
             raise ValueError(f"Invalid role or strategy: {e}")

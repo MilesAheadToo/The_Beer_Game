@@ -26,6 +26,9 @@ class PlayerStrategy(str, Enum):
     LLM_BALANCED = "llm_balanced"
     LLM_AGGRESSIVE = "llm_aggressive"
     LLM_ADAPTIVE = "llm_adaptive"
+    # Daybreak strategies
+    DAYBREAK_DTCE = "daybreak_dtce"
+    DAYBREAK_DTCE_CENTRAL = "daybreak_dtce_central"
 
 class PlayerAssignment(BaseModel):
     """Schema for assigning a player to a game role."""
@@ -39,6 +42,12 @@ class PlayerAssignment(BaseModel):
     )
     llm_config: Optional[dict] = None  # temperature, max_tokens, prompt
     basic_config: Optional[dict] = None  # heuristic params, e.g., base_stock_target, smoothing
+    daybreak_override_pct: Optional[float] = Field(
+        default=None,
+        ge=0.05,
+        le=0.5,
+        description="Optional override percentage for centralized Daybreak coordination (0.05-0.5)",
+    )
 
     @validator('user_id')
     def validate_user_id(cls, v, values):
