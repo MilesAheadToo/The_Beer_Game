@@ -147,28 +147,42 @@ export function AuthProvider({ children }) {
     try {
       setLoading(true);
       setError(null);
-      
+
       // This will automatically handle CSRF token and cookies
       const result = await mixedGameApi.login(credentials);
-      
+
       // API returns shape { success, user } on success
       if (result?.success) {
         const nextUser = result.user;
         setUser(nextUser);
         setIsAuthenticated(true);
-        
+
         // Reset timers after successful login
         resetTimers();
         return { success: true, user: nextUser };
       }
-      
+
       const message = result?.error || 'Login failed. Please check your credentials.';
       setError(message);
-      return { success: false, error: message };
+      return { success: false, error: message, detail: result?.detail };
     } catch (error) {
-      const message = error.response?.data?.detail || 'Login failed. Please check your credentials.';
+      const detail = error?.response?.data?.detail;
+      let message = 'Login failed. Please check your credentials.';
+
+      if (detail && typeof detail === 'object') {
+        message = detail.message || message;
+      } else if (typeof detail === 'string') {
+        message = detail;
+      } else if (error?.message) {
+        message = error.message;
+      }
+
       setError(message);
-      return { success: false, error: message };
+      return {
+        success: false,
+        error: message,
+        detail: detail && typeof detail === 'object' ? detail : undefined,
+      };
     } finally {
       setLoading(false);
     }

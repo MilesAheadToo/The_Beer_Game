@@ -214,18 +214,45 @@ export const mixedGameApi = {
     form.set('password', credentials.password);
     form.set('grant_type', 'password');
 
-    const { data } = await http.post('/auth/login', form, {
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
+    try {
+      const { data } = await http.post('/auth/login', form, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      });
 
-    // Handle successful login
-    if (data?.access_token) {
-      // Store tokens in httpOnly cookies (handled by the browser)
-      // The backend should set the appropriate cookies
-      return { success: true, user: data.user };
+      if (data?.access_token) {
+        return { success: true, user: data.user };
+      }
+
+      const detail = data?.detail;
+      if (detail && typeof detail === 'object') {
+        return {
+          success: false,
+          error: detail.message || 'Login failed',
+          detail,
+        };
+      }
+
+      return { success: false, error: detail || 'Login failed' };
+    } catch (error) {
+      const detail = error?.response?.data?.detail;
+
+      if (detail && typeof detail === 'object') {
+        return {
+          success: false,
+          error: detail.message || 'Login failed. Please try again.',
+          detail,
+        };
+      }
+
+      if (typeof detail === 'string') {
+        return { success: false, error: detail };
+      }
+
+      return {
+        success: false,
+        error: error?.message || 'Login failed. Please try again.',
+      };
     }
-    
-    return { success: false, error: data?.detail || 'Login failed' };
   },
 
   async logout() {
