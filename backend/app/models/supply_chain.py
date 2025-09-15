@@ -189,6 +189,7 @@ class PlayerRound(Base):
     holding_cost = Column(Float, default=0.0)
     backorder_cost = Column(Float, default=0.0)
     total_cost = Column(Float, default=0.0)
+    comment = Column(String(255), nullable=True)
     
     player = relationship("Player", back_populates="player_rounds")
     game_round = relationship("GameRound", back_populates="player_rounds")

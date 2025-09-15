@@ -166,7 +166,7 @@ class GameService:
         self.db.refresh(game)
         return game
     
-    def submit_order(self, game_id: int, player_id: int, order_quantity: int) -> PlayerRound:
+    def submit_order(self, game_id: int, player_id: int, order_quantity: int, comment: Optional[str] = None) -> PlayerRound:
         """
         Submit or update an order for the current round.
         
@@ -212,6 +212,7 @@ class GameService:
         # If player already submitted, update their order
         if player_round:
             player_round.order_placed = order_quantity
+            player_round.comment = comment
             player_round.updated_at = datetime.datetime.utcnow()
             self.db.commit()
             self.db.refresh(player_round)
@@ -229,7 +230,8 @@ class GameService:
             backorders_after=player.inventory.backorders,  # Will be updated
             holding_cost=0.0,  # Will be calculated
             backorder_cost=0.0,  # Will be calculated
-            total_cost=0.0  # Will be calculated
+            total_cost=0.0,  # Will be calculated
+            comment=comment
         )
         
         self.db.add(player_round)

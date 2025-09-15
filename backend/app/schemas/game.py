@@ -277,6 +277,7 @@ class GameState(GameInDBBase):
 
 class OrderCreate(BaseModel):
     quantity: int = Field(..., ge=0, description="Number of units to order")
+    comment: Optional[str] = Field(None, max_length=255, description="Reason for this order")
 
 class OrderResponse(BaseModel):
     id: int
@@ -296,6 +297,7 @@ class PlayerRoundBase(BaseModel):
     holding_cost: float = Field(0.0, ge=0)
     backorder_cost: float = Field(0.0, ge=0)
     total_cost: float = Field(0.0, ge=0)
+    comment: Optional[str] = Field(None, description="Player's comment for this round")
 
 class PlayerRoundCreate(PlayerRoundBase):
     pass
