@@ -38,22 +38,33 @@ class CRUDSupplyChainConfig(CRUDBase[SupplyChainConfig, SupplyChainConfigCreate,
         )
             
     def create(self, db: Session, *, obj_in: SupplyChainConfigCreate) -> SupplyChainConfig:
-        # Ensure only one active config
+        # Ensure only one active config per group
         if obj_in.is_active:
-            db.query(self.model).filter(self.model.is_active == True).update({"is_active": False})
+            group_id = getattr(obj_in, "group_id", None)
+            query = db.query(self.model).filter(self.model.is_active == True)
+            if group_id is not None:
+                query = query.filter(self.model.group_id == group_id)
+            else:
+                query = query.filter(self.model.group_id.is_(None))
+            query.update({"is_active": False})
         return super().create(db, obj_in=obj_in)
-    
+
     def update(
         self, db: Session, *, db_obj: SupplyChainConfig, obj_in: SupplyChainConfigUpdate
     ) -> SupplyChainConfig:
         # Handle is_active update
         if obj_in.is_active is True and not db_obj.is_active:
             # Deactivate other active configs
-            db.query(self.model).filter(
+            query = db.query(self.model).filter(
                 self.model.id != db_obj.id,
                 self.model.is_active == True
-            ).update({"is_active": False})
-        
+            )
+            if db_obj.group_id is not None:
+                query = query.filter(self.model.group_id == db_obj.group_id)
+            else:
+                query = query.filter(self.model.group_id.is_(None))
+            query.update({"is_active": False})
+
         return super().update(db, db_obj=db_obj, obj_in=obj_in)
 
 class CRUDItem(CRUDBase[Item, ItemCreate, ItemUpdate]):

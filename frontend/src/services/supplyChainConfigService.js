@@ -186,6 +186,7 @@ export const DEFAULT_CONFIG = {
   name: '',
   description: '',
   is_active: false,
+  group_id: null,
 };
 
 export const DEFAULT_ITEM = {

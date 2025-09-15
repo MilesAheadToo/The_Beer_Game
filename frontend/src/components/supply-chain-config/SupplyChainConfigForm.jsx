@@ -1,17 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { 
-  Box, 
+import {
+  Box,
   Button,
+  FormControl,
   FormControlLabel,
+  FormHelperText,
+  InputLabel,
   Switch,
-  Chip, 
-  Card, 
-  CardContent, 
-  CardHeader, 
-  Divider, 
-  Grid, 
-  TextField, 
+  Chip,
+  Card,
+  CardContent,
+  Grid,
+  MenuItem,
+  TextField,
   Typography,
   CircularProgress,
   Alert,
@@ -20,21 +22,20 @@ import {
   StepLabel,
   Paper,
   IconButton,
-  Tooltip
+  Tooltip,
+  Select,
 } from '@mui/material';
-import { 
-  Save as SaveIcon, 
-  ArrowBack as ArrowBackIcon,
-  Add as AddIcon,
-  Edit as EditIcon,
-  Delete as DeleteIcon
+import {
+  Save as SaveIcon,
+  ArrowBack as ArrowBackIcon
 } from '@mui/icons-material';
 import { useFormik } from 'formik';
 import * as Yup from 'yup';
 import { useSnackbar } from 'notistack';
+import api from '../../services/api';
 
 // Import services
-import { 
+import {
   getSupplyChainConfigById,
   createSupplyChainConfig,
   updateSupplyChainConfig,
@@ -58,19 +59,11 @@ import {
   updateMarketDemand,
   deleteMarketDemand,
   getNodeTypeDisplayName,
-  getNodeTypeColor,
   DEFAULT_CONFIG,
-  DEFAULT_ITEM,
-  DEFAULT_NODE,
-  DEFAULT_LANE,
-  DEFAULT_ITEM_NODE_CONFIG,
-  DEFAULT_MARKET_DEMAND,
   CLASSIC_SUPPLY_CHAIN
 } from '../../services/supplyChainConfigService';
 
 // Import sub-components
-import RangeInput from './RangeInput';
-import DemandPatternInput from './DemandPatternInput';
 import NodeForm from './NodeForm';
 import LaneForm from './LaneForm';
 import ItemForm from './ItemForm';
@@ -87,52 +80,74 @@ const STEPS = [
   'Review & Save'
 ];
 
-const SupplyChainConfigForm = () => {
+const SupplyChainConfigForm = ({
+  basePath = '/supply-chain-config',
+  allowGroupSelection = true,
+  defaultGroupId = null,
+} = {}) => {
   const { id } = useParams();
   const isEditMode = Boolean(id);
   const navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar();
-  
+
   const [activeStep, setActiveStep] = useState(0);
   const [loading, setLoading] = useState(isEditMode);
   const [error, setError] = useState(null);
-  
+
   // Data state
-  const [config, setConfig] = useState(DEFAULT_CONFIG);
+  const [config, setConfig] = useState({ ...DEFAULT_CONFIG, group_id: null });
   const [items, setItems] = useState(isEditMode ? [] : CLASSIC_SUPPLY_CHAIN.items);
   const [nodes, setNodes] = useState(isEditMode ? [] : CLASSIC_SUPPLY_CHAIN.nodes);
   const [lanes, setLanes] = useState(isEditMode ? [] : CLASSIC_SUPPLY_CHAIN.lanes);
   const [itemNodeConfigs, setItemNodeConfigs] = useState([]);
   const [marketDemands, setMarketDemands] = useState([]);
-  
+
+  // Group selection state
+  const [groups, setGroups] = useState([]);
+  const [groupsLoading, setGroupsLoading] = useState(false);
+  const [groupsError, setGroupsError] = useState(null);
+
   // Formik form
   const formik = useFormik({
     initialValues: {
       name: '',
       description: '',
       is_active: false,
+      group_id: defaultGroupId ? String(defaultGroupId) : '',
     },
     validationSchema: Yup.object({
       name: Yup.string().required('Name is required'),
       description: Yup.string(),
       is_active: Yup.boolean(),
+      ...(allowGroupSelection
+        ? { group_id: Yup.string().required('Group is required') }
+        : {}),
     }),
     onSubmit: async (values) => {
       try {
         setLoading(true);
-        
-        if (isEditMode) {
-          await updateSupplyChainConfig(id, values);
-          enqueueSnackbar('Configuration updated successfully', { variant: 'success' });
-        } else {
-          const newConfig = await createSupplyChainConfig(values);
-          enqueueSnackbar('Configuration created successfully', { variant: 'success' });
-          navigate(`/supply-chain-config/edit/${newConfig.id}`);
+
+        const effectiveGroupId =
+          values.group_id || (defaultGroupId ? String(defaultGroupId) : '');
+
+        const payload = {
+          name: values.name,
+          description: values.description,
+          is_active: values.is_active,
+        };
+
+        if (effectiveGroupId) {
+          payload.group_id = Number(effectiveGroupId);
         }
-        
-        // Refresh data
+
         if (isEditMode) {
-          fetchConfig();
+          await updateSupplyChainConfig(id, payload);
+          enqueueSnackbar('Configuration updated successfully', { variant: 'success' });
+          await fetchConfig();
+        } else {
+          const newConfig = await createSupplyChainConfig(payload);
+          enqueueSnackbar('Configuration created successfully', { variant: 'success' });
+          navigate(`${basePath}/edit/${newConfig.id}`);
         }
       } catch (err) {
         console.error('Error saving configuration:', err);
@@ -143,26 +158,92 @@ const SupplyChainConfigForm = () => {
     },
   });
 
-  // Fetch configuration data if in edit mode
+  const { setFieldValue, setValues } = formik;
+
   useEffect(() => {
-    if (isEditMode) {
-      fetchConfig();
+    if (!allowGroupSelection) {
+      setFieldValue('group_id', defaultGroupId ? String(defaultGroupId) : '', false);
+      return;
     }
+
+    let isMounted = true;
+
+    const loadGroups = async () => {
+      try {
+        setGroupsLoading(true);
+        const response = await api.get('/api/v1/groups');
+        if (!isMounted) return;
+        setGroups(response.data || []);
+        setGroupsError(null);
+      } catch (err) {
+        console.error('Error loading groups:', err);
+        if (!isMounted) return;
+        setGroups([]);
+        setGroupsError('Unable to load groups');
+      } finally {
+        if (isMounted) {
+          setGroupsLoading(false);
+        }
+      }
+    };
+
+    loadGroups();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [allowGroupSelection, defaultGroupId, setFieldValue]);
+
+  useEffect(() => {
+    if (!isEditMode && allowGroupSelection) {
+      setFieldValue('group_id', defaultGroupId ? String(defaultGroupId) : '', false);
+    }
+  }, [allowGroupSelection, defaultGroupId, isEditMode, setFieldValue]);
+
+  const fetchItems = useCallback(async () => {
+    const itemsData = await getItems(id);
+    setItems(itemsData);
+    return itemsData;
   }, [id]);
 
-  const fetchConfig = async () => {
+  const fetchNodes = useCallback(async () => {
+    const nodesData = await getNodes(id);
+    setNodes(nodesData);
+    return nodesData;
+  }, [id]);
+
+  const fetchLanes = useCallback(async () => {
+    const lanesData = await getLanes(id);
+    setLanes(lanesData);
+    return lanesData;
+  }, [id]);
+
+  const fetchItemNodeConfigs = useCallback(async () => {
+    const configsData = await getItemNodeConfigs(id);
+    setItemNodeConfigs(configsData);
+    return configsData;
+  }, [id]);
+
+  const fetchMarketDemands = useCallback(async () => {
+    const demandsData = await getMarketDemands(id);
+    setMarketDemands(demandsData);
+    return demandsData;
+  }, [id]);
+
+  const fetchConfig = useCallback(async () => {
     try {
       setLoading(true);
       const configData = await getSupplyChainConfigById(id);
       setConfig(configData);
-      
+
       // Set form values
-      formik.setValues({
+      setValues({
         name: configData.name,
         description: configData.description || '',
         is_active: configData.is_active || false,
+        group_id: configData.group_id ? String(configData.group_id) : '',
       });
-      
+
       // Fetch related data
       await Promise.all([
         fetchItems(),
@@ -180,37 +261,22 @@ const SupplyChainConfigForm = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [
+    enqueueSnackbar,
+    fetchItemNodeConfigs,
+    fetchItems,
+    fetchLanes,
+    fetchMarketDemands,
+    fetchNodes,
+    id,
+    setValues,
+  ]);
 
-  const fetchItems = async () => {
-    const itemsData = await getItems(id);
-    setItems(itemsData);
-    return itemsData;
-  };
-
-  const fetchNodes = async () => {
-    const nodesData = await getNodes(id);
-    setNodes(nodesData);
-    return nodesData;
-  };
-
-  const fetchLanes = async () => {
-    const lanesData = await getLanes(id);
-    setLanes(lanesData);
-    return lanesData;
-  };
-
-  const fetchItemNodeConfigs = async () => {
-    const configsData = await getItemNodeConfigs(id);
-    setItemNodeConfigs(configsData);
-    return configsData;
-  };
-
-  const fetchMarketDemands = async () => {
-    const demandsData = await getMarketDemands(id);
-    setMarketDemands(demandsData);
-    return demandsData;
-  };
+  useEffect(() => {
+    if (isEditMode) {
+      fetchConfig();
+    }
+  }, [isEditMode, fetchConfig]);
 
   const handleBack = () => {
     if (activeStep === 0) {
@@ -270,6 +336,43 @@ const SupplyChainConfigForm = () => {
                 disabled={loading}
               />
             </Grid>
+            {allowGroupSelection && (
+              <Grid item xs={12}>
+                <FormControl
+                  fullWidth
+                  disabled={loading || groupsLoading}
+                  error={Boolean(formik.touched.group_id && formik.errors.group_id)}
+                >
+                  <InputLabel id="group-select-label">Group</InputLabel>
+                  <Select
+                    labelId="group-select-label"
+                    id="group_id"
+                    name="group_id"
+                    label="Group"
+                    value={formik.values.group_id}
+                    onChange={formik.handleChange}
+                    onBlur={formik.handleBlur}
+                  >
+                    {groups.length === 0 && !groupsLoading ? (
+                      <MenuItem value="" disabled>
+                        No groups available
+                      </MenuItem>
+                    ) : (
+                      groups.map((group) => (
+                        <MenuItem key={group.id} value={String(group.id)}>
+                          {group.name}
+                        </MenuItem>
+                      ))
+                    )}
+                  </Select>
+                  {formik.touched.group_id && formik.errors.group_id ? (
+                    <FormHelperText>{formik.errors.group_id}</FormHelperText>
+                  ) : groupsError ? (
+                    <FormHelperText error>{groupsError}</FormHelperText>
+                  ) : null}
+                </FormControl>
+              </Grid>
+            )}
             {isEditMode && (
               <Grid item xs={12}>
                 <FormControlLabel
@@ -357,6 +460,9 @@ const SupplyChainConfigForm = () => {
               <Typography>Name: {formik.values.name}</Typography>
               <Typography>Description: {formik.values.description || 'N/A'}</Typography>
               <Typography>Status: {formik.values.is_active ? 'Active' : 'Inactive'}</Typography>
+              {(allowGroupSelection || formik.values.group_id) && (
+                <Typography>Group ID: {formik.values.group_id || (config.group_id ? String(config.group_id) : 'N/A')}</Typography>
+              )}
             </Paper>
             
             <Paper elevation={2} sx={{ p: 3, mb: 3 }}>

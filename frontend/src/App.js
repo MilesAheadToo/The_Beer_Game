@@ -23,6 +23,8 @@ import SystemConfig from "./pages/SystemConfig.jsx";
 import Unauthorized from "./pages/Unauthorized";
 import SupplyChainConfigList from "./components/supply-chain-config/SupplyChainConfigList";
 import SupplyChainConfigForm from "./components/supply-chain-config/SupplyChainConfigForm";
+import GroupSupplyChainConfigList from "./pages/admin/GroupSupplyChainConfigList.jsx";
+import GroupSupplyChainConfigForm from "./pages/admin/GroupSupplyChainConfigForm.jsx";
 import Players from "./pages/Players.jsx";
 import DebugBanner from "./components/DebugBanner.jsx";
 import { getDefaultLandingPath } from "./utils/authUtils";
@@ -186,6 +188,36 @@ const AppContent = () => {
                   <Navbar />
                   <Box sx={(theme) => theme.mixins.toolbar} />
                   <AdminUserManagement />
+                </>
+              }
+            />
+            <Route
+              path="/admin/group/supply-chain-configs"
+              element={
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <GroupSupplyChainConfigList />
+                </>
+              }
+            />
+            <Route
+              path="/admin/group/supply-chain-configs/new"
+              element={
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <GroupSupplyChainConfigForm />
+                </>
+              }
+            />
+            <Route
+              path="/admin/group/supply-chain-configs/edit/:id"
+              element={
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <GroupSupplyChainConfigForm />
                 </>
               }
             />

@@ -1,9 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Alert,
-  Box,
-  Button,
+import { 
+  Box, 
+  Button, 
+  Card, 
+  CardContent, 
+  CardHeader, 
+  Divider,
+  IconButton,
+  List,
+  ListItem,
+  Tooltip,
+  Typography,
+
   Chip,
   CircularProgress,
   Dialog,
@@ -38,16 +47,11 @@ import { useSnackbar } from 'notistack';
 import { format } from 'date-fns';
 import api from '../../services/api';
 
-const formatDate = (value) => {
-  if (!value) return '—';
-  try {
-    return format(new Date(value), 'MMM d, yyyy');
-  } catch {
-    return '—';
-  }
-};
+const SupplyChainConfigList = ({
+  title = 'Supply Chain Configurations',
+  basePath = '/supply-chain-config',
+} = {}) => {
 
-const SupplyChainConfigList = () => {
   const [configs, setConfigs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -80,11 +84,11 @@ const SupplyChainConfigList = () => {
   }, []);
 
   const handleCreateNew = () => {
-    navigate('/supply-chain-config/new');
+    navigate(`${basePath}/new`);
   };
 
   const handleEdit = (id) => {
-    navigate(`/supply-chain-config/edit/${id}`);
+    navigate(`${basePath}/edit/${id}`);
   };
 
   const handleDeleteClick = (config) => {
@@ -149,6 +153,7 @@ const SupplyChainConfigList = () => {
       const { id, created_at, updated_at, is_active, ...configData } = config;
       await api.post('/api/v1/supply-chain-config', {
         ...configData,
+        group_id: config.group_id ?? configData.group_id ?? null,
         name: `${config.name} (Copy)`,
         is_active: false,
       });
@@ -257,11 +262,92 @@ const SupplyChainConfigList = () => {
 
   return (
     <>
-      {error && (
-        <Alert severity="error" sx={{ mb: 3 }}>
-          {error}
-        </Alert>
-      )}
+      <Card>
+        <CardHeader 
+          title={title}
+          action={
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={<AddIcon />}
+              onClick={handleCreateNew}
+            >
+              New Configuration
+            </Button>
+          }
+        />
+        <Divider />
+        <CardContent>
+          {configs.length === 0 ? (
+            <Box textAlign="center" py={4}>
+              <Typography variant="body1" color="textSecondary">
+                No supply chain configurations found. Create your first configuration to get started.
+              </Typography>
+              <Box mt={2}>
+                <Button
+                  variant="contained"
+                  color="primary"
+                  startIcon={<AddIcon />}
+                  onClick={handleCreateNew}
+                >
+                  Create Configuration
+                </Button>
+              </Box>
+            </Box>
+          ) : (
+            <List>
+              {configs.map((config) => (
+                <React.Fragment key={config.id}>
+                  <ListItem>
+                    <Box display="flex" alignItems="center" width="100%">
+                      <Box flexGrow={1}>
+                        <Box display="flex" alignItems="center" mb={1}>
+                          <Typography variant="h6" component="div">
+                            {config.name}
+                          </Typography>
+                          {config.is_active && (
+                            <Chip
+                              label="Active"
+                              color="success"
+                              size="small"
+                              sx={{ ml: 1 }}
+                              icon={<ActiveIcon />}
+                            />
+                          )}
+                        </Box>
+                        <Typography variant="body2" color="textSecondary">
+                          {config.description || 'No description provided'}
+                        </Typography>
+                        <Box display="flex" mt={1}>
+                          <Typography variant="caption" color="textSecondary" sx={{ mr: 2 }}>
+                            Created: {format(new Date(config.created_at), 'MMM d, yyyy')}
+                          </Typography>
+                          <Typography variant="caption" color="textSecondary">
+                            Updated: {format(new Date(config.updated_at), 'MMM d, yyyy')}
+                          </Typography>
+                        </Box>
+                      </Box>
+                      <Box>
+                        <Tooltip title="Actions">
+                          <IconButton
+                            onClick={(e) => handleMenuOpen(e, config)}
+                            color="primary"
+                            size="large"
+                          >
+                            <MoreVertIcon />
+                          </IconButton>
+                        </Tooltip>
+                      </Box>
+                    </Box>
+                  </ListItem>
+                  <Divider component="li" />
+                </React.Fragment>
+              ))}
+            </List>
+          )}
+        </CardContent>
+      </Card>
+
 
       <Paper elevation={0} sx={{ p: 3 }}>
         <Box
