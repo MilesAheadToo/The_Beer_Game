@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import mixedGameApi from '../services/api';
+import { getDefaultLandingPath, isAdmin, isSuperAdmin } from '../utils/authUtils';
 import { toast } from 'react-toastify';
 
 const Login = () => {
@@ -24,16 +25,12 @@ const Login = () => {
       const redirectTo = searchParams.get('redirect');
 
       // Handle superadmin separately (case-insensitive check, allow role flag)
-      const isSuperAdmin =
-        user?.email?.toLowerCase() === 'superadmin@daybreak.ai' ||
-        (Array.isArray(user?.roles) && user.roles.includes('superadmin'));
-      if (isSuperAdmin) {
+      if (isSuperAdmin(user)) {
         navigate('/admin/groups', { replace: true });
         return;
       }
-      const isAdmin = user?.is_superuser || (Array.isArray(user?.roles) && user.roles.includes('admin'));
-      if (isAdmin) {
-        navigate(redirectTo || '/players', { replace: true });
+      if (isAdmin(user)) {
+        navigate(redirectTo || getDefaultLandingPath(user), { replace: true });
         return;
       }
 
@@ -106,17 +103,13 @@ const Login = () => {
       
       if (success) {
         // After successful login: if non-admin, try to jump directly to their assigned game
-        const isSuperAdmin =
-          loggedInUser?.email?.toLowerCase() === 'superadmin@daybreak.ai' ||
-          (Array.isArray(loggedInUser?.roles) && loggedInUser.roles.includes('superadmin'));
-        const isAdmin =
-          loggedInUser?.is_superuser ||
-          (Array.isArray(loggedInUser?.roles) && loggedInUser.roles.includes('admin'));
-        if (!isAdmin || isSuperAdmin) {
-          if (isSuperAdmin) {
-            navigate('/admin/groups', { replace: true });
-            return;
-          }
+        const redirectTo = searchParams.get('redirect');
+        if (isSuperAdmin(loggedInUser)) {
+          navigate('/admin/groups', { replace: true });
+          return;
+        }
+
+        if (!isAdmin(loggedInUser)) {
           try {
             const games = await mixedGameApi.getGames();
             const assigned = games.find(g => Array.isArray(g.players) && g.players.some(p => p.user_id === loggedInUser?.id));
@@ -127,11 +120,9 @@ const Login = () => {
           } catch (e) {
             // ignore and fall back
           }
-          const redirectTo = searchParams.get('redirect') || '/games';
-          navigate(redirectTo, { replace: true });
+          navigate(redirectTo || getDefaultLandingPath(loggedInUser), { replace: true });
         } else {
-          const redirectTo = searchParams.get('redirect') || '/players';
-          navigate(redirectTo, { replace: true });
+          navigate(redirectTo || getDefaultLandingPath(loggedInUser), { replace: true });
         }
       } else if (error) {
         toast.error(error);
