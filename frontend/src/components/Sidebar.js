@@ -63,8 +63,13 @@ const superAdminMenuItems = [
 const Sidebar = ({ mobileOpen, handleDrawerToggle }) => {
   const [adminOpen, setAdminOpen] = React.useState(false);
   const { user: currentUser } = useAuth() || {};
-  const isSuperAdmin = currentUser?.email === 'superadmin@daybreak.ai';
-  const isAdmin = currentUser?.email === 'admin@daybreak.ai';
+  const isSuperAdmin =
+    currentUser?.email?.toLowerCase() === 'superadmin@daybreak.ai' ||
+    (Array.isArray(currentUser?.roles) && currentUser.roles.includes('superadmin'));
+  const isAdmin =
+    currentUser?.email?.toLowerCase() === 'admin@daybreak.ai' ||
+    currentUser?.is_superuser ||
+    (Array.isArray(currentUser?.roles) && currentUser.roles.includes('admin'));
   const location = useLocation();
   
   // If we're still loading the user, don't render anything

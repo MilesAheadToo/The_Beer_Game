@@ -23,8 +23,10 @@ const Login = () => {
       if (!isAuthenticated) return;
       const redirectTo = searchParams.get('redirect');
 
-      // Handle superadmin separately
-      const isSuperAdmin = user?.email === 'superadmin@daybreak.ai';
+      // Handle superadmin separately (case-insensitive check, allow role flag)
+      const isSuperAdmin =
+        user?.email?.toLowerCase() === 'superadmin@daybreak.ai' ||
+        (Array.isArray(user?.roles) && user.roles.includes('superadmin'));
       if (isSuperAdmin) {
         navigate('/admin/groups', { replace: true });
         return;
@@ -104,8 +106,12 @@ const Login = () => {
       
       if (success) {
         // After successful login: if non-admin, try to jump directly to their assigned game
-        const isSuperAdmin = loggedInUser?.email === 'superadmin@daybreak.ai';
-        const isAdmin = loggedInUser?.is_superuser || (Array.isArray(loggedInUser?.roles) && loggedInUser.roles.includes('admin'));
+        const isSuperAdmin =
+          loggedInUser?.email?.toLowerCase() === 'superadmin@daybreak.ai' ||
+          (Array.isArray(loggedInUser?.roles) && loggedInUser.roles.includes('superadmin'));
+        const isAdmin =
+          loggedInUser?.is_superuser ||
+          (Array.isArray(loggedInUser?.roles) && loggedInUser.roles.includes('admin'));
         if (!isAdmin || isSuperAdmin) {
           if (isSuperAdmin) {
             navigate('/admin/groups', { replace: true });
