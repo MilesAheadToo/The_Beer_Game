@@ -40,12 +40,9 @@ mysql -h localhost -u root -p"$MARIADB_ROOT_PASSWORD" -e "
 
 log "✅ Database and user created successfully"
 
-# Import schema if it exists
-if [ -f "/docker-entrypoint-initdb.d/init_db.sql" ]; then
-    log "Importing database schema..."
-    mysql -h localhost -u root -p"$MARIADB_ROOT_PASSWORD" "$MARIADB_DATABASE" < /docker-entrypoint-initdb.d/init_db.sql
-    log "✅ Database schema imported successfully"
-fi
+# The init_db.sql file will be executed automatically by the MariaDB
+# entrypoint after this script completes, so we no longer import it here
+# to avoid running the schema twice and causing duplicate key errors.
 
 # Run migrations if alembic is available
 if command -v alembic &> /dev/null; then
