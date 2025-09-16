@@ -33,11 +33,9 @@ model training. The tables below list every `make` target defined in the root
 | `make down` | Stop and remove all containers and named volumes. |
 | `make ps` | Show the status of the running compose services. |
 | `make logs` | Follow the combined logs (tail 200 lines) for all services. |
-| `make proxy-up` | Start only the proxy service from `docker-compose.yml`. |
-| `make proxy-down` | Stop only the proxy service. |
-| `make proxy-restart` | Restart the proxy service (`proxy-down` followed by `proxy-up`). |
-| `make proxy-logs` | Tail the proxy container logs (last 200 lines, follow). |
-| `make proxy-url` | Print the HTTP/HTTPS URLs and default credentials. |
+| `make proxy-up` | Restart only the proxy container without restarting dependencies. |
+| `make proxy-recreate` | Force-rebuild the proxy container to pick up configuration or image changes. |
+| `make proxy-logs` | Tail just the proxy container logs. |
 | `make seed` | Seed default users via the `create-users` service. |
 | `make reset-admin` | Reset the SystemAdmin password to `Daybreak@2025`. |
 | `make init-env` | Run the platform-specific environment setup script to generate `.env` files. |
@@ -62,12 +60,12 @@ flag as needed (the base `docker-compose.yml` is used automatically when you run
 
 | File | Purpose | Example usage |
 | --- | --- | --- |
-| `docker-compose.yml` | Core development stack providing the nginx proxy, React frontend, FastAPI backend, MariaDB database, phpMyAdmin, and the `create-users` seeding container. Acts as the base file for overrides. | `docker-compose up` or `make up` |
-| `docker-compose.dev.yml` | Development overrides that pin the frontend API URLs to relative paths, expose an optional TLS proxy via the `tls` profile, and surface runtime hooks for GPU/CPU switching through `FORCE_GPU`. | `docker-compose -f docker-compose.yml -f docker-compose.dev.yml up` |
-| `docker-compose.gpu.yml` | Rebuilds the backend image with `Dockerfile.gpu`, enables the NVIDIA runtime, and requests a GPU device. Layer it on top of the base file when a GPU is available. | `docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up` |
-| `docker-compose.prod.yml` | Minimal production deployment with MariaDB, a Gunicorn-backed backend built from `Dockerfile.prod`, and nginx serving the pre-built frontend. Used by `deploy-prod.sh`. | `docker-compose -f docker-compose.prod.yml up -d` |
-| `docker-compose.apps.yml` | Runs only the frontend and backend while expecting the `beer-game-network` and database to be provided externally—handy when pointing at a managed DB service. | `docker-compose -f docker-compose.apps.yml up` |
-| `docker-compose.db.yml` | Launches a standalone MariaDB instance with tuned performance flags on host port `3307` for local development or tooling that only needs the database. | `docker-compose -f docker-compose.db.yml up` |
+| `docker-compose.yml` | Core development stack providing the nginx proxy, React frontend, FastAPI backend, MariaDB database, phpMyAdmin, and the `create-users` seeding container. Acts as the base file for overrides. | `docker compose up` or `make up` |
+| `docker-compose.dev.yml` | Development overrides that pin the frontend API URLs to relative paths, expose an optional TLS proxy via the `tls` profile, and surface runtime hooks for GPU/CPU switching through `FORCE_GPU`. | `docker compose -f docker-compose.yml -f docker-compose.dev.yml up` |
+| `docker-compose.gpu.yml` | Rebuilds the backend image with `Dockerfile.gpu`, enables the NVIDIA runtime, and requests a GPU device. Layer it on top of the base file when a GPU is available. | `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up` |
+| `docker-compose.prod.yml` | Minimal production deployment with MariaDB, a Gunicorn-backed backend built from `Dockerfile.prod`, and nginx serving the pre-built frontend. Used by `deploy-prod.sh`. | `docker compose -f docker-compose.prod.yml up -d` |
+| `docker-compose.apps.yml` | Runs only the frontend and backend while expecting the `beer-game-network` and database to be provided externally—handy when pointing at a managed DB service. | `docker compose -f docker-compose.apps.yml up` |
+| `docker-compose.db.yml` | Launches a standalone MariaDB instance with tuned performance flags on host port `3307` for local development or tooling that only needs the database. | `docker compose -f docker-compose.db.yml up` |
 
 ## GPU and CPU Controls
 
@@ -124,6 +122,10 @@ make train-gpu     # Run GPU-enabled training
 
 - Override the hostname printed in helper messages with `HOST=<ip-or-hostname>` when
   running locally (defaults to `localhost`).
+- The Makefile auto-detects the Docker Compose V2 plugin. If you encounter
+  `KeyError: 'ContainerConfig'` with the legacy `docker-compose` binary,
+  override the helper with `DOCKER_COMPOSE="docker compose"` or upgrade to the
+  plugin.
 - Remote helper commands use `REMOTE_HOST=172.29.20.187` for status messages.
 - The `help` target prints an annotated list of all commands if you need a quick
   reminder: `make help`.

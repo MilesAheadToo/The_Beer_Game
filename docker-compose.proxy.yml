@@ -14,7 +14,7 @@ services:
         aliases:
           - proxy
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8088/healthz"]
+      test: ["CMD-SHELL", "wget -q -O- http://127.0.0.1:8088/healthz | grep -q ok"]
       interval: 15s
       timeout: 5s
       retries: 4
