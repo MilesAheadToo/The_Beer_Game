@@ -31,34 +31,46 @@ export const getNormalizedEmail = (user) => {
 };
 
 export const isSystemAdmin = (user) => {
+  if (!user) return false;
+  
   const normalizedEmail = getNormalizedEmail(user);
-  const roles = normalizeRoles(user?.roles);
+  const roles = normalizeRoles(user.roles || []);
 
+  // Check for system admin in various possible locations
   return (
-    Boolean(user?.is_superuser) ||
+    user.is_superuser === true ||
+    user.is_superuser === 'true' ||
+    user.isAdmin === true ||
+    user.role === 'systemadmin' ||
     normalizedEmail === 'systemadmin@daybreak.ai' ||
     normalizedEmail === 'superadmin@daybreak.ai' ||
-    roles.includes('systemadmin')
+    roles.includes('systemadmin') ||
+    (Array.isArray(user.roles) && user.roles.includes('systemadmin'))
   );
 };
 
 export const isGroupAdmin = (user) => {
-  const roles = normalizeRoles(user?.roles);
+  if (!user) return false;
+  
+  const roles = normalizeRoles(user.roles || []);
   const normalizedEmail = getNormalizedEmail(user);
 
+  // System admins should be able to manage groups
   if (isSystemAdmin(user)) {
-    return false;
+    return true;
   }
 
   return (
     roles.includes('groupadmin') ||
-    normalizedEmail === 'groupadmin@daybreak.ai'
+    normalizedEmail === 'groupadmin@daybreak.ai' ||
+    user.role === 'groupadmin' ||
+    (Array.isArray(user.roles) && user.roles.includes('groupadmin'))
   );
 };
 
 export const getDefaultLandingPath = (user) => {
   if (isSystemAdmin(user)) {
-    return '/admin/groups';
+    return '/system/users';
   }
 
   if (isGroupAdmin(user)) {
