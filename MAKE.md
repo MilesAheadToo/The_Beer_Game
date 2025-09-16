@@ -23,6 +23,22 @@ them.
 | `make proxy-url` | Print the HTTP/HTTPS URLs and default credentials. |
 | `make init-env` | Run the platform-specific environment setup script to generate `.env` files. |
 
+## Docker Compose Files
+
+The Make targets wrap a small collection of Compose files so you can mix and match stacks
+for development, production, or targeted services. Combine files with Docker's `-f`
+flag as needed (the base `docker-compose.yml` is used automatically when you run
+`docker-compose up`).
+
+| File | Purpose | Example usage |
+| --- | --- | --- |
+| `docker-compose.yml` | Core development stack providing the nginx proxy, React frontend, FastAPI backend, MariaDB database, phpMyAdmin, and the `create-users` seeding container. Acts as the base file for overrides. | `docker-compose up` or `make up` |
+| `docker-compose.dev.yml` | Development overrides that pin the frontend API URLs to relative paths, expose an optional TLS proxy via the `tls` profile, and surface runtime hooks for GPU/CPU switching through `FORCE_GPU`. | `docker-compose -f docker-compose.yml -f docker-compose.dev.yml up` |
+| `docker-compose.gpu.yml` | Rebuilds the backend image with `Dockerfile.gpu`, enables the NVIDIA runtime, and requests a GPU device. Layer it on top of the base file when a GPU is available. | `docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up` |
+| `docker-compose.prod.yml` | Minimal production deployment with MariaDB, a Gunicorn-backed backend built from `Dockerfile.prod`, and nginx serving the pre-built frontend. Used by `deploy-prod.sh`. | `docker-compose -f docker-compose.prod.yml up -d` |
+| `docker-compose.apps.yml` | Runs only the frontend and backend while expecting the `beer-game-network` and database to be provided externally—handy when pointing at a managed DB service. | `docker-compose -f docker-compose.apps.yml up` |
+| `docker-compose.db.yml` | Launches a standalone MariaDB instance with tuned performance flags on host port `3307` for local development or tooling that only needs the database. | `docker-compose -f docker-compose.db.yml up` |
+
 ## GPU and CPU Controls
 
 GPU builds can be toggled by passing `FORCE_GPU=1` to compatible targets:
