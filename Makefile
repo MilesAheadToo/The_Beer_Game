@@ -112,6 +112,20 @@ ps:
 logs:
 	@docker-compose logs -f --tail=200
 
+# Proxy management
+proxy-up:
+	@echo "\n[+] Starting proxy service..."
+	docker-compose -f docker-compose.yml up -d proxy
+
+proxy-down:
+	@echo "\n[+] Stopping proxy service..."
+	docker-compose -f docker-compose.yml stop proxy
+
+proxy-restart: proxy-down proxy-up
+
+proxy-logs:
+	@docker-compose logs -f --tail=200 proxy
+
 seed:
 	@echo "\n[+] Seeding default users..."; \
 	docker-compose run --rm create-users
