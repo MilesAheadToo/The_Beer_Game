@@ -1,27 +1,57 @@
 # Make Targets Overview
 
 This project uses a Docker-based workflow for local development, remote deployment, and
-model training. The table below outlines the most common `make` targets and when to use
-them.
+model training. The tables below list every `make` target defined in the root
+`Makefile` along with guidance on when to use them.
+
+## Full stack orchestration
 
 | Target | Description |
 | --- | --- |
-| `make up` | Build and start the proxy, frontend, backend, database, and seed containers in CPU mode. Exposes HTTP on `http://localhost:8088`. |
-| `make gpu-up` | Same as `make up`, but builds the backend with GPU support enabled (requires NVIDIA Docker). |
-| `make up-dev` | Start the stack using the development overrides in `docker-compose.dev.yml`. |
-| `make up-remote` | Bring up the stack for remote access using the default compose file plus dev overrides; exposes HTTP at `http://172.29.20.187:8088`. |
-| `make up-tls` | Start the stack with the TLS profile enabled. Uses the self-signed certificate and listens on `https://localhost:8443`. |
+| `make up` | Build and start the proxy, frontend, backend, database, and seeding containers in CPU mode. Exposes HTTP on `http://localhost:8088`. |
+| `make up-dev` | Same as `make up`, but layers in the overrides from `docker-compose.dev.yml`. |
+| `make up-remote` | Launch the stack for remote access (HTTP on `http://172.29.20.187:8088`) using the default compose file plus dev overrides. |
+| `make up-tls` | Start the stack with the TLS profile enabled (self-signed cert on `https://localhost:8443`). |
 | `make up-remote-tls` | Start the TLS-enabled stack for remote access on `https://172.29.20.187:8443`. |
 | `make up-tls-only` | Start only the TLS proxy (no HTTP proxy on port 8088). |
-| `make rebuild-frontend` | Rebuild just the frontend image and restart the container. |
-| `make rebuild-backend` | Rebuild just the backend image and restart the container. Honors `FORCE_GPU`. |
+| `make gpu-up` | Run `make up` with GPU support forced on (requires NVIDIA Docker). |
+| `make gpu-up-dev` | Run `make up-dev` with GPU support forced on. |
+| `make cpu-up` | Run `make up` with GPU support explicitly disabled. |
+| `make cpu-up-dev` | Run `make up-dev` with GPU support explicitly disabled. |
+
+## Image rebuild helpers
+
+| Target | Description |
+| --- | --- |
+| `make rebuild-frontend` | Rebuild the frontend image using the dev overrides and restart the container. |
+| `make rebuild-backend` | Rebuild the backend image (respecting `FORCE_GPU`) and restart the container. |
+
+## Lifecycle, proxy, and administration utilities
+
+| Target | Description |
+| --- | --- |
 | `make down` | Stop and remove all containers and named volumes. |
 | `make ps` | Show the status of the running compose services. |
 | `make logs` | Follow the combined logs (tail 200 lines) for all services. |
+| `make proxy-up` | Start only the proxy service from `docker-compose.yml`. |
+| `make proxy-down` | Stop only the proxy service. |
+| `make proxy-restart` | Restart the proxy service (`proxy-down` followed by `proxy-up`). |
+| `make proxy-logs` | Tail the proxy container logs (last 200 lines, follow). |
+| `make proxy-url` | Print the HTTP/HTTPS URLs and default credentials. |
 | `make seed` | Seed default users via the `create-users` service. |
 | `make reset-admin` | Reset the SystemAdmin password to `Daybreak@2025`. |
-| `make proxy-url` | Print the HTTP/HTTPS URLs and default credentials. |
 | `make init-env` | Run the platform-specific environment setup script to generate `.env` files. |
+| `make help` | Print an annotated list of all available targets. |
+
+## Training workflows
+
+| Target | Description |
+| --- | --- |
+| `make train-setup` | Create a Python virtual environment under `backend/` and install training dependencies. |
+| `make train-cpu` | Run the local training script in CPU mode. |
+| `make train-gpu` | Run the local training script in GPU mode. |
+| `make remote-train` | Kick off remote training via `scripts/remote_train.sh` (requires `REMOTE=user@host`). |
+| `make remote-train-dataset` | Remote training variant that also uploads a dataset (requires both `REMOTE` and `DATASET`). |
 
 ## Docker Compose Files
 
