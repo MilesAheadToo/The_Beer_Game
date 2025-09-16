@@ -68,6 +68,70 @@ export const getDefaultLandingPath = (user) => {
   return '/dashboard';
 };
 
+const parseRedirectTarget = (target) => {
+  if (!target || typeof target !== 'string') {
+    return null;
+  }
+
+  const trimmed = target.trim();
+  if (!trimmed || trimmed.includes('://')) {
+    return null;
+  }
+
+  let path = trimmed;
+  let search = '';
+  let hash = '';
+
+  const hashIndex = path.indexOf('#');
+  if (hashIndex >= 0) {
+    hash = path.slice(hashIndex);
+    path = path.slice(0, hashIndex);
+  }
+
+  const searchIndex = path.indexOf('?');
+  if (searchIndex >= 0) {
+    search = path.slice(searchIndex);
+    path = path.slice(0, searchIndex);
+  }
+
+  if (!path) {
+    path = '/';
+  }
+
+  if (!path.startsWith('/')) {
+    path = `/${path}`;
+  }
+
+  if (path.startsWith('//')) {
+    return null;
+  }
+
+  const normalizedPath = path.length > 1 ? path.replace(/\/+$/, '') : path;
+
+  return {
+    pathname: normalizedPath,
+    fullPath: `${normalizedPath}${search}${hash}`,
+  };
+};
+
+export const resolvePostLoginDestination = (user, redirectTo) => {
+  const fallback = getDefaultLandingPath(user);
+  if (!redirectTo) {
+    return fallback;
+  }
+
+  const parsed = parseRedirectTarget(redirectTo);
+  if (!parsed) {
+    return fallback;
+  }
+
+  if (isSystemAdmin(user) && (parsed.pathname === '/' || parsed.pathname === '/dashboard')) {
+    return fallback;
+  }
+
+  return parsed.fullPath;
+};
+
 /**
  * Builds the appropriate login URL for redirecting an unauthenticated user.
  * Avoids appending a redirect back to the root route (`/`) so that the
