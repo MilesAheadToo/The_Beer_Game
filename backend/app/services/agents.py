@@ -34,6 +34,7 @@ class AgentStrategy(Enum):
     LLM = "llm"  # Large Language Model strategy
     DAYBREAK_DTCE = "daybreak_dtce"  # Decentralized twin coordinated ensemble
     DAYBREAK_DTCE_CENTRAL = "daybreak_dtce_central"  # DTCE with central override
+    DAYBREAK_DTCE_GLOBAL = "daybreak_dtce_global"  # Single agent orchestrating the network
 
 
 class DaybreakCoordinator:
@@ -145,6 +146,134 @@ class DaybreakCoordinator:
 
         return final_order, explanation
 
+
+class DaybreakGlobalController:
+    """Orchestrates a single Daybreak agent across the entire supply chain."""
+
+    def __init__(self, history_length: int = 12):
+        self.history_length = max(3, int(history_length))
+        self.round_marker: Optional[int] = None
+        self.base_orders: Dict[AgentType, float] = {}
+        self.context: Dict[AgentType, Dict[str, Any]] = {}
+        self.plan: Dict[AgentType, int] = {}
+        self.last_orders: Dict[AgentType, deque] = {}
+        self.network_targets: deque = deque(maxlen=self.history_length)
+
+    def _reset_round(self, round_number: int) -> None:
+        if self.round_marker != round_number:
+            self.round_marker = round_number
+            self.base_orders.clear()
+            self.context.clear()
+            self.plan.clear()
+
+    def _determine_target_flow(self) -> float:
+        if AgentType.RETAILER in self.base_orders:
+            return max(0.0, float(self.base_orders[AgentType.RETAILER]))
+        if self.base_orders:
+            return max(0.0, sum(self.base_orders.values()) / len(self.base_orders))
+        if self.network_targets:
+            return max(0.0, float(self.network_targets[-1]))
+        return 0.0
+
+    def _peer_anchor(self, requesting: AgentType) -> Optional[float]:
+        peers = [qty for role, qty in self.plan.items() if role != requesting]
+        if peers:
+            return sum(peers) / len(peers)
+        return None
+
+    def plan_order(
+        self,
+        agent_type: AgentType,
+        round_number: int,
+        base_order: float,
+        context: Optional[Dict[str, Any]] = None,
+        prev_order: Optional[int] = None,
+    ) -> Tuple[int, Optional[str]]:
+        self._reset_round(round_number)
+
+        safe_base = max(0.0, float(base_order))
+        ctx = context or {}
+        self.base_orders[agent_type] = safe_base
+        self.context[agent_type] = ctx
+
+        target_flow = self._determine_target_flow()
+        peer_anchor = self._peer_anchor(agent_type)
+        if peer_anchor is not None:
+            target_flow = 0.6 * target_flow + 0.4 * peer_anchor
+
+        def _to_float(value: Any) -> float:
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return 0.0
+
+        backlog = _to_float(ctx.get("backlog"))
+        inventory = _to_float(ctx.get("inventory"))
+        pipeline = _to_float(ctx.get("pipeline"))
+
+        adjusted = 0.65 * safe_base + 0.35 * target_flow
+        reasons: List[str] = []
+
+        if backlog > inventory:
+            adjusted += backlog - inventory
+            reasons.append("protect service level (backlog > inventory)")
+        elif inventory > backlog and inventory > 0:
+            reduction = min(inventory - backlog, adjusted * 0.3)
+            if reduction > 0:
+                adjusted -= reduction
+                reasons.append("trim excess inventory")
+
+        if pipeline > target_flow * 1.5 and pipeline > 0:
+            dampen = min(pipeline - target_flow * 1.5, adjusted * 0.25)
+            if dampen > 0:
+                adjusted -= dampen
+                reasons.append("pipeline congestion")
+
+        prev_reference = prev_order
+        if prev_reference is None:
+            prev_history = self.last_orders.get(agent_type)
+            if prev_history:
+                prev_reference = prev_history[-1]
+
+        if prev_reference is not None:
+            max_step = max(3.0, abs(prev_reference) * 0.5)
+            upper = prev_reference + max_step
+            lower = max(0.0, prev_reference - max_step)
+            if adjusted > upper:
+                adjusted = upper
+                reasons.append("limit step-up for stability")
+            elif adjusted < lower:
+                adjusted = lower
+                reasons.append("limit step-down for stability")
+
+        final_qty = int(round(max(0.0, adjusted)))
+        self.plan[agent_type] = final_qty
+        history = self.last_orders.setdefault(agent_type, deque(maxlen=self.history_length))
+        history.append(final_qty)
+        self.network_targets.append(target_flow)
+
+        global_notes: List[str] = [f"target flow {target_flow:.1f}"]
+        if peer_anchor is not None:
+            global_notes.append(f"peer avg {peer_anchor:.1f}")
+        if pipeline > 0:
+            global_notes.append(f"pipeline {pipeline:.1f}")
+
+        supervisor_ctx = SupervisorContext(
+            max_scale_pct=100.0,
+            rule="global_balancing",
+            reasons=reasons,
+        )
+        explanation = explain_supervisor_adjustment(
+            role=f"{agent_type.name.title()} (Global)",
+            week=round_number,
+            pre_qty=int(round(safe_base)),
+            post_qty=final_qty,
+            ctx=supervisor_ctx,
+            global_notes=global_notes or None,
+        )
+
+        return final_qty, explanation
+
 class BeerGameAgent:
     def __init__(
         self,
@@ -156,6 +285,7 @@ class BeerGameAgent:
         initial_orders: int = 4,
         llm_model: Optional[str] = None,
         central_coordinator: Optional[DaybreakCoordinator] = None,
+        global_controller: Optional[DaybreakGlobalController] = None,
     ):
         self.agent_id = agent_id
         self.agent_type = agent_type
@@ -172,6 +302,8 @@ class BeerGameAgent:
         self._llm_agent: Optional[LLMAgent] = None
         # Optional centralized coordinator for Daybreak variants
         self.central_coordinator = central_coordinator
+        # Optional global coordinator when a single agent manages all roles
+        self.global_controller = global_controller
         self.last_explanation: Optional[str] = None
         
     def make_decision(
@@ -247,6 +379,16 @@ class BeerGameAgent:
             )
         elif self.strategy == AgentStrategy.DAYBREAK_DTCE_CENTRAL:
             order = self._daybreak_central_strategy(
+                current_round,
+                prev_order,
+                current_demand,
+                upstream_data,
+                inventory_level,
+                backlog_level,
+                processed_shipments,
+            )
+        elif self.strategy == AgentStrategy.DAYBREAK_DTCE_GLOBAL:
+            order = self._daybreak_global_strategy(
                 current_round,
                 prev_order,
                 current_demand,
@@ -462,6 +604,59 @@ class BeerGameAgent:
         self.last_explanation = role_explanation
         return final_order
 
+    def _daybreak_global_strategy(
+        self,
+        current_round: int,
+        prev_order: Optional[int],
+        current_demand: Optional[int],
+        upstream_data: Optional[Dict],
+        inventory_level: int,
+        backlog_level: int,
+        incoming_shipments: List[float],
+    ) -> int:
+        base_order, context = self._compute_daybreak_base(
+            current_demand,
+            upstream_data,
+            inventory_level,
+            backlog_level,
+            incoming_shipments,
+        )
+        final_order = max(0, int(round(base_order)))
+        global_explanation: Optional[str] = None
+
+        if self.global_controller:
+            final_order, global_explanation = self.global_controller.plan_order(
+                self.agent_type,
+                current_round,
+                base_order,
+                context,
+                prev_order,
+            )
+
+        role_explanation = self._build_daybreak_explanation(
+            week=current_round,
+            inventory_level=inventory_level,
+            backlog_level=backlog_level,
+            incoming_shipments=incoming_shipments,
+            context=context,
+            action_qty=final_order,
+            prev_action=prev_order,
+            base_order=base_order,
+        )
+
+        if global_explanation:
+            if role_explanation:
+                role_explanation = f"{role_explanation}\n\n{global_explanation}"
+            else:
+                role_explanation = global_explanation
+
+        self.last_explanation = role_explanation
+
+        if self.central_coordinator:
+            self.central_coordinator.register_decision(self.agent_type, final_order)
+
+        return final_order
+
     def _build_daybreak_explanation(
         self,
         week: int,
@@ -609,6 +804,7 @@ class AgentManager:
         self.agents: Dict[AgentType, BeerGameAgent] = {}
         self.can_see_demand = can_see_demand
         self.daybreak_coordinator = DaybreakCoordinator()
+        self.daybreak_global_controller = DaybreakGlobalController()
         self.initialize_agents()
 
     def initialize_agents(self):
@@ -620,6 +816,7 @@ class AgentManager:
             can_see_demand=True,  # Retailer can always see demand
             llm_model="gpt-4o-mini",
             central_coordinator=self.daybreak_coordinator,
+            global_controller=self.daybreak_global_controller,
         )
 
         self.agents[AgentType.WHOLESALER] = BeerGameAgent(
@@ -629,6 +826,7 @@ class AgentManager:
             can_see_demand=self.can_see_demand,
             llm_model="gpt-4o-mini",
             central_coordinator=self.daybreak_coordinator,
+            global_controller=self.daybreak_global_controller,
         )
 
         self.agents[AgentType.DISTRIBUTOR] = BeerGameAgent(
@@ -638,6 +836,7 @@ class AgentManager:
             can_see_demand=self.can_see_demand,
             llm_model="gpt-4o-mini",
             central_coordinator=self.daybreak_coordinator,
+            global_controller=self.daybreak_global_controller,
         )
 
         self.agents[AgentType.FACTORY] = BeerGameAgent(
@@ -647,6 +846,7 @@ class AgentManager:
             can_see_demand=self.can_see_demand,
             llm_model="gpt-4o-mini",
             central_coordinator=self.daybreak_coordinator,
+            global_controller=self.daybreak_global_controller,
         )
 
     def get_agent(self, agent_type: AgentType) -> BeerGameAgent:
@@ -665,6 +865,7 @@ class AgentManager:
             agent = self.agents[agent_type]
             agent.strategy = strategy
             agent.central_coordinator = self.daybreak_coordinator
+            agent.global_controller = self.daybreak_global_controller
             if llm_model is not None:
                 agent.llm_model = llm_model
             if strategy == AgentStrategy.DAYBREAK_DTCE_CENTRAL:

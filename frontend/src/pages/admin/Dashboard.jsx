@@ -111,7 +111,8 @@ const buildReasoningTableData = (gameId, gameName, players = [], rounds = []) =>
       return false;
     }
     const strategyValue = strategyRaw?.value ?? strategyRaw?.name ?? strategyRaw;
-    return String(strategyValue).toUpperCase() === 'DAYBREAK_DTCE_CENTRAL';
+    const normalized = String(strategyValue).toUpperCase();
+    return ['DAYBREAK_DTCE_CENTRAL', 'DAYBREAK_DTCE_GLOBAL'].includes(normalized);
   });
 
   players.forEach((player) => {
