@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import {
@@ -143,6 +143,92 @@ const AdminDashboard = () => {
 
   const [showRangesModal, setShowRangesModal] = useState(false);
   const [rangeEdits, setRangeEdits] = useState({});
+
+  const activeGameProgress = useMemo(() => {
+    if (!recentGames || recentGames.length === 0) {
+      return null;
+    }
+
+    const prioritized = recentGames.find((game) => {
+      const status = (game.status || '').toLowerCase();
+      return status.includes('progress');
+    }) || recentGames[0];
+
+    if (!prioritized) {
+      return null;
+    }
+
+    const rawMax = prioritized.max_rounds ?? prioritized.maxRounds ?? prioritized.total_rounds ?? 1;
+    const maxRounds = Math.max(rawMax || 1, 1);
+    const current = Math.min(prioritized.current_round ?? prioritized.currentRound ?? 0, maxRounds);
+    const percent = Math.round((current / maxRounds) * 100);
+
+    return {
+      id: prioritized.id,
+      name: prioritized.name || `Game ${prioritized.id}`,
+      currentRound: current,
+      maxRounds,
+      percent,
+    };
+  }, [recentGames]);
+
+  const decisionFeed = useMemo(() => {
+    const entries = [];
+
+    (recentGames || []).forEach((game) => {
+      const rounds = game.rounds || game.recent_rounds || [];
+
+      rounds.forEach((round) => {
+        const week = round.round_number ?? round.week ?? round.number ?? 0;
+        const playerRounds = round.player_rounds || round.rounds || [];
+
+        playerRounds.forEach((playerRound) => {
+          const reason = playerRound.comment || playerRound.reason;
+          if (!reason) return;
+
+          const orderValue =
+            playerRound.order_placed ?? playerRound.order ?? playerRound.quantity ?? playerRound.amount;
+          const role = playerRound.player?.role || playerRound.role || 'Player';
+
+          entries.push({
+            key: `${game.id || 'game'}-${week}-${playerRound.player_id || role}`,
+            gameName: game.name || `Game ${game.id}`,
+            week,
+            role,
+            order: orderValue,
+            reason,
+          });
+        });
+      });
+    });
+
+    return entries
+      .sort((a, b) => (b.week ?? 0) - (a.week ?? 0))
+      .slice(0, 10);
+  }, [recentGames]);
+
+  const renderProgressSlider = (game) => {
+    const rawMax = game?.max_rounds ?? game?.maxRounds ?? game?.total_rounds ?? 1;
+    const maxRounds = Math.max(rawMax || 1, 1);
+    const current = Math.min(game?.current_round ?? game?.currentRound ?? 0, maxRounds);
+    const percent = Math.round((current / maxRounds) * 100);
+
+    return (
+      <div className="flex flex-col space-y-1">
+        <input
+          type="range"
+          min="0"
+          max={maxRounds}
+          value={current}
+          readOnly
+          className="accent-indigo-600 cursor-default"
+        />
+        <span className="text-xs text-gray-500">
+          {current} / {maxRounds} ({percent}%)
+        </span>
+      </div>
+    );
+  };
 
   useEffect(() => {
     if (!isGroupAdmin) navigate('/unauthorized');
@@ -381,6 +467,39 @@ const AdminDashboard = () => {
           {/* Overview */}
           {activeTab === 'overview' && (
             <div className="space-y-6">
+              <div className="card-surface pad-6 rounded-lg">
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-lg font-medium text-gray-900">Game Progress</h3>
+                    <p className="text-sm text-gray-500">
+                      {activeGameProgress
+                        ? `${activeGameProgress.name} · Week ${activeGameProgress.currentRound} of ${activeGameProgress.maxRounds}`
+                        : 'No active games at the moment'}
+                    </p>
+                  </div>
+                  <span className="text-sm font-semibold text-indigo-600">
+                    {activeGameProgress ? `${activeGameProgress.percent}%` : ''}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max={activeGameProgress?.maxRounds || 1}
+                  value={activeGameProgress?.currentRound || 0}
+                  readOnly
+                  className="w-full accent-indigo-600 cursor-default"
+                />
+                <div className="flex justify-between text-xs text-gray-500 mt-2">
+                  <span>0</span>
+                  <span>
+                    {activeGameProgress
+                      ? `${activeGameProgress.currentRound} / ${activeGameProgress.maxRounds} rounds`
+                      : 'Awaiting game data'}
+                  </span>
+                  <span>{activeGameProgress?.maxRounds || 1}</span>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
                 <StatCard title="Total Users" value={stats?.totalUsers?.toLocaleString() || '0'} icon={UsersIcon} change={stats?.userGrowth} changeType={stats?.userGrowth >= 0 ? 'increase' : 'decrease'} />
                 <StatCard title="Active Users" value={stats?.activeUsers?.toLocaleString() || '0'} icon={UserCircleIcon} />
@@ -409,6 +528,34 @@ const AdminDashboard = () => {
                     </div>
                   </div>
                 </div>
+              </div>
+
+              <div className="card-surface pad-6 rounded-lg">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-medium text-gray-900">Recent Order Reasoning</h3>
+                  <span className="text-sm text-gray-500">Latest updates by week</span>
+                </div>
+                {decisionFeed.length ? (
+                  <div className="space-y-4">
+                    {decisionFeed.map((entry) => (
+                      <div
+                        key={entry.key}
+                        className="rounded border border-gray-200 bg-gray-50 p-4"
+                      >
+                        <div className="flex items-center justify-between text-sm text-gray-500">
+                          <span className="font-medium text-gray-700">
+                            {entry.gameName} · Week {entry.week}
+                          </span>
+                          <span className="text-xs uppercase text-indigo-600">{entry.role}</span>
+                        </div>
+                        <div className="mt-2 text-sm text-gray-900">Order {entry.order ?? '—'}</div>
+                        <p className="mt-2 text-sm text-gray-700">{entry.reason}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No recent human or AI reasoning captured yet.</p>
+                )}
               </div>
             </div>
           )}
@@ -475,6 +622,7 @@ const AdminDashboard = () => {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Game</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Players</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Progress</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Started</th>
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Duration</th>
                     </tr>
@@ -492,6 +640,9 @@ const AdminDashboard = () => {
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900">{Array.isArray(game.players) ? game.players.length : game.players ?? 0}</div>
+                        </td>
+                        <td className="px-6 py-4 whitespace-nowrap">
+                          {renderProgressSlider(game)}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <div className="text-sm text-gray-900 truncate max-w-[12rem]">{formatDateTime(game.started_at || game.created_at)}</div>

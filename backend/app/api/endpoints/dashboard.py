@@ -1,12 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any, Optional
 from datetime import datetime
-from ... import models
-from ... import schemas
+
+from ... import models, schemas
 from ...crud import crud_dashboard as crud
 from ...database import get_db
 from ...core.security import get_current_active_user
+from ...models.supply_chain import Player as SupplyChainPlayer
 
 # Router for dashboard endpoints
 dashboard_router = APIRouter()
@@ -29,11 +29,15 @@ async def get_human_dashboard(
         )
     
     # Get player's role in the game
-    player = db.query(models.Player).filter(
-        models.Player.user_id == current_user.id,
-        models.Player.game_id == active_game.id
-    ).first()
-    
+    player = (
+        db.query(SupplyChainPlayer)
+        .filter(
+            SupplyChainPlayer.user_id == current_user.id,
+            SupplyChainPlayer.game_id == active_game.id,
+        )
+        .first()
+    )
+
     if not player:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -44,13 +48,15 @@ async def get_human_dashboard(
     metrics = crud.get_player_metrics(db, player_id=player.id, game_id=active_game.id)
     
     # Get time series data for the player
+    role_value = getattr(player.role, "name", str(player.role)).upper()
+
     time_series = crud.get_time_series_metrics(
         db,
         player_id=player.id,
         game_id=active_game.id,
-        role=str(player.role).upper()
+        role=role_value,
     )
-    
+
     # Convert time series data to TimeSeriesPoint models
     time_series_points = [
         schemas.TimeSeriesPoint(
@@ -60,16 +66,20 @@ async def get_human_dashboard(
             cost=point.get('cost', 0),
             backlog=point.get('backlog', 0),
             demand=point.get('demand'),
-            supply=point.get('supply')
+            supply=point.get('supply'),
+            reason=point.get('reason'),
         )
         for point in time_series
     ]
-    
+
     # Create the response model
     return schemas.DashboardResponse(
+        game_id=active_game.id,
+        player_id=player.id,
         game_name=active_game.name,
         current_round=active_game.current_round,
-        player_role=str(player.role).upper(),
+        max_rounds=active_game.max_rounds,
+        player_role=role_value,
         metrics=schemas.PlayerMetrics(**metrics),
         time_series=time_series_points,
         last_updated=datetime.utcnow().isoformat()
