@@ -65,12 +65,12 @@ A comprehensive simulation of the Beer Distribution Game featuring AI-powered su
 
 3. Start the application using Docker Compose:
    ```bash
-   docker-compose up -d --build
+   docker compose up -d --build
    ```
 
 4. Initialize the database (first time only):
    ```bash
-   docker-compose exec backend python -m app.db.init_db
+   docker compose exec backend python -m app.db.init_db
    ```
 
 5. Access the application:
@@ -82,6 +82,31 @@ A comprehensive simulation of the Beer Distribution Game featuring AI-powered su
    - Database Admin (phpMyAdmin): http://localhost:8080
      - Username: root
      - Password: 19890617
+
+## ♻️ Refreshing the development proxy
+
+The Nginx proxy hot-reloads its configuration from the bind-mounted
+`config/dev-proxy/nginx.conf`, so restarting the container is usually enough to
+pick up changes:
+
+```bash
+make proxy-restart
+```
+
+When you need to force a brand-new container (for example after changing the
+base image), rebuild the proxy service without touching its dependencies:
+
+```bash
+make proxy-recreate
+# or
+docker compose -f docker-compose.yml up -d --no-deps --force-recreate --build proxy
+```
+
+> **Heads up:** Docker Compose V1 (`docker-compose` 1.x) is incompatible with
+> recent Docker Engine releases and triggers `KeyError: 'ContainerConfig'`
+> during `up --force-recreate`. Use the Docker Compose V2 plugin (`docker
+> compose`) or override the Makefile helper with
+> `DOCKER_COMPOSE="docker compose" make proxy-recreate`.
 
 ## 🏗 Project Structure
 
