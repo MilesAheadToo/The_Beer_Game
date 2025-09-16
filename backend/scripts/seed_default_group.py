@@ -16,17 +16,23 @@ from sqlalchemy.orm import Session
 
 from app.db.base_class import SessionLocal
 from app.models import (
-    Group,
+    AgentConfig,
     Game,
     GameStatus,
+    Group,
+    Item,
+    ItemNodeConfig,
+    Lane,
+    MarketDemand,
+    Node,
+    NodeType,
     Player,
     PlayerRole,
     PlayerStrategy,
     PlayerType,
+    SupplyChainConfig,
     User,
 )
-from app.models.agent_config import AgentConfig
-from app.models.supply_chain_config import SupplyChainConfig
 from app.schemas.group import GroupCreate
 from app.schemas.user import UserCreate
 from app.services.group_service import GroupService
@@ -74,6 +80,100 @@ def ensure_group(session: Session) -> Tuple[Group, bool]:
     return group, True
 
 
+def ensure_supply_chain_config(session: Session, group: Group) -> SupplyChainConfig:
+    """Ensure the default supply chain configuration exists for the group."""
+    config = (
+        session.query(SupplyChainConfig)
+        .filter(SupplyChainConfig.group_id == group.id)
+        .order_by(SupplyChainConfig.id.asc())
+        .first()
+    )
+    if config:
+        print(
+            f"[info] Supply chain configuration already exists (id={config.id})."
+        )
+        return config
+
+    print("[info] Creating default supply chain configuration...")
+    config = SupplyChainConfig(
+        name="Default TBG",
+        description="Default supply chain configuration",
+        created_by=group.admin_id,
+        group_id=group.id,
+        is_active=True,
+    )
+    session.add(config)
+    session.flush()
+
+    item = Item(
+        config_id=config.id,
+        name="Case of Beer",
+        description="Standard product for the Beer Game",
+    )
+    session.add(item)
+    session.flush()
+
+    node_specs = [
+        ("Retailer", NodeType.RETAILER),
+        ("Distributor", NodeType.DISTRIBUTOR),
+        ("Manufacturer", NodeType.MANUFACTURER),
+        ("Supplier", NodeType.SUPPLIER),
+    ]
+    nodes: Dict[NodeType, Node] = {}
+    for name, node_type in node_specs:
+        node = Node(
+            config_id=config.id,
+            name=name,
+            type=node_type,
+        )
+        session.add(node)
+        session.flush()
+        nodes[node_type] = node
+
+    lane_specs = [
+        (NodeType.SUPPLIER, NodeType.MANUFACTURER),
+        (NodeType.MANUFACTURER, NodeType.DISTRIBUTOR),
+        (NodeType.DISTRIBUTOR, NodeType.RETAILER),
+    ]
+    for upstream_type, downstream_type in lane_specs:
+        lane = Lane(
+            config_id=config.id,
+            upstream_node_id=nodes[upstream_type].id,
+            downstream_node_id=nodes[downstream_type].id,
+            capacity=9999,
+            lead_time_days={"min": 2, "max": 10},
+        )
+        session.add(lane)
+
+    session.flush()
+
+    for node in nodes.values():
+        node_config = ItemNodeConfig(
+            item_id=item.id,
+            node_id=node.id,
+            inventory_target_range={"min": 10, "max": 20},
+            initial_inventory_range={"min": 5, "max": 30},
+            holding_cost_range={"min": 1.0, "max": 5.0},
+            backlog_cost_range={"min": 5.0, "max": 10.0},
+            selling_price_range={"min": 25.0, "max": 50.0},
+        )
+        session.add(node_config)
+
+    market_demand = MarketDemand(
+        config_id=config.id,
+        item_id=item.id,
+        retailer_id=nodes[NodeType.RETAILER].id,
+        demand_pattern={"type": "constant", "params": {"value": 4}},
+    )
+    session.add(market_demand)
+    session.flush()
+
+    print(
+        f"[success] Created supply chain configuration (id={config.id}) for group {group.id}."
+    )
+    return config
+
+
 def ensure_default_game(session: Session, group: Group) -> Game:
     """Ensure the default game exists for the supplied group."""
     game = (
@@ -88,16 +188,7 @@ def ensure_default_game(session: Session, group: Group) -> Game:
         return game
 
     print("[info] Creating default game from supply chain configuration...")
-    sc_config = (
-        session.query(SupplyChainConfig)
-        .filter(SupplyChainConfig.group_id == group.id)
-        .order_by(SupplyChainConfig.id.asc())
-        .first()
-    )
-    if sc_config is None:
-        raise RuntimeError(
-            "No supply chain configuration found for the default group."
-        )
+    sc_config = ensure_supply_chain_config(session, group)
 
     config_service = SupplyChainConfigService(session)
     game_config = config_service.create_game_from_config(
