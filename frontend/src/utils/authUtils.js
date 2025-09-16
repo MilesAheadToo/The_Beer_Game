@@ -70,7 +70,7 @@ export const isGroupAdmin = (user) => {
 
 export const getDefaultLandingPath = (user) => {
   if (isSystemAdmin(user)) {
-    return '/system/users';
+    return '/admin/groups';  // Always send system admins to groups management
   }
 
   if (isGroupAdmin(user)) {
