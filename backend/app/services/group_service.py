@@ -156,11 +156,33 @@ class GroupService:
             self.db.add(game)
             self.db.flush()
 
+            group_suffix = f"g{group.id}"
+            player_password_hash = get_password_hash("Daybreak@2025")
             default_users = [
-                {"username": "retailer", "email": "retailer@daybreak.ai", "full_name": "Retailer", "role": PlayerRole.RETAILER},
-                {"username": "distributor", "email": "distributor@daybreak.ai", "full_name": "Distributor", "role": PlayerRole.DISTRIBUTOR},
-                {"username": "manufacturer", "email": "manufacturer@daybreak.ai", "full_name": "Manufacturer", "role": PlayerRole.MANUFACTURER},
-                {"username": "supplier", "email": "supplier@daybreak.ai", "full_name": "Supplier", "role": PlayerRole.WHOLESALER},
+                {
+                    "username": f"retailer_{group_suffix}",
+                    "email": f"retailer+{group_suffix}@daybreak.ai",
+                    "full_name": "Retailer",
+                    "role": PlayerRole.RETAILER,
+                },
+                {
+                    "username": f"distributor_{group_suffix}",
+                    "email": f"distributor+{group_suffix}@daybreak.ai",
+                    "full_name": "Distributor",
+                    "role": PlayerRole.DISTRIBUTOR,
+                },
+                {
+                    "username": f"manufacturer_{group_suffix}",
+                    "email": f"manufacturer+{group_suffix}@daybreak.ai",
+                    "full_name": "Manufacturer",
+                    "role": PlayerRole.MANUFACTURER,
+                },
+                {
+                    "username": f"supplier_{group_suffix}",
+                    "email": f"supplier+{group_suffix}@daybreak.ai",
+                    "full_name": "Supplier",
+                    "role": PlayerRole.WHOLESALER,
+                },
             ]
 
             player_users = []
@@ -169,7 +191,7 @@ class GroupService:
                     username=spec["username"],
                     email=spec["email"],
                     full_name=spec["full_name"],
-                    hashed_password=get_password_hash("Daybreak@2025"),
+                    hashed_password=player_password_hash,
                     roles=["player"],
                     group_id=group.id,
                     is_active=True,
