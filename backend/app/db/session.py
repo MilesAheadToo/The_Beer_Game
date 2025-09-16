@@ -16,11 +16,15 @@ logger = logging.getLogger(__name__)
 
 # Get database connection details from environment variables
 DB_USER = os.getenv("MYSQL_USER", "beer_user")
-DB_PASSWORD = os.getenv("MYSQL_PASSWORD", "Daybreak@2025")
-# Use MYSQL_HOST if available, otherwise fall back to MYSQL_SERVER, then default to 'db' for Docker
-DB_HOST = os.getenv("MYSQL_HOST") or os.getenv("MYSQL_SERVER", "db")
-DB_NAME = os.getenv("MYSQL_DATABASE") or os.getenv("MYSQL_DB", "beer_game")
-DB_PORT = os.getenv("MYSQL_PORT", "3306")
+DB_PASSWORD = os.getenv("MYSQL_PASSWORD", "beergame123")  # Updated default password to match test script
+
+# Always use localhost for development
+DB_HOST = "localhost"
+DB_NAME = os.getenv("MYSQL_DATABASE", "beer_game")
+DB_PORT = os.getenv("MYSQL_PORT", "3307")  # Default to 3307 which is the mapped port in docker-compose
+
+# Log the actual connection details being used
+print(f"[DEBUG] Database connection - Host: {DB_HOST}, Port: {DB_PORT}, User: {DB_USER}, DB: {DB_NAME}")
 
 # Log the database connection details for debugging
 logger.info(f"Database connection details - User: {DB_USER}, Host: {DB_HOST}, DB: {DB_NAME}")

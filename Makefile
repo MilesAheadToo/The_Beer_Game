@@ -166,7 +166,7 @@ seed:
 
 seed-default-group:
 	@echo "\n[+] Creating default group, users, and AI-powered game..."; \
-	python backend/scripts/seed_default_group.py
+	cd backend && source venv/bin/activate && python scripts/seed_default_group.py
 
 reset-admin:
 	@echo "\n[+] Resetting superadmin password to Daybreak@2025..."; \

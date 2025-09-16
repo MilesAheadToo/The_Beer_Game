@@ -6,10 +6,11 @@ services:
     container_name: beer_game_db
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: Daybreak@2025
+      MYSQL_ROOT_PASSWORD: rootpassword
       MYSQL_DATABASE: beer_game
       MYSQL_USER: beer_user
-      MYSQL_PASSWORD: Daybreak@2025
+      MYSQL_PASSWORD: beergame123
+      MYSQL_INITDB_SKIP_TZINFO: 1
     ports:
       - "3307:3306"
     volumes:

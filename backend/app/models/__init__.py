@@ -27,6 +27,17 @@ from .agent_config import AgentConfig
 from .auth_models import PasswordHistory, PasswordResetToken
 from .session import TokenBlacklist, UserSession
 
+# 4. Supply chain configuration models
+from .supply_chain_config import (
+    NodeType,
+    SupplyChainConfig,
+    Item,
+    Node,
+    Lane,
+    ItemNodeConfig,
+    MarketDemand
+)
+
 # Verify all models are properly registered
 registered_tables = set(Base.metadata.tables.keys())
 expected_tables = {
@@ -48,6 +59,13 @@ __all__ = [
     'User',
     'Group',
     'RefreshToken',
+    'NodeType',
+    'SupplyChainConfig',
+    'Item',
+    'Node',
+    'Lane',
+    'ItemNodeConfig',
+    'MarketDemand',
     'Player',
     'Game',
     'AgentConfig',
