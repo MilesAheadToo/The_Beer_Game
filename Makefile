@@ -48,7 +48,9 @@ endif
 
 DOCKER_COMPOSE_CMD = $(strip $(COMPOSE_ENV) $(DOCKER_COMPOSE))
 
-.PHONY: up gpu-up up-dev down ps logs seed reset-admin help init-env proxy-up proxy-down proxy-restart proxy-recreate proxy-logs proxy-url seed-default-group
+.PHONY: up gpu-up gpu-up-dev up-dev cpu-up cpu-up-dev down ps logs seed reset-admin help init-env \
+        proxy-up proxy-down proxy-restart proxy-recreate proxy-logs proxy-url \
+        seed-default-group
 
 # Default CPU target
 up:
@@ -121,8 +123,8 @@ rebuild-backend:
 	echo "\n[✓] Backend rebuilt and restarted."
 
 # GPU-specific targets
-gpu-up gpu-up-dev:
-	$(MAKE) $(subst gpu-,,$@) FORCE_GPU=1
+gpu-up-dev:
+	$(MAKE) up-dev FORCE_GPU=1
 
 # CPU-specific targets
 cpu-up cpu-up-dev:
@@ -163,6 +165,10 @@ proxy-logs:
 seed:
         @echo "\n[+] Seeding default users..."; \
         $(DOCKER_COMPOSE_CMD) run --rm create-users
+
+seed-default-group:
+	@echo "\n[+] Creating default group, users, and AI-powered game..."; \
+	python backend/scripts/seed_default_group.py
 
 seed-default-group:
 	@echo "\n[+] Creating default group, users, and AI-powered game..."; \
