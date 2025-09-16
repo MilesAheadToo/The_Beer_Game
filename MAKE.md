@@ -122,10 +122,11 @@ make train-gpu     # Run GPU-enabled training
 
 - Override the hostname printed in helper messages with `HOST=<ip-or-hostname>` when
   running locally (defaults to `localhost`).
-- The Makefile auto-detects the Docker Compose V2 plugin. If you encounter
-  `KeyError: 'ContainerConfig'` with the legacy `docker-compose` binary,
-  override the helper with `DOCKER_COMPOSE="docker compose"` or upgrade to the
-  plugin.
+- The Makefile auto-detects the Docker Compose V2 plugin. When it falls back to
+  the legacy `docker-compose` binary it automatically pins
+  `COMPOSE_API_VERSION=1.44` to avoid the `KeyError: 'ContainerConfig'` bug in
+  new Docker Engine releases. If you run commands manually, either use the V2
+  plugin (`docker compose`) or export the same environment variable yourself.
 - Remote helper commands use `REMOTE_HOST=172.29.20.187` for status messages.
 - The `help` target prints an annotated list of all commands if you need a quick
   reminder: `make help`.

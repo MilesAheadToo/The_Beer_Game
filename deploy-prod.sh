@@ -1,5 +1,21 @@
 #!/bin/bash
-set -e
+set -euo pipefail
+
+if [[ -n "${DOCKER_COMPOSE:-}" ]]; then
+    compose_cmd="${DOCKER_COMPOSE}"
+elif docker compose version >/dev/null 2>&1; then
+    compose_cmd="docker compose"
+elif command -v docker-compose >/dev/null 2>&1; then
+    compose_cmd="docker-compose"
+else
+    echo "Docker Compose is required but was not found." >&2
+    exit 1
+fi
+
+if [[ "${compose_cmd}" == "docker-compose" ]]; then
+    export COMPOSE_API_VERSION="${COMPOSE_API_VERSION:-1.44}"
+    export DOCKER_API_VERSION="${DOCKER_API_VERSION:-1.44}"
+fi
 
 # Load environment variables
 if [ -f .env.prod ]; then
@@ -31,26 +47,26 @@ cd ..
 
 # Build and start services
 echo "Starting production services..."
-docker-compose -f docker-compose.prod.yml up -d --build
+${compose_cmd} -f docker-compose.prod.yml up -d --build
 
 # Wait for database to be ready
 echo "Waiting for database to be ready..."
-docker-compose -f docker-compose.prod.yml exec -T db bash -c 'while ! mysqladmin ping -h localhost --silent; do sleep 2; done'
+${compose_cmd} -f docker-compose.prod.yml exec -T db bash -c 'while ! mysqladmin ping -h localhost --silent; do sleep 2; done'
 
 # Run database migrations
 echo "Running database migrations..."
-docker-compose -f docker-compose.prod.yml exec -T backend alembic upgrade head
+${compose_cmd} -f docker-compose.prod.yml exec -T backend alembic upgrade head
 
 # Restart backend to ensure all services are using the latest database schema
 echo "Restarting backend service..."
-docker-compose -f docker-compose.prod.yml restart backend
+${compose_cmd} -f docker-compose.prod.yml restart backend
 
 echo ""
 echo "Production deployment complete!"
 echo "Application should be available at https://localhost (accept the self-signed certificate)"
 echo ""
 echo "To view logs:"
-echo "  docker-compose -f docker-compose.prod.yml logs -f"
+echo "  ${compose_cmd} -f docker-compose.prod.yml logs -f"
 echo ""
 echo "To stop the application:"
-echo "  docker-compose -f docker-compose.prod.yml down"
+echo "  ${compose_cmd} -f docker-compose.prod.yml down"
