@@ -28,7 +28,7 @@ import GroupSupplyChainConfigList from "./pages/admin/GroupSupplyChainConfigList
 import GroupSupplyChainConfigForm from "./pages/admin/GroupSupplyChainConfigForm.jsx";
 import Players from "./pages/Players.jsx";
 import DebugBanner from "./components/DebugBanner.jsx";
-import { getDefaultLandingPath } from "./utils/authUtils";
+import { buildLoginRedirectPath, getDefaultLandingPath } from "./utils/authUtils";
 
 window.onerror = function (message, source, lineno, colno, error) {
   console.error("Global error:", { message, source, lineno, colno, error });
@@ -51,8 +51,7 @@ function RequireAuth() {
   }
 
   if (!isAuthenticated) {
-    const back = encodeURIComponent(location.pathname + location.search);
-    return <Navigate to={`/login?redirect=${back}`} replace />;
+    return <Navigate to={buildLoginRedirectPath(location)} replace />;
   }
 
   return <Outlet />;

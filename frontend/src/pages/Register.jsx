@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'react-toastify';
 import { mixedGameApi } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { buildLoginRedirectPath } from '../utils/authUtils';
 
 const Register = () => {
   const [formData, setFormData] = useState({
@@ -110,7 +111,8 @@ const Register = () => {
         // Auto-redirect to login after a delay
         setTimeout(() => {
           const redirectTo = searchParams.get('redirect') || '/';
-          navigate(`/login?redirect=${encodeURIComponent(redirectTo)}`);
+          const loginPath = buildLoginRedirectPath(redirectTo);
+          navigate(loginPath);
         }, 5000);
       } else {
         throw new Error(error || 'Registration failed. Please try again.');
