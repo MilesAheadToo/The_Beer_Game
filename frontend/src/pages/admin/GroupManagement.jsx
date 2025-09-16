@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FaEdit, FaPlus, FaTrash } from 'react-icons/fa';
+import { FaEdit, FaPlus, FaRocket, FaTrash } from 'react-icons/fa';
 import { api } from '../../services/api';
 import { toast } from 'react-toastify';
 
@@ -29,7 +29,10 @@ const GroupManagement = () => {
   const [logoPreview, setLogoPreview] = useState(DEFAULT_FORM.logo || '');
   const [logoFileName, setLogoFileName] = useState('');
   const [saving, setSaving] = useState(false);
+  const [creatingDefault, setCreatingDefault] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   const selectedGroup = useMemo(
     () => groups.find((group) => group.id === selectedGroupId) || null,
@@ -39,15 +42,16 @@ const GroupManagement = () => {
   const openModal = useCallback((group = null) => {
     if (group) {
       setEditingGroupId(group.id);
+      const adminUser = group.admin || {};
       setForm({
         name: group.name || '',
         description: group.description || '',
         logo: group.logo || '',
         admin: {
-          username: '',
-          email: '',
+          username: adminUser.username || '',
+          email: adminUser.email || '',
           password: '',
-          full_name: '',
+          full_name: adminUser.full_name || '',
         },
       });
       setLogoPreview(group.logo || '');
@@ -63,6 +67,12 @@ const GroupManagement = () => {
 
   const closeModal = useCallback(() => {
     setIsModalOpen(false);
+    setSaving(false);
+    setEditingGroupId(null);
+    const defaults = createDefaultForm();
+    setForm(defaults);
+    setLogoPreview(defaults.logo || '');
+    setLogoFileName('');
   }, []);
 
   const fetchGroups = useCallback(
@@ -96,6 +106,40 @@ const GroupManagement = () => {
     },
     [openModal]
   );
+
+  const handleQuickCreateDefaultGroup = useCallback(async () => {
+    if (creatingDefault) return;
+
+    setCreatingDefault(true);
+    const defaults = createDefaultForm();
+    const uniqueSuffix = Math.random().toString(36).slice(-6).toLowerCase();
+    const generatedName = `Daybreak ${uniqueSuffix.toUpperCase()}`;
+
+    const payload = {
+      ...defaults,
+      name: generatedName,
+      description: defaults.description || 'Auto-generated group with default setup',
+      admin: {
+        ...defaults.admin,
+        username: `${defaults.admin.username}_${uniqueSuffix}`,
+        email: `groupadmin+${uniqueSuffix}@daybreak.ai`,
+      },
+    };
+
+    try {
+      const { data } = await api.post('/api/v1/groups', payload);
+      toast.success('Group and default setup created successfully');
+      closeModal();
+      await fetchGroups(data?.id);
+    } catch (error) {
+      console.error('Failed to auto-create group:', error);
+      const detail = error?.response?.data?.detail;
+      const message = typeof detail === 'string' ? detail : detail?.message || 'Failed to create group. Please try again.';
+      toast.error(message);
+    } finally {
+      setCreatingDefault(false);
+    }
+  }, [closeModal, creatingDefault, fetchGroups]);
 
   useEffect(() => {
     fetchGroups();
@@ -187,31 +231,41 @@ const GroupManagement = () => {
     }
   };
 
-  const handleDeleteGroup = async (group) => {
-    if (!group) return;
-
-    const confirmMessage = `Are you sure you want to delete ${group.name || 'this group'}?`;
-    if (!window.confirm(confirmMessage)) return;
-
-    try {
-      await api.delete(`/api/v1/groups/${group.id}`);
-      toast.success('Group deleted');
-      await fetchGroups();
-    } catch (error) {
-      console.error('Failed to delete group:', error);
-      toast.error('Failed to delete group. Please try again.');
-    }
-  };
-
   const handleEditSelected = () => {
     if (!selectedGroup) return;
     openModal(selectedGroup);
   };
 
-  const handleDeleteSelected = () => {
+  const handleRequestDeleteSelected = () => {
     if (!selectedGroup) return;
-    handleDeleteGroup(selectedGroup);
+    setDeleteTarget(selectedGroup);
+    setDeleting(false);
   };
+
+  const closeDeleteModal = useCallback(() => {
+    if (deleting) return;
+    setDeleteTarget(null);
+  }, [deleting]);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!deleteTarget) return;
+
+    setDeleting(true);
+    const groupId = deleteTarget.id;
+
+    try {
+      await api.delete(`/api/v1/groups/${groupId}`);
+      toast.success('Group deleted');
+      setDeleteTarget(null);
+      setSelectedGroupId((prev) => (prev === groupId ? null : prev));
+      await fetchGroups();
+    } catch (error) {
+      console.error('Failed to delete group:', error);
+      toast.error('Failed to delete group. Please try again.');
+    } finally {
+      setDeleting(false);
+    }
+  }, [deleteTarget, fetchGroups]);
 
   if (isLoading) {
     return (
@@ -228,8 +282,33 @@ const GroupManagement = () => {
         <div className="flex flex-wrap gap-3">
           <button
             type="button"
+            onClick={handleQuickCreateDefaultGroup}
+            disabled={creatingDefault}
+            className={`flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium ${
+              creatingDefault ? 'opacity-75 cursor-not-allowed' : ''
+            }`}
+          >
+            {creatingDefault ? (
+              <span className="flex items-center gap-2">
+                <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                </svg>
+                Creating…
+              </span>
+            ) : (
+              <>
+                <FaRocket /> Quick Create Default Group
+              </>
+            )}
+          </button>
+          <button
+            type="button"
             onClick={() => openModal(null)}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
+            className={`flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium ${
+              creatingDefault ? 'opacity-75 cursor-not-allowed' : ''
+            }`}
+            disabled={creatingDefault}
           >
             <FaPlus /> Add Group
           </button>
@@ -247,7 +326,7 @@ const GroupManagement = () => {
           </button>
           <button
             type="button"
-            onClick={handleDeleteSelected}
+            onClick={handleRequestDeleteSelected}
             disabled={!selectedGroup}
             className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition ${
               selectedGroup
@@ -443,62 +522,73 @@ const GroupManagement = () => {
                 />
               </div>
 
-              {!editingGroupId && (
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="md:col-span-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="admin-username">
-                      Admin Username
-                    </label>
-                    <input
-                      id="admin-username"
-                      name="admin.username"
-                      type="text"
-                      value={form.admin.username}
-                      onChange={handleChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="md:col-span-1">
-                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="admin-email">
-                      Admin Email
-                    </label>
-                    <input
-                      id="admin-email"
-                      name="admin.email"
-                      type="email"
-                      value={form.admin.email}
-                      onChange={handleChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="admin-full-name">
-                      Admin Full Name
-                    </label>
-                    <input
-                      id="admin-full-name"
-                      name="admin.full_name"
-                      type="text"
-                      value={form.admin.full_name}
-                      onChange={handleChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="admin-password">
-                      Admin Password
-                    </label>
-                    <input
-                      id="admin-password"
-                      name="admin.password"
-                      type="password"
-                      value={form.admin.password}
-                      onChange={handleChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="md:col-span-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="admin-username">
+                    Admin Username
+                  </label>
+                  <input
+                    id="admin-username"
+                    name="admin.username"
+                    type="text"
+                    value={form.admin.username}
+                    onChange={handleChange}
+                    disabled={Boolean(editingGroupId)}
+                    className={`w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                      editingGroupId ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''
+                    }`}
+                  />
                 </div>
-              )}
+                <div className="md:col-span-1">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="admin-email">
+                    Admin Email
+                  </label>
+                  <input
+                    id="admin-email"
+                    name="admin.email"
+                    type="email"
+                    value={form.admin.email}
+                    onChange={handleChange}
+                    disabled={Boolean(editingGroupId)}
+                    className={`w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                      editingGroupId ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''
+                    }`}
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="admin-full-name">
+                    Admin Full Name
+                  </label>
+                  <input
+                    id="admin-full-name"
+                    name="admin.full_name"
+                    type="text"
+                    value={form.admin.full_name}
+                    onChange={handleChange}
+                    disabled={Boolean(editingGroupId)}
+                    className={`w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                      editingGroupId ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''
+                    }`}
+                  />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-1" htmlFor="admin-password">
+                    Admin Password
+                  </label>
+                  <input
+                    id="admin-password"
+                    name="admin.password"
+                    type="password"
+                    value={form.admin.password}
+                    onChange={handleChange}
+                    disabled={Boolean(editingGroupId)}
+                    placeholder={editingGroupId ? 'Admin password management is handled separately' : ''}
+                    className={`w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                      editingGroupId ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''
+                    }`}
+                  />
+                </div>
+              </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
                 <button
@@ -520,6 +610,45 @@ const GroupManagement = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg">
+            <div className="px-6 py-5 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-800">Delete Group</h2>
+            </div>
+            <div className="px-6 py-6 space-y-4">
+              <p className="text-sm text-gray-700">
+                Are you sure you want to delete{' '}
+                <span className="font-semibold">{deleteTarget.name || 'this group'}</span>? This action cannot be undone and
+                will remove all associated supply chain configurations, games, and users.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200">
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                disabled={deleting}
+                className={`px-4 py-2 rounded-md text-sm font-medium border border-gray-300 text-gray-700 hover:bg-gray-50 ${
+                  deleting ? 'opacity-75 cursor-not-allowed' : ''
+                }`}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={deleting}
+                className={`px-4 py-2 rounded-md text-sm font-medium text-white bg-red-600 hover:bg-red-700 ${
+                  deleting ? 'opacity-75 cursor-not-allowed' : ''
+                }`}
+              >
+                {deleting ? 'Deleting…' : 'Delete'}
+              </button>
+            </div>
           </div>
         </div>
       )}
