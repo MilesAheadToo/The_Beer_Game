@@ -27,6 +27,11 @@ export const deleteSupplyChainConfig = async (id) => {
   await api.delete(`${SUPPLY_CHAIN_CONFIG_BASE_URL}/${id}`);
 };
 
+export const trainSupplyChainConfig = async (configId, options = {}) => {
+  const response = await api.post(`${SUPPLY_CHAIN_CONFIG_BASE_URL}/${configId}/train`, options);
+  return response.data;
+};
+
 // Items CRUD
 export const getItems = async (configId) => {
   const response = await api.get(`${SUPPLY_CHAIN_CONFIG_BASE_URL}/${configId}/items`);
