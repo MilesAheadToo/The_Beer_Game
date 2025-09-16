@@ -22,8 +22,9 @@ class DemandPattern(BaseModel):
             "example": {
                 "type": "classic",
                 "params": {
-                    "stable_period": 5,
-                    "step_increase": 4
+                    "initial_demand": 4,
+                    "change_week": 6,
+                    "final_demand": 8
                 }
             }
         }
@@ -104,7 +105,7 @@ class GameCreate(GameBase):
     demand_pattern: DemandPattern = Field(
         default_factory=lambda: DemandPattern(
             type=DemandPatternType.CLASSIC,
-            params={"stable_period": 5, "step_increase": 4}
+            params={"initial_demand": 4, "change_week": 6, "final_demand": 8}
         ),
         description="Configuration for the demand pattern to use in the game"
     )
@@ -129,7 +130,7 @@ class GameInDBBase(GameBase):
     demand_pattern: DemandPattern = Field(
         default_factory=lambda: DemandPattern(
             type=DemandPatternType.CLASSIC,
-            params={"stable_period": 5, "step_increase": 4}
+            params={"initial_demand": 4, "change_week": 6, "final_demand": 8}
         ),
         description="Configuration for the demand pattern used in the game"
     )

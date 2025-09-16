@@ -41,8 +41,9 @@ class Game(Base):
     demand_pattern = Column(JSON, default={
         "type": "classic",
         "params": {
-            "stable_period": 5,
-            "step_increase": 4
+            "initial_demand": 4,
+            "change_week": 6,
+            "final_demand": 8
         }
     })
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

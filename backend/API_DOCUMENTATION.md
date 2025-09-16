@@ -137,8 +137,9 @@ GET /games/{game_id}/state
   "demand_pattern": {
     "type": "classic",
     "params": {
-      "stable_period": 5,
-      "step_increase": 4
+      "initial_demand": 4,
+      "change_week": 6,
+      "final_demand": 8
     },
     "current_demand": 8,
     "next_demand": 8
@@ -310,16 +311,18 @@ The game supports different demand patterns that can be specified when creating 
 ### Classic Pattern
 - **Type:** `classic`
 - **Parameters:**
-  - `stable_period`: Number of initial rounds with stable demand (default: 5)
-  - `step_increase`: Increase in demand after stable period (default: 4)
+  - `initial_demand`: Customer demand before the change (default: 4)
+  - `change_week`: Week number at which demand shifts to the new level (default: 6)
+  - `final_demand`: Customer demand after the change (default: 8)
 
 Example:
 ```json
 {
   "type": "classic",
   "params": {
-    "stable_period": 5,
-    "step_increase": 4
+    "initial_demand": 4,
+    "change_week": 6,
+    "final_demand": 8
   }
 }
 ```

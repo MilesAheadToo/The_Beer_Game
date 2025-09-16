@@ -14,8 +14,9 @@ def test_classic_demand_pattern():
     config = {
         "type": DemandPatternType.CLASSIC,
         "params": {
-            "stable_period": 5,
-            "step_increase": 4
+            "initial_demand": 4,
+            "change_week": 6,
+            "final_demand": 8
         }
     }
     
@@ -55,7 +56,7 @@ def test_different_parameters():
             "name": "Longer Stable Period",
             "config": {
                 "type": DemandPatternType.CLASSIC,
-                "params": {"stable_period": 8, "step_increase": 4}
+                "params": {"initial_demand": 4, "change_week": 9, "final_demand": 8}
             },
             "rounds": 10,
             "expected": [4]*8 + [8]*2  # 8 rounds of 4, then 2 of 8
@@ -64,7 +65,7 @@ def test_different_parameters():
             "name": "Larger Step Increase",
             "config": {
                 "type": DemandPatternType.CLASSIC,
-                "params": {"stable_period": 3, "step_increase": 6}
+                "params": {"initial_demand": 4, "change_week": 4, "final_demand": 10}
             },
             "rounds": 5,
             "expected": [4, 4, 4, 10, 10]  # 3 rounds of 4, then 10 (4+6)

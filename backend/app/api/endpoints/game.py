@@ -6,12 +6,13 @@ from datetime import datetime
 from app.db.session import get_db
 from app.models.supply_chain import Game as GameModel, Player, GameRound, PlayerRound
 from app.schemas.game import (
-    GameCreate, GameUpdate, 
+    GameCreate, GameUpdate,
     PlayerCreate, PlayerUpdate, Player as PlayerSchema,
     GameState, OrderCreate, OrderResponse, PlayerRound as PlayerRoundSchema,
     GameRound as GameRoundSchema,
     DemandPattern
 )
+from app.core.demand_patterns import normalize_demand_pattern, DEFAULT_DEMAND_PATTERN
 
 class PlayerResponse(PlayerSchema):
     """Response model for player data."""
@@ -47,45 +48,30 @@ class GameResponse(BaseModel):
             if hasattr(obj, 'demand_pattern') and obj.demand_pattern is not None:
                 if isinstance(obj.demand_pattern, dict):
                     demand_pattern = dict(obj.demand_pattern)
-                    # Remove any model_config that might be in the dictionary
                     demand_pattern.pop('model_config', None)
                 elif hasattr(obj.demand_pattern, '__dict__'):
-                    demand_pattern = {k: v for k, v in obj.demand_pattern.__dict__.items() 
-                                   if not k.startswith('_') and k != 'model_config'}
+                    demand_pattern = {
+                        k: v
+                        for k, v in obj.demand_pattern.__dict__.items()
+                        if not k.startswith('_') and k != 'model_config'
+                    }
                 else:
-                    # Handle case where demand_pattern is a string
                     import json
+
                     try:
                         demand_pattern = json.loads(obj.demand_pattern) if isinstance(obj.demand_pattern, str) else {}
                         if isinstance(demand_pattern, dict):
                             demand_pattern.pop('model_config', None)
                     except json.JSONDecodeError:
-                        demand_pattern = {}
+                        demand_pattern = DEFAULT_DEMAND_PATTERN.copy()
             else:
-                demand_pattern = {
-                    'type': 'classic',
-                    'params': {'stable_period': 5, 'step_increase': 4}
-                }
-            
-            # Ensure we have the required fields with proper values
-            if not isinstance(demand_pattern, dict):
-                demand_pattern = {}
-                
-            # Clean up the demand_pattern dictionary
+                demand_pattern = DEFAULT_DEMAND_PATTERN.copy()
+
+            normalized = normalize_demand_pattern(demand_pattern)
+
             clean_demand_pattern = {
-                'type': str(demand_pattern.get('type', 'classic')),
-                'params': {}
-            }
-            
-            # Ensure params is a dictionary
-            params = demand_pattern.get('params', {})
-            if not isinstance(params, dict):
-                params = {}
-                
-            # Set default values for params
-            clean_demand_pattern['params'] = {
-                'stable_period': int(params.get('stable_period', 5)),
-                'step_increase': int(params.get('step_increase', 4))
+                'type': str(normalized.get('type', 'classic')),
+                'params': dict(normalized.get('params', {})) if isinstance(normalized.get('params', {}), dict) else {},
             }
             
             # Convert SQLAlchemy model to dict
@@ -115,8 +101,8 @@ class GameResponse(BaseModel):
                 current_round=int(getattr(obj, 'current_round', 0)),
                 max_rounds=int(getattr(obj, 'max_rounds', 20)),
                 demand_pattern={
-                    'type': 'classic',
-                    'params': {'stable_period': 5, 'step_increase': 4}
+                    'type': DEFAULT_DEMAND_PATTERN['type'],
+                    'params': DEFAULT_DEMAND_PATTERN['params'].copy(),
                 },
                 created_at=getattr(obj, 'created_at', None),
                 updated_at=getattr(obj, 'updated_at', None)
@@ -179,26 +165,26 @@ async def list_games(
                 if hasattr(game, 'demand_pattern') and game.demand_pattern is not None:
                     if isinstance(game.demand_pattern, dict):
                         demand_pattern = dict(game.demand_pattern)
-                        # Remove any model_config that might be in the dictionary
                         demand_pattern.pop('model_config', None)
                     elif hasattr(game.demand_pattern, '__dict__'):
-                        demand_pattern = {k: v for k, v in game.demand_pattern.__dict__.items() 
-                                      if not k.startswith('_') and k != 'model_config'}
+                        demand_pattern = {
+                            k: v
+                            for k, v in game.demand_pattern.__dict__.items()
+                            if not k.startswith('_') and k != 'model_config'
+                        }
                     else:
-                        demand_pattern = {'type': 'classic', 'params': {'stable_period': 5, 'step_increase': 4}}
+                        import json
+
+                        try:
+                            demand_pattern = json.loads(game.demand_pattern) if isinstance(game.demand_pattern, str) else {}
+                            if isinstance(demand_pattern, dict):
+                                demand_pattern.pop('model_config', None)
+                        except json.JSONDecodeError:
+                            demand_pattern = DEFAULT_DEMAND_PATTERN.copy()
                 else:
-                    demand_pattern = {'type': 'classic', 'params': {'stable_period': 5, 'step_increase': 4}}
-                
-                # Ensure demand_pattern has the right structure
-                if not isinstance(demand_pattern, dict):
-                    demand_pattern = {'type': 'classic', 'params': {'stable_period': 5, 'step_increase': 4}}
-                
-                if 'type' not in demand_pattern:
-                    demand_pattern['type'] = 'classic'
-                if 'params' not in demand_pattern or not isinstance(demand_pattern['params'], dict):
-                    demand_pattern['params'] = {'stable_period': 5, 'step_increase': 4}
-                
-                game_dict['demand_pattern'] = demand_pattern
+                    demand_pattern = DEFAULT_DEMAND_PATTERN.copy()
+
+                game_dict['demand_pattern'] = normalize_demand_pattern(demand_pattern)
                 response.append(game_dict)
                 
             except Exception as e:
