@@ -172,6 +172,10 @@ reset-admin:
         @echo "\n[+] Resetting superadmin password to Daybreak@2025..."; \
         $(DOCKER_COMPOSE_CMD) exec backend python scripts/reset_admin_password.py
 
+setup-default-env:
+	@echo "\n[+] Setting up default environment..."; \
+	$(DOCKER_COMPOSE_CMD) exec backend python scripts/setup_default_environment.py
+
 proxy-url:
 	@echo "Current host: $(HOST) (set with HOST=ip make ...)"; \
 	echo "HTTP:  http://$(HOST):8088"; \
