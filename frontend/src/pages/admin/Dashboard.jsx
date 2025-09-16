@@ -25,6 +25,183 @@ import {
 } from '@heroicons/react/24/outline';
 import { mixedGameApi } from '../../services/api';
 
+const ROLE_DISPLAY_LABELS = {
+  retailer: 'Retailer',
+  wholesaler: 'Wholesaler',
+  distributor: 'Distributor',
+  factory: 'Factory',
+  manufacturer: 'Manufacturer',
+  supervisor: 'Supervisor',
+};
+
+const normalizeRoleKey = (role) => {
+  if (role === null || role === undefined) {
+    return '';
+  }
+  const rawValue =
+    typeof role === 'string'
+      ? role
+      : role?.value !== undefined
+      ? role.value
+      : role?.name !== undefined
+      ? role.name
+      : role;
+  return String(rawValue).toLowerCase();
+};
+
+const formatRoleLabel = (roleKey) => {
+  if (!roleKey) {
+    return 'Player';
+  }
+  const normalized = roleKey.toLowerCase();
+  if (ROLE_DISPLAY_LABELS[normalized]) {
+    return ROLE_DISPLAY_LABELS[normalized];
+  }
+  return normalized
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+};
+
+const splitReasonLines = (text) => {
+  if (!text) {
+    return [];
+  }
+  return text
+    .replace(/\r?\n/g, ' | ')
+    .split(/\s*\|\s*/g)
+    .map((part) => part.trim())
+    .filter(Boolean);
+};
+
+const parseReasonSections = (comment) => {
+  if (!comment) {
+    return { agent: '', supervisor: '' };
+  }
+  const text = String(comment).trim();
+  if (!text) {
+    return { agent: '', supervisor: '' };
+  }
+  const idx = text.toLowerCase().indexOf('supervisor (week');
+  if (idx === -1) {
+    return { agent: text, supervisor: '' };
+  }
+  const agent = text.slice(0, idx).trim();
+  const supervisor = text.slice(idx).trim();
+  return { agent, supervisor };
+};
+
+const toNumberOrNull = (value) => {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const buildReasoningTableData = (gameId, gameName, players = [], rounds = []) => {
+  const playersById = new Map();
+  const roleMeta = new Map();
+
+  let hasSupervisor = players.some((player) => {
+    const strategyRaw = player?.strategy ?? player?.ai_strategy;
+    if (!strategyRaw) {
+      return false;
+    }
+    const strategyValue = strategyRaw?.value ?? strategyRaw?.name ?? strategyRaw;
+    return String(strategyValue).toUpperCase() === 'DAYBREAK_DTCE_CENTRAL';
+  });
+
+  players.forEach((player) => {
+    if (!player) return;
+    const roleKey = normalizeRoleKey(player.role);
+    if (!roleKey) return;
+    playersById.set(player.id, { ...player, roleKey });
+    if (!roleMeta.has(roleKey)) {
+      roleMeta.set(roleKey, {
+        key: roleKey,
+        label: formatRoleLabel(roleKey),
+      });
+    }
+  });
+
+  const priorityOrder = ['retailer', 'wholesaler', 'distributor', 'manufacturer', 'factory'];
+  const orderedRoles = [];
+  priorityOrder.forEach((roleKey) => {
+    if (roleMeta.has(roleKey)) {
+      orderedRoles.push(roleMeta.get(roleKey));
+      roleMeta.delete(roleKey);
+    }
+  });
+  roleMeta.forEach((meta) => {
+    orderedRoles.push(meta);
+  });
+
+  const sortedRounds = Array.isArray(rounds)
+    ? [...rounds].sort((a, b) => {
+        const aWeek = Number(a?.round_number ?? a?.week ?? a?.number ?? 0);
+        const bWeek = Number(b?.round_number ?? b?.week ?? b?.number ?? 0);
+        return aWeek - bWeek;
+      })
+    : [];
+
+  const rows = sortedRounds.map((round) => {
+    const week = Number(round?.round_number ?? round?.week ?? round?.number ?? 0);
+    const roleEntries = {};
+    const supervisorEntries = {};
+    const playerRounds = Array.isArray(round?.player_rounds) ? round.player_rounds : [];
+
+    playerRounds.forEach((playerRound) => {
+      if (!playerRound) return;
+      const player = playersById.get(playerRound.player_id);
+      if (!player) return;
+
+      const { agent, supervisor } = parseReasonSections(playerRound.comment);
+      const orderValue = toNumberOrNull(playerRound.order_placed);
+      const inventoryValue = toNumberOrNull(
+        playerRound.inventory_after ?? playerRound.inventory_before
+      );
+      const backlogValue = toNumberOrNull(
+        playerRound.backorders_after ?? playerRound.backorders_before
+      );
+
+      roleEntries[player.roleKey] = {
+        order: orderValue,
+        inventory: inventoryValue,
+        backlog: backlogValue,
+        reason: agent,
+        lines: splitReasonLines(agent),
+      };
+
+      if (supervisor) {
+        const existing = supervisorEntries[player.roleKey];
+        const combinedText = existing ? `${existing.reason}\n${supervisor}` : supervisor;
+        supervisorEntries[player.roleKey] = {
+          reason: combinedText,
+          lines: splitReasonLines(combinedText),
+        };
+        hasSupervisor = true;
+      }
+    });
+
+    return {
+      week,
+      roles: roleEntries,
+      supervisor: Object.keys(supervisorEntries).length ? supervisorEntries : null,
+    };
+  });
+
+  return {
+    gameId,
+    gameName,
+    roles: orderedRoles,
+    rows,
+    hasSupervisor,
+  };
+};
+
 ChartJS.register(CategoryScale, LinearScale, LineElement, PointElement, Title, Tooltip, Legend, ArcElement);
 
 const StatCard = ({ title, value, icon: Icon, change, changeType = 'neutral', loading = false }) => (
@@ -128,9 +305,12 @@ const RangesModal = ({ visible, rangeEdits, onClose, onChange, onSave, originalC
 };
 
 const AdminDashboard = () => {
-  const { isGroupAdmin } = useAuth();
+  const auth = useAuth();
+  const { isGroupAdmin, user } = auth;
   const navigate = useNavigate();
   const location = useLocation();
+  const params = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const selectedGameId = params.get('gameId') || '';
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -143,6 +323,18 @@ const AdminDashboard = () => {
 
   const [showRangesModal, setShowRangesModal] = useState(false);
   const [rangeEdits, setRangeEdits] = useState({});
+
+  const [reasoningData, setReasoningData] = useState({
+    gameId: null,
+    gameName: '',
+    roles: [],
+    rows: [],
+    hasSupervisor: false,
+  });
+  const [reasoningLoading, setReasoningLoading] = useState(false);
+  const [reasoningError, setReasoningError] = useState(null);
+  const [reasoningFocus, setReasoningFocus] = useState('all');
+  const [myGames, setMyGames] = useState([]);
 
   const activeGameProgress = useMemo(() => {
     if (!recentGames || recentGames.length === 0) {
@@ -172,40 +364,199 @@ const AdminDashboard = () => {
     };
   }, [recentGames]);
 
-  const decisionFeed = useMemo(() => {
-    const entries = [];
+  const focusGameId = useMemo(() => {
+    if (selectedGameId) {
+      return String(selectedGameId);
+    }
+    if (activeGameProgress?.id) {
+      return String(activeGameProgress.id);
+    }
+    if ((recentGames || []).length > 0 && recentGames[0]?.id) {
+      return String(recentGames[0].id);
+    }
+    return '';
+  }, [selectedGameId, activeGameProgress, recentGames]);
 
-    (recentGames || []).forEach((game) => {
-      const rounds = game.rounds || game.recent_rounds || [];
+  useEffect(() => {
+    setReasoningFocus('all');
+  }, [focusGameId]);
 
-      rounds.forEach((round) => {
-        const week = round.round_number ?? round.week ?? round.number ?? 0;
-        const playerRounds = round.player_rounds || round.rounds || [];
+  useEffect(() => {
+    let ignore = false;
 
-        playerRounds.forEach((playerRound) => {
-          const reason = playerRound.comment || playerRound.reason;
-          if (!reason) return;
-
-          const orderValue =
-            playerRound.order_placed ?? playerRound.order ?? playerRound.quantity ?? playerRound.amount;
-          const role = playerRound.player?.role || playerRound.role || 'Player';
-
-          entries.push({
-            key: `${game.id || 'game'}-${week}-${playerRound.player_id || role}`,
-            gameName: game.name || `Game ${game.id}`,
-            week,
-            role,
-            order: orderValue,
-            reason,
-          });
-        });
+    if (!focusGameId) {
+      setReasoningData({
+        gameId: null,
+        gameName: '',
+        roles: [],
+        rows: [],
+        hasSupervisor: false,
       });
-    });
+      setReasoningError(null);
+      setReasoningLoading(false);
+      return () => {
+        ignore = true;
+      };
+    }
 
-    return entries
-      .sort((a, b) => (b.week ?? 0) - (a.week ?? 0))
-      .slice(0, 10);
-  }, [recentGames]);
+    const numericId = Number(focusGameId);
+    if (!Number.isFinite(numericId)) {
+      setReasoningData({
+        gameId: null,
+        gameName: '',
+        roles: [],
+        rows: [],
+        hasSupervisor: false,
+      });
+      setReasoningError(null);
+      setReasoningLoading(false);
+      return () => {
+        ignore = true;
+      };
+    }
+
+    const fallbackName =
+      (recentGames || []).find((g) => String(g.id) === String(focusGameId))?.name ||
+      `Game ${numericId}`;
+
+    const loadReasoning = async () => {
+      setReasoningLoading(true);
+      try {
+        const [players, rounds] = await Promise.all([
+          mixedGameApi.getPlayers(numericId),
+          mixedGameApi.getRounds(numericId),
+        ]);
+        if (ignore) return;
+        const parsed = buildReasoningTableData(
+          numericId,
+          fallbackName,
+          Array.isArray(players) ? players : [],
+          Array.isArray(rounds) ? rounds : []
+        );
+        setReasoningData(parsed);
+        setReasoningError(null);
+      } catch (err) {
+        if (ignore) return;
+        console.error('Failed to load reasoning data:', err);
+        setReasoningData({
+          gameId: numericId,
+          gameName: fallbackName,
+          roles: [],
+          rows: [],
+          hasSupervisor: false,
+        });
+        setReasoningError('Failed to load reasoning data for the selected game.');
+      } finally {
+        if (!ignore) {
+          setReasoningLoading(false);
+        }
+      }
+    };
+
+    loadReasoning();
+
+    return () => {
+      ignore = true;
+    };
+  }, [focusGameId, recentGames]);
+
+  const reasoningFocusOptions = useMemo(() => {
+    const options = [{ value: 'all', label: 'All players' }];
+    (reasoningData.roles || []).forEach((role) => {
+      if (role?.key) {
+        options.push({ value: role.key, label: role.label });
+      }
+    });
+    if (reasoningData.hasSupervisor) {
+      options.push({ value: 'supervisor', label: ROLE_DISPLAY_LABELS.supervisor });
+    }
+    return options;
+  }, [reasoningData.roles, reasoningData.hasSupervisor]);
+
+  const reasoningFocusLabel = useMemo(() => {
+    const match = reasoningFocusOptions.find((option) => option.value === reasoningFocus);
+    return match ? match.label : 'All players';
+  }, [reasoningFocusOptions, reasoningFocus]);
+
+  useEffect(() => {
+    if (!reasoningFocusOptions.some((option) => option.value === reasoningFocus)) {
+      setReasoningFocus('all');
+    }
+  }, [reasoningFocusOptions, reasoningFocus]);
+
+  const renderReasonCell = (entry) => {
+    if (!entry) {
+      return <div className="text-xs italic text-gray-400">No data recorded yet.</div>;
+    }
+
+    const metrics = [];
+    if (entry.order !== null && entry.order !== undefined) {
+      metrics.push(`Order ${entry.order}`);
+    }
+    if (entry.inventory !== null && entry.inventory !== undefined) {
+      metrics.push(`Inventory ${entry.inventory}`);
+    }
+    if (entry.backlog !== null && entry.backlog !== undefined) {
+      metrics.push(`Backlog ${entry.backlog}`);
+    }
+
+    return (
+      <div className="space-y-2">
+        {metrics.length > 0 && (
+          <div className="text-xs font-medium text-gray-500">{metrics.join(' • ')}</div>
+        )}
+        {entry.lines && entry.lines.length > 0 ? (
+          <div className="space-y-1 text-sm leading-snug text-gray-700">
+            {entry.lines.map((line, idx) => (
+              <p key={idx}>{line}</p>
+            ))}
+          </div>
+        ) : (
+          <p className="text-xs italic text-gray-400">No reasoning submitted.</p>
+        )}
+      </div>
+    );
+  };
+
+  const renderSupervisorCell = (entries, targetRole = null) => {
+    if (!entries || Object.keys(entries).length === 0) {
+      return <div className="text-xs italic text-gray-400">No supervisor overrides.</div>;
+    }
+
+    const items = targetRole
+      ? Object.entries(entries).filter(([roleKey]) => roleKey === targetRole)
+      : Object.entries(entries);
+
+    if (items.length === 0) {
+      return <div className="text-xs italic text-gray-400">No supervisor overrides.</div>;
+    }
+
+    return (
+      <div className="space-y-3">
+        {items.map(([roleKey, value]) => (
+          <div key={roleKey} className="space-y-1">
+            {(!targetRole || items.length > 1) && (
+              <div className="text-xs font-semibold uppercase tracking-wide text-indigo-600">
+                {formatRoleLabel(roleKey)}
+              </div>
+            )}
+            {value.lines && value.lines.length > 0 ? (
+              <div className="space-y-1 text-sm leading-snug text-gray-700">
+                {value.lines.map((line, idx) => (
+                  <p key={`${roleKey}-${idx}`}>{line}</p>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs italic text-gray-400">No supervisor reasoning captured.</p>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const reasoningGameName = reasoningData.gameName || (focusGameId ? `Game ${focusGameId}` : '');
+  const hasReasoningRows = (reasoningData.rows || []).length > 0;
 
   const renderProgressSlider = (game) => {
     const rawMax = game?.max_rounds ?? game?.maxRounds ?? game?.total_rounds ?? 1;
@@ -357,12 +708,6 @@ const AdminDashboard = () => {
       return '-';
     }
   };
-
-  const { user } = useAuth();
-  // Games created by this admin for selection
-  const [myGames, setMyGames] = useState([]);
-  const params = new URLSearchParams(location.search);
-  const selectedGameId = params.get('gameId') || '';
 
   useEffect(() => {
     (async () => {
@@ -531,30 +876,127 @@ const AdminDashboard = () => {
               </div>
 
               <div className="card-surface pad-6 rounded-lg">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-lg font-medium text-gray-900">Recent Order Reasoning</h3>
-                  <span className="text-sm text-gray-500">Latest updates by week</span>
-                </div>
-                {decisionFeed.length ? (
-                  <div className="space-y-4">
-                    {decisionFeed.map((entry) => (
-                      <div
-                        key={entry.key}
-                        className="rounded border border-gray-200 bg-gray-50 p-4"
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
+                  <div>
+                    <h3 className="text-lg font-medium text-gray-900">Order Reasoning by Week</h3>
+                    <p className="text-sm text-gray-500">
+                      {focusGameId
+                        ? `${reasoningGameName || `Game ${focusGameId}`} · ${reasoningFocusLabel}`
+                        : 'Select a game to review decision rationale.'}
+                    </p>
+                  </div>
+                  {reasoningFocusOptions.length > 1 && (
+                    <div className="flex items-center space-x-2">
+                      <label
+                        htmlFor="reasoning-focus"
+                        className="text-xs font-medium uppercase tracking-wide text-gray-500"
                       >
-                        <div className="flex items-center justify-between text-sm text-gray-500">
-                          <span className="font-medium text-gray-700">
-                            {entry.gameName} · Week {entry.week}
-                          </span>
-                          <span className="text-xs uppercase text-indigo-600">{entry.role}</span>
-                        </div>
-                        <div className="mt-2 text-sm text-gray-900">Order {entry.order ?? '—'}</div>
-                        <p className="mt-2 text-sm text-gray-700">{entry.reason}</p>
-                      </div>
-                    ))}
+                        Focus
+                      </label>
+                      <select
+                        id="reasoning-focus"
+                        value={reasoningFocus}
+                        onChange={(event) => setReasoningFocus(event.target.value)}
+                        className="border-gray-300 text-sm rounded-md shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                      >
+                        {reasoningFocusOptions.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+                {reasoningLoading ? (
+                  <div className="space-y-3">
+                    <div className="h-4 w-2/3 rounded bg-gray-100 animate-pulse" />
+                    <div className="h-4 w-full rounded bg-gray-100 animate-pulse" />
+                    <div className="h-4 w-5/6 rounded bg-gray-100 animate-pulse" />
+                  </div>
+                ) : reasoningError ? (
+                  <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                    {reasoningError}
+                  </div>
+                ) : !focusGameId ? (
+                  <p className="text-sm text-gray-500">Select a game to view player reasoning.</p>
+                ) : hasReasoningRows ? (
+                  <div className="overflow-x-auto">
+                    {reasoningFocus === 'all' ? (
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Week
+                            </th>
+                            {reasoningData.roles.map((role) => (
+                              <th
+                                key={role.key}
+                                className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500"
+                              >
+                                {role.label}
+                              </th>
+                            ))}
+                            {reasoningData.hasSupervisor && (
+                              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                Supervisor
+                              </th>
+                            )}
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {reasoningData.rows.map((row, idx) => (
+                            <tr key={row.week ?? `row-${idx}`}>
+                              <td className="px-4 py-3 align-top text-sm font-medium text-gray-700">
+                                Week {row.week ?? '—'}
+                              </td>
+                              {reasoningData.roles.map((role) => (
+                                <td key={`${role.key}-${idx}`} className="px-4 py-3 align-top">
+                                  {renderReasonCell(row.roles[role.key])}
+                                </td>
+                              ))}
+                              {reasoningData.hasSupervisor && (
+                                <td className="px-4 py-3 align-top">
+                                  {renderSupervisorCell(row.supervisor)}
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    ) : (
+                      <table className="min-w-full divide-y divide-gray-200">
+                        <thead className="bg-gray-50">
+                          <tr>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              Week
+                            </th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500">
+                              {reasoningFocusLabel}
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="bg-white divide-y divide-gray-200">
+                          {reasoningData.rows.map((row, idx) => (
+                            <tr key={row.week ?? `focus-${idx}`}>
+                              <td className="px-4 py-3 align-top text-sm font-medium text-gray-700">
+                                Week {row.week ?? '—'}
+                              </td>
+                              <td className="px-4 py-3 align-top">
+                                {reasoningFocus === 'supervisor'
+                                  ? renderSupervisorCell(row.supervisor)
+                                  : renderReasonCell(row.roles[reasoningFocus])}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-500">No recent human or AI reasoning captured yet.</p>
+                  <p className="text-sm text-gray-500">
+                    No reasoning has been recorded yet for this game.
+                  </p>
                 )}
               </div>
             </div>
