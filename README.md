@@ -104,9 +104,10 @@ docker compose -f docker-compose.yml up -d --no-deps --force-recreate --build pr
 
 > **Heads up:** Docker Compose V1 (`docker-compose` 1.x) is incompatible with
 > recent Docker Engine releases and triggers `KeyError: 'ContainerConfig'`
-> during `up --force-recreate`. Use the Docker Compose V2 plugin (`docker
-> compose`) or override the Makefile helper with
-> `DOCKER_COMPOSE="docker compose" make proxy-recreate`.
+> during `up --force-recreate`. The bundled Makefile now auto-downgrades the
+> Docker API version when it detects V1, but if you run raw `docker-compose`
+> commands you should either switch to the Compose V2 plugin (`docker compose`)
+> or prefix the command with `COMPOSE_API_VERSION=1.44`.
 
 ## 🏗 Project Structure
 
