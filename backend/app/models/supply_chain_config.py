@@ -46,6 +46,13 @@ class SupplyChainConfig(Base):
     market_demands = relationship("MarketDemand", back_populates="config", cascade="all, delete-orphan")
     group = relationship("Group", back_populates="supply_chain_configs")
 
+    # Training metadata
+    needs_training = Column(Boolean, nullable=False, default=True)
+    training_status = Column(String(50), nullable=False, default="pending")
+    trained_at = Column(DateTime, nullable=True)
+    trained_model_path = Column(String(255), nullable=True)
+    last_trained_config_hash = Column(String(128), nullable=True)
+
 class Item(Base):
     """Products in the supply chain"""
     __tablename__ = "items"
