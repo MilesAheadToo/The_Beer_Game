@@ -141,20 +141,24 @@ logs:
 # Proxy management
 proxy-up:
 	@echo "\n[+] Starting proxy service..."
-	$(DOCKER_COMPOSE_CMD) -f docker-compose.yml up -d --no-deps proxy
+	$(DOCKER_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.proxy.yml up -d --no-deps proxy
 
 proxy-down:
 	@echo "\n[+] Stopping proxy service..."
-	$(DOCKER_COMPOSE_CMD) -f docker-compose.yml stop proxy
+	$(DOCKER_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.proxy.yml stop proxy
+
+proxy-clean:
+	@echo "\n[+] Removing proxy container..."
+	-$(DOCKER_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.proxy.yml rm -f proxy
 
 proxy-restart: proxy-down proxy-up
 
-proxy-recreate:
+proxy-recreate: proxy-clean
 	@echo "\n[+] Recreating proxy service with a fresh container..."
-	$(DOCKER_COMPOSE_CMD) -f docker-compose.yml up -d --no-deps --force-recreate --build proxy
+	$(DOCKER_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.proxy.yml up -d --build proxy
 
 proxy-logs:
-	@$(DOCKER_COMPOSE_CMD) logs -f --tail=200 proxy
+	@$(DOCKER_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.proxy.yml logs -f --tail=200 proxy
 
 seed:
 	@echo "\n[+] Seeding default users..."; \
