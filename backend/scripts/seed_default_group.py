@@ -218,6 +218,7 @@ def ensure_naive_agents(session: Session, game: Game) -> None:
         "user_id": None,
     }
 
+
     game.role_assignments = role_assignments
     session.add(game)
     print(
@@ -265,6 +266,7 @@ def ensure_role_users(session: Session, group: Group) -> None:
         session.add(user)
         session.flush()
         print(f"[success] Created {display_name.lower()} user ({email}).")
+
 
 
 def main() -> None:
