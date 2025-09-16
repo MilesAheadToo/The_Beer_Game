@@ -38,7 +38,7 @@ model training. The tables below list every `make` target defined in the root
 | `make proxy-logs` | Tail just the proxy container logs. |
 | `make seed` | Seed default users via the `create-users` service. |
 | `make seed-default-group` | Ensure the database is running and execute the backend seeding script inside the container to create the default Daybreak group, its supply chain/game scaffolding, and naive AI players. |
-| `make reset-admin` | Reset the SystemAdmin password to `Daybreak@2025`. |
+  `make reset-admin` | Reset the SystemAdmin password to `Daybreak@2025`. |
 | `make init-env` | Run the platform-specific environment setup script to generate `.env` files. |
 | `make help` | Print an annotated list of all available targets. |
 
