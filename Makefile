@@ -48,7 +48,9 @@ endif
 
 DOCKER_COMPOSE_CMD = $(strip $(COMPOSE_ENV) $(DOCKER_COMPOSE))
 
-.PHONY: up gpu-up up-dev down ps logs seed reset-admin help init-env proxy-up proxy-down proxy-restart proxy-recreate proxy-logs proxy-url seed-default-group
+.PHONY: up gpu-up gpu-up-dev up-dev cpu-up cpu-up-dev down ps logs seed reset-admin help init-env \
+        proxy-up proxy-down proxy-restart proxy-recreate proxy-logs proxy-url \
+        seed-default-group
 
 # Default CPU target
 up:
@@ -121,8 +123,8 @@ rebuild-backend:
 	echo "\n[✓] Backend rebuilt and restarted."
 
 # GPU-specific targets
-gpu-up gpu-up-dev:
-	$(MAKE) $(subst gpu-,,$@) FORCE_GPU=1
+gpu-up-dev:
+	$(MAKE) up-dev FORCE_GPU=1
 
 # CPU-specific targets
 cpu-up cpu-up-dev:
@@ -167,6 +169,20 @@ seed:
 seed-default-group:
 	@echo "\n[+] Creating default group, users, and AI-powered game..."; \
 	python backend/scripts/seed_default_group.py
+
+seed-default-group:
+	@echo "\n[+] Creating default group, users, and AI-powered game..."; \
+	DB_CONTAINER_ID=$$($(DOCKER_COMPOSE_CMD) ps -q db); \
+	if [ -z "$$DB_CONTAINER_ID" ]; then \
+		echo "[info] Starting database container..."; \
+		$(DOCKER_COMPOSE_CMD) up -d db >/dev/null; \
+	fi; \
+	BACKEND_CONTAINER_ID=$$($(DOCKER_COMPOSE_CMD) ps -q backend); \
+	if [ -n "$$BACKEND_CONTAINER_ID" ]; then \
+		$(DOCKER_COMPOSE_CMD) exec backend python scripts/seed_default_group.py; \
+	else \
+		$(DOCKER_COMPOSE_CMD) run --rm backend python scripts/seed_default_group.py; \
+	fi
 
 reset-admin:
 	@echo "\n[+] Resetting superadmin password to Daybreak@2025..."; \

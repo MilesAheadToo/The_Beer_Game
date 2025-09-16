@@ -27,6 +27,7 @@ from app.models import (
 )
 from app.models.agent_config import AgentConfig
 from app.models.supply_chain_config import SupplyChainConfig
+from app.core.security import get_password_hash
 from app.schemas.group import GroupCreate
 from app.schemas.user import UserCreate
 from app.services.group_service import GroupService
@@ -192,8 +193,30 @@ def ensure_naive_agents(session: Session, game: Game) -> None:
             "user_id": None,
         }
 
-    if "wholesaler" in role_assignments and "supplier" not in role_assignments:
-        role_assignments["supplier"] = dict(role_assignments["wholesaler"])
+    supplier_config = (
+        session.query(AgentConfig)
+        .filter(AgentConfig.game_id == game.id, AgentConfig.role == "supplier")
+        .first()
+    )
+    if supplier_config:
+        supplier_config.agent_type = DEFAULT_AGENT_TYPE
+        supplier_config.config = supplier_config.config or {}
+        session.add(supplier_config)
+    else:
+        supplier_config = AgentConfig(
+            game_id=game.id,
+            role="supplier",
+            agent_type=DEFAULT_AGENT_TYPE,
+            config={},
+        )
+        session.add(supplier_config)
+        session.flush()
+
+    role_assignments["supplier"] = {
+        "is_ai": True,
+        "agent_config_id": supplier_config.id,
+        "user_id": None,
+    }
 
     game.role_assignments = role_assignments
     session.add(game)
@@ -204,22 +227,44 @@ def ensure_naive_agents(session: Session, game: Game) -> None:
 
 
 def ensure_role_users(session: Session, group: Group) -> None:
-    """Log the status of default role users to confirm their existence."""
-    expected_emails = {
-        "retailer": f"retailer+g{group.id}@daybreak.ai",
-        "distributor": f"distributor+g{group.id}@daybreak.ai",
-        "manufacturer": f"manufacturer+g{group.id}@daybreak.ai",
-        "supplier": f"supplier+g{group.id}@daybreak.ai",
-    }
-    for role, email in expected_emails.items():
-        exists = (
+    """Ensure the default role-based users exist for the group."""
+    group_suffix = f"g{group.id}"
+    player_specs = [
+        ("Retailer", "retailer"),
+        ("Distributor", "distributor"),
+        ("Manufacturer", "manufacturer"),
+        ("Supplier", "supplier"),
+    ]
+
+    hashed_password: str | None = None
+    for display_name, slug in player_specs:
+        email = f"{slug}+{group_suffix}@daybreak.ai"
+        user = (
             session.query(User)
             .filter(User.group_id == group.id, User.email == email)
             .first()
-            is not None
         )
-        status = "found" if exists else "missing"
-        print(f"[info] {role.title()} user {status} ({email}).")
+        if user:
+            print(f"[info] {display_name} user found ({email}).")
+            continue
+
+        if hashed_password is None:
+            hashed_password = get_password_hash(DEFAULT_PASSWORD)
+
+        print(f"[info] Creating {display_name.lower()} user ({email})...")
+        user = User(
+            username=f"{slug}_{group_suffix}",
+            email=email,
+            full_name=display_name,
+            hashed_password=hashed_password,
+            roles=["player"],
+            group_id=group.id,
+            is_active=True,
+            is_superuser=False,
+        )
+        session.add(user)
+        session.flush()
+        print(f"[success] Created {display_name.lower()} user ({email}).")
 
 
 def main() -> None:
