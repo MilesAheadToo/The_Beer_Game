@@ -228,7 +228,10 @@ const CreateMixedGame = () => {
   const [maxRounds, setMaxRounds] = useState(20);
   const [description, setDescription] = useState(searchParams.get('description') || '');
   const [isPublic, setIsPublic] = useState(true);
-  const [demandPattern] = useState(demandPatterns[0].value);
+  const [demandPattern, setDemandPattern] = useState(demandPatterns[0].value);
+  const [initialDemand, setInitialDemand] = useState(4);
+  const [demandChangeWeek, setDemandChangeWeek] = useState(6);
+  const [finalDemand, setFinalDemand] = useState(8);
   const [pricingConfig, setPricingConfig] = useState({
     retailer: { selling_price: 100.0, standard_cost: 80.0 },
     wholesaler: { selling_price: 75.0, standard_cost: 60.0 },
@@ -504,7 +507,13 @@ const handleStrategyChange = (index, strategy) => {
         is_public: isPublic,
         demand_pattern: {
           type: demandPattern,
-          params: {}
+          params: demandPattern === 'classic'
+            ? {
+                initial_demand: Math.max(0, Number.isFinite(Number(initialDemand)) ? Number(initialDemand) : 0),
+                change_week: Math.max(1, Number.isFinite(Number(demandChangeWeek)) ? Number(demandChangeWeek) : 1),
+                final_demand: Math.max(0, Number.isFinite(Number(finalDemand)) ? Number(finalDemand) : 0),
+              }
+            : {}
         },
         node_policies: nodePolicies,
         system_config: systemConfig,
@@ -728,6 +737,71 @@ const handleStrategyChange = (index, strategy) => {
                           p={3}
                         />
                       </FormControl>
+                    </VStack>
+                  </CardBody>
+                </Card>
+
+                {/* Market Demand Settings */}
+                <Card variant="outline" bg={cardBg} borderColor={borderColor} w="100%" className="card-surface pad-6">
+                  <CardHeader pb={2}>
+                    <Heading size="md">Market Demand</Heading>
+                    <Text color="gray.500" fontSize="sm">Configure how customer demand evolves during the game</Text>
+                  </CardHeader>
+                  <CardBody pt={0}>
+                    <VStack spacing={5} align="stretch">
+                      <FormControl>
+                        <FormLabel>Demand Pattern</FormLabel>
+                        <Select value={demandPattern} onChange={(e) => setDemandPattern(e.target.value)}>
+                          {demandPatterns.map((pattern) => (
+                            <option key={pattern.value} value={pattern.value}>
+                              {pattern.label}
+                            </option>
+                          ))}
+                        </Select>
+                        <FormHelperText>Select the demand model to use for this game</FormHelperText>
+                      </FormControl>
+                      {demandPattern === 'classic' && (
+                        <Grid templateColumns={{ base: '1fr', md: 'repeat(3, 1fr)' }} gap={6}>
+                          <FormControl>
+                            <FormLabel>Initial demand</FormLabel>
+                            <NumberInput min={0} value={initialDemand} onChange={(value) => setInitialDemand(parseInt(value) || 0)}>
+                              <NumberInputField />
+                              <NumberInputStepper>
+                                <NumberIncrementStepper />
+                                <NumberDecrementStepper />
+                              </NumberInputStepper>
+                            </NumberInput>
+                            <FormHelperText>Customer demand before the change occurs</FormHelperText>
+                          </FormControl>
+                          <FormControl>
+                            <FormLabel>Change occurs in week</FormLabel>
+                            <NumberInput min={1} value={demandChangeWeek} onChange={(value) => setDemandChangeWeek(parseInt(value) || 1)}>
+                              <NumberInputField />
+                              <NumberInputStepper>
+                                <NumberIncrementStepper />
+                                <NumberDecrementStepper />
+                              </NumberInputStepper>
+                            </NumberInput>
+                            <FormHelperText>Week when demand switches to the new level</FormHelperText>
+                          </FormControl>
+                          <FormControl>
+                            <FormLabel>Final demand</FormLabel>
+                            <NumberInput min={0} value={finalDemand} onChange={(value) => setFinalDemand(parseInt(value) || 0)}>
+                              <NumberInputField />
+                              <NumberInputStepper>
+                                <NumberIncrementStepper />
+                                <NumberDecrementStepper />
+                              </NumberInputStepper>
+                            </NumberInput>
+                            <FormHelperText>Customer demand after the change</FormHelperText>
+                          </FormControl>
+                        </Grid>
+                      )}
+                      {demandPattern !== 'classic' && (
+                        <Text color="gray.500" fontSize="sm">
+                          Additional configuration for this pattern will be added in a future update.
+                        </Text>
+                      )}
                     </VStack>
                   </CardBody>
                 </Card>

@@ -10,6 +10,11 @@ from app.models.supply_chain import (
 from app.db.session import SessionLocal, get_db
 from app.schemas.game import GameCreate, PlayerCreate, GameState, PlayerState, DemandPattern
 from app.services.agents import AgentManager, AgentType, AgentStrategy
+from app.core.demand_patterns import (
+    normalize_demand_pattern,
+    DEFAULT_DEMAND_PATTERN,
+    DEFAULT_CLASSIC_PARAMS,
+)
 
 class AgentGameService:
     """Service for managing the Beer Game with AI agents."""
@@ -20,12 +25,18 @@ class AgentGameService:
     
     def create_game(self, game_data: GameCreate) -> Game:
         """Create a new game with AI agents."""
+        pattern_config = (
+            normalize_demand_pattern(game_data.demand_pattern.dict())
+            if game_data.demand_pattern
+            else normalize_demand_pattern(DEFAULT_DEMAND_PATTERN)
+        )
+
         game = Game(
             name=game_data.name,
             status=GameStatus.CREATED,
             current_round=0,
             max_rounds=game_data.max_rounds,
-            demand_pattern=game_data.demand_pattern.dict()
+            demand_pattern=pattern_config
         )
         self.db.add(game)
         self.db.commit()
@@ -217,14 +228,17 @@ class AgentGameService:
     
     def _generate_demand_pattern(self, demand_pattern: DemandPattern):
         """Generate a demand pattern based on the game settings."""
-        if demand_pattern.type == 'classic':
-            # Classic beer game pattern: stable for a while, then step increase
-            stable_period = demand_pattern.params.get('stable_period', 5)
-            step_increase = demand_pattern.params.get('step_increase', 4)
-            
-            pattern = [4] * stable_period  # Initial stable period
-            pattern += [4 + step_increase] * (20 - stable_period)  # Step increase
-            
+        normalized = normalize_demand_pattern(demand_pattern.dict())
+        if normalized.get('type') == 'classic':
+            params = normalized.get('params', {})
+            initial = params.get('initial_demand', DEFAULT_CLASSIC_PARAMS['initial_demand'])
+            final = params.get('final_demand', DEFAULT_CLASSIC_PARAMS['final_demand'])
+            change_week = params.get('change_week', DEFAULT_CLASSIC_PARAMS['change_week'])
+            total_rounds = max(change_week, 20)
+            pattern: List[int] = []
+            for week in range(1, total_rounds + 1):
+                pattern.append(final if week >= change_week else initial)
+
             demand_pattern.pattern = pattern
     
     def get_game_state(self, game_id: int) -> Dict:

@@ -11,6 +11,9 @@ def test_classic_demand_pattern() -> None:
     """Classic pattern should step from 4 to 8 after five rounds."""
     expected = [4, 4, 4, 4, 4, 8, 8, 8, 8, 8]
     pattern = DemandGenerator.generate_classic(
-        num_rounds=10, stable_period=5, step_increase=4
+        num_rounds=10,
+        initial_demand=4,
+        change_week=6,
+        final_demand=8,
     )
     assert pattern == expected

@@ -11,6 +11,11 @@ from app.schemas.game import GameCreate, GameUpdate, GameState, PlayerState, Gam
 from app.schemas.player import PlayerAssignment, PlayerType, PlayerStrategy
 from app.services.agents import AgentManager, AgentType, AgentStrategy as AgentStrategyEnum
 from app.api.endpoints.config import _read_cfg as read_system_cfg
+from app.core.demand_patterns import (
+    normalize_demand_pattern,
+    DEFAULT_DEMAND_PATTERN,
+    DEFAULT_CLASSIC_PARAMS,
+)
 
 class MixedGameService:
     """Service for managing games with mixed human and AI players."""
@@ -25,8 +30,14 @@ class MixedGameService:
         Persists extended configuration into Game.config JSON to avoid schema changes.
         """
         # Create the game
+        normalized_pattern = (
+            normalize_demand_pattern(game_data.demand_pattern.dict())
+            if game_data.demand_pattern
+            else normalize_demand_pattern(DEFAULT_DEMAND_PATTERN)
+        )
+
         config: Dict[str, Any] = {
-            "demand_pattern": game_data.demand_pattern.dict() if game_data.demand_pattern else {},
+            "demand_pattern": normalized_pattern,
             "pricing_config": game_data.pricing_config.dict() if hasattr(game_data, 'pricing_config') else {},
             "node_policies": (game_data.node_policies or {}),
             "system_config": (game_data.system_config or {}),
@@ -44,7 +55,7 @@ class MixedGameService:
         # Persist creator/metadata into columns if present in schema (fallback-safe via raw SQL)
         try:
             from sqlalchemy import text
-            dp = json.dumps(game_data.demand_pattern.dict()) if getattr(game_data, 'demand_pattern', None) else None
+            dp = json.dumps(normalized_pattern) if getattr(game_data, 'demand_pattern', None) else None
             desc = getattr(game_data, 'description', None)
             is_public = getattr(game_data, 'is_public', True)
             self.db.execute(
@@ -499,26 +510,23 @@ class MixedGameService:
     
     def calculate_demand(self, game: Game, round_number: int) -> int:
         """Calculate demand for a given round based on the game's demand pattern."""
-        pattern = game.demand_pattern or {}
+        pattern = normalize_demand_pattern(game.demand_pattern or {})
         pattern_type = pattern.get('type', 'classic')
-        params = pattern.get('params', {})
-        
+        params = pattern.get('params', {}) if isinstance(pattern.get('params', {}), dict) else {}
+
         if pattern_type == 'classic':
-            stable_period = params.get('stable_period', 5)
-            step_increase = params.get('step_increase', 4)
-            
-            if round_number <= stable_period:
-                return 4  # Base demand
-            else:
-                return 4 + step_increase
-        
+            initial = params.get('initial_demand', DEFAULT_CLASSIC_PARAMS['initial_demand'])
+            final = params.get('final_demand', DEFAULT_CLASSIC_PARAMS['final_demand'])
+            change_week = params.get('change_week', DEFAULT_CLASSIC_PARAMS['change_week'])
+            return final if round_number >= change_week else initial
+
         elif pattern_type == 'random':
             min_demand = params.get('min_demand', 1)
             max_demand = params.get('max_demand', 10)
             return random.randint(min_demand, max_demand)
-        
+
         # Default demand
-        return 4
+        return DEFAULT_CLASSIC_PARAMS['initial_demand']
     
     def list_games(self, status: Optional[GameStatus] = None) -> List[Dict[str, Any]]:
         """List all games, optionally filtered by status."""
@@ -547,9 +555,10 @@ class MixedGameService:
         games = []
         for row in result:
             try:
-                demand_pattern = json.loads(row[11]) if row[11] else {"type": "classic", "params": {}}
+                raw_pattern = json.loads(row[11]) if row[11] else DEFAULT_DEMAND_PATTERN.copy()
             except (json.JSONDecodeError, TypeError):
-                demand_pattern = {"type": "classic", "params": {}}
+                raw_pattern = DEFAULT_DEMAND_PATTERN.copy()
+            demand_pattern = normalize_demand_pattern(raw_pattern)
             # Unpack optional config
             node_policies = {}
             system_config = {}
@@ -642,9 +651,10 @@ class MixedGameService:
         
         # Create a default demand pattern if none exists
         try:
-            demand_pattern = json.loads(game_result[7]) if game_result[7] else {}
+            raw_pattern = json.loads(game_result[7]) if game_result[7] else DEFAULT_DEMAND_PATTERN.copy()
         except (json.JSONDecodeError, TypeError):
-            demand_pattern = {}
+            raw_pattern = DEFAULT_DEMAND_PATTERN.copy()
+        demand_pattern = normalize_demand_pattern(raw_pattern)
 
         # Unpack optional config
         node_policies = {}

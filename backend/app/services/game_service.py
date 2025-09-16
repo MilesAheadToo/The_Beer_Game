@@ -47,7 +47,13 @@ class BackgroundTaskManager:
             self._tasks.pop(game_id, None)
 from app.schemas.game import GameCreate, PlayerCreate, GameState, PlayerState
 from app.models.supply_chain import PlayerRole, Game, Player, GameRound, PlayerRound, PlayerInventory
-from app.core.demand_patterns import get_demand_pattern, DemandPatternType
+from app.core.demand_patterns import (
+    get_demand_pattern,
+    DemandPatternType,
+    normalize_demand_pattern,
+    DEFAULT_DEMAND_PATTERN,
+    DEFAULT_CLASSIC_PARAMS,
+)
 
 class GameService:
     # Cost parameters
@@ -76,14 +82,11 @@ class GameService:
     def create_game(self, game_data: GameCreate) -> Game:
         """Create a new game with the given parameters."""
         # Convert DemandPattern model to dict for storage
-        demand_pattern = game_data.demand_pattern.dict() if game_data.demand_pattern else {
-            "type": DemandPatternType.CLASSIC,
-            "params": {
-                "stable_period": 5,
-                "step_increase": 4
-            }
-        }
-            
+        if game_data.demand_pattern:
+            demand_pattern = normalize_demand_pattern(game_data.demand_pattern.dict())
+        else:
+            demand_pattern = normalize_demand_pattern(DEFAULT_DEMAND_PATTERN)
+
         game = Game(
             name=game_data.name,
             status=GameStatus.CREATED,
@@ -137,17 +140,16 @@ class GameService:
             raise ValueError("Game has already started or completed")
         
         # Pre-generate the entire demand pattern for the game
+        pattern_config = normalize_demand_pattern(game.demand_pattern)
         self._demand_pattern = get_demand_pattern(
-            pattern_config=game.demand_pattern,
+            pattern_config=pattern_config,
             num_rounds=game.max_rounds
         )
-        
+
         # Store the demand pattern in the game for persistence
-        game.demand_pattern = {
-            "type": game.demand_pattern.get("type", DemandPatternType.CLASSIC),
-            "params": game.demand_pattern.get("params", {"stable_period": 5, "step_increase": 4}),
-            "pattern": self._demand_pattern  # Store the full pattern
-        }
+        stored_pattern = dict(pattern_config)
+        stored_pattern["pattern"] = self._demand_pattern  # Store the full pattern
+        game.demand_pattern = stored_pattern
         
         # Initialize first round with the first demand value
         game_round = GameRound(
@@ -286,12 +288,12 @@ class GameService:
             ))
             
         # Include demand pattern info in the game state
+        pattern_config = normalize_demand_pattern(game.demand_pattern)
         demand_pattern_info = {
-            "type": game.demand_pattern.get("type", DemandPatternType.CLASSIC),
-            "params": game.demand_pattern.get("params", {}),
+            **pattern_config,
             "current_demand": current_round.customer_demand if current_round else None,
-            "next_demand": self._generate_demand(game.current_round + 1, game.max_rounds) 
-                          if game.current_round < game.max_rounds else None
+            "next_demand": self._generate_demand(game.current_round + 1, game.max_rounds)
+            if game.current_round < game.max_rounds else None,
         }
             
         return GameState(
@@ -593,10 +595,8 @@ class GameService:
             return self._demand_pattern[idx]
             
         # Fallback to default classic pattern if not pre-generated
-        stable_period = 5
-        base_demand = 4
-        step_increase = 4
-        
-        if round_number <= stable_period:
-            return base_demand
-        return base_demand + step_increase
+        change_week = DEFAULT_CLASSIC_PARAMS["change_week"]
+        initial = DEFAULT_CLASSIC_PARAMS["initial_demand"]
+        final = DEFAULT_CLASSIC_PARAMS["final_demand"]
+
+        return final if round_number >= change_week else initial

@@ -40,8 +40,9 @@ class AgentGameDemo:
             "demand_pattern": {
                 "type": "classic",
                 "params": {
-                    "stable_period": 3,
-                    "step_increase": 4
+                    "initial_demand": 4,
+                    "change_week": 4,
+                    "final_demand": 8
                 }
             }
         }

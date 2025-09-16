@@ -38,6 +38,33 @@ import gameApi from '../services/gameApi';
 // isn't available. Using MUI components exclusively ensures the page renders
 // correctly without additional providers.
 
+const DEFAULT_CLASSIC_PARAMS = {
+  initial_demand: 4,
+  change_week: 6,
+  final_demand: 8,
+};
+
+const normalizeClassicParams = (params = {}) => {
+  const safeNumber = (value, fallback) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
+  const initial = safeNumber(params.initial_demand ?? params.base_demand, DEFAULT_CLASSIC_PARAMS.initial_demand);
+  const stablePeriod = safeNumber(params.stable_period, DEFAULT_CLASSIC_PARAMS.change_week - 1);
+  const changeWeek = params.change_week != null
+    ? safeNumber(params.change_week, DEFAULT_CLASSIC_PARAMS.change_week)
+    : stablePeriod + 1;
+  const stepIncrease = safeNumber(params.step_increase, DEFAULT_CLASSIC_PARAMS.final_demand - DEFAULT_CLASSIC_PARAMS.initial_demand);
+  const final = params.final_demand != null ? safeNumber(params.final_demand, initial + stepIncrease) : initial + stepIncrease;
+
+  return {
+    initial_demand: Math.max(0, initial),
+    change_week: Math.max(1, changeWeek),
+    final_demand: Math.max(0, final),
+  };
+};
+
 const GamesList = () => {
   const [games, setGames] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -58,10 +85,7 @@ const GamesList = () => {
     max_rounds: 20,
     demand_pattern: {
       type: 'classic',
-      params: {
-        stable_period: 5,
-        step_increase: 4,
-      },
+      params: { ...DEFAULT_CLASSIC_PARAMS },
     },
   });
 
@@ -175,15 +199,15 @@ const GamesList = () => {
   const handleOpenDialog = (game = null) => {
     if (game) {
       setSelectedGame(game);
+      const params = game.demand_pattern?.type === 'classic'
+        ? normalizeClassicParams(game.demand_pattern?.params)
+        : (game.demand_pattern?.params || {});
       setFormData({
         name: game.name,
         max_rounds: game.max_rounds,
         demand_pattern: {
           type: game.demand_pattern?.type || 'classic',
-          params: {
-            stable_period: game.demand_pattern?.params?.stable_period || 5,
-            step_increase: game.demand_pattern?.params?.step_increase || 4,
-          },
+          params,
         },
       });
     } else {
@@ -193,10 +217,7 @@ const GamesList = () => {
         max_rounds: 20,
         demand_pattern: {
           type: 'classic',
-          params: {
-            stable_period: 5,
-            step_increase: 4,
-          },
+          params: { ...DEFAULT_CLASSIC_PARAMS },
         },
       });
     }
@@ -217,27 +238,36 @@ const GamesList = () => {
   };
 
   const handleDemandPatternChange = (e) => {
-    const { name, value } = e.target;
-    setFormData({
-      ...formData,
+    const { value } = e.target;
+    setFormData((prev) => ({
+      ...prev,
       demand_pattern: {
-        ...formData.demand_pattern,
-        [name]: name === 'type' ? value : { ...formData.demand_pattern.params, [name]: value },
+        type: value,
+        params: value === 'classic' ? { ...DEFAULT_CLASSIC_PARAMS } : {},
       },
-    });
+    }));
   };
 
   // Handle form submission
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
+      const payload = {
+        ...formData,
+        demand_pattern: {
+          ...formData.demand_pattern,
+          params: formData.demand_pattern.type === 'classic'
+            ? normalizeClassicParams(formData.demand_pattern.params)
+            : (formData.demand_pattern.params || {}),
+        },
+      };
       if (selectedGame) {
         // Update existing game
-        await gameApi.updateGame(selectedGame.id, formData);
+        await gameApi.updateGame(selectedGame.id, payload);
         showSnackbar('Game updated successfully', 'success');
       } else {
         // Create new game
-        await gameApi.createGame(formData);
+        await gameApi.createGame(payload);
         showSnackbar('Game created successfully', 'success');
       }
       fetchGames();
@@ -423,8 +453,13 @@ const GamesList = () => {
                 </TableCell>
               </TableRow>
             ) : (
-              games.map((game) => (
-                <TableRow key={game.id}>
+              games.map((game) => {
+                const params = game.demand_pattern?.params || {};
+                const demandSummary = game.demand_pattern?.type === 'classic'
+                  ? ` (Initial: ${params.initial_demand ?? '-'}, Change Week: ${params.change_week ?? '-'}, Final: ${params.final_demand ?? '-'})`
+                  : '';
+                return (
+                  <TableRow key={game.id}>
                   <TableCell>
                     <Typography noWrap maxWidth={320} title={game.name}>
                       {game.name}
@@ -441,9 +476,7 @@ const GamesList = () => {
                   <TableCell>{game.max_rounds}</TableCell>
                   <TableCell>
                     <Typography noWrap maxWidth={260} title={game.demand_pattern?.type || 'classic'}>
-                      {(game.demand_pattern?.type || 'classic')}
-                      {game.demand_pattern?.params?.stable_period &&
-                        ` (Stable: ${game.demand_pattern.params.stable_period} weeks)`}
+                      {(game.demand_pattern?.type || 'classic')}{demandSummary}
                     </Typography>
                   </TableCell>
                   <TableCell>
@@ -486,8 +519,9 @@ const GamesList = () => {
                       </Button>
                     </Box>
                   </TableCell>
-                </TableRow>
-              ))
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>
@@ -533,22 +567,44 @@ const GamesList = () => {
                 </Select>
               </FormControl>
               {formData.demand_pattern.type === 'classic' && (
-                <Box mt={2}>
+                <Box mt={2} display="grid" gap={2}>
                   <TextField
                     fullWidth
                     type="number"
-                    label="Stable Period (weeks)"
-                    name="stable_period"
-                    value={formData.demand_pattern.params?.stable_period || 5}
+                    label="Initial Demand"
+                    name="initial_demand"
+                    value={formData.demand_pattern.params?.initial_demand ?? DEFAULT_CLASSIC_PARAMS.initial_demand}
                     onChange={(e) => {
-                      const value = e.target.value;
+                      const parsed = parseInt(e.target.value, 10);
                       setFormData({
                         ...formData,
                         demand_pattern: {
                           ...formData.demand_pattern,
                           params: {
                             ...formData.demand_pattern.params,
-                            stable_period: parseInt(value) || 5,
+                            initial_demand: Number.isNaN(parsed) ? 0 : Math.max(0, parsed),
+                          },
+                        },
+                      });
+                    }}
+                    margin="normal"
+                    inputProps={{ min: 0 }}
+                  />
+                  <TextField
+                    fullWidth
+                    type="number"
+                    label="Change Week"
+                    name="change_week"
+                    value={formData.demand_pattern.params?.change_week ?? DEFAULT_CLASSIC_PARAMS.change_week}
+                    onChange={(e) => {
+                      const parsed = parseInt(e.target.value, 10);
+                      setFormData({
+                        ...formData,
+                        demand_pattern: {
+                          ...formData.demand_pattern,
+                          params: {
+                            ...formData.demand_pattern.params,
+                            change_week: Number.isNaN(parsed) ? 1 : Math.max(1, parsed),
                           },
                         },
                       });
@@ -559,24 +615,24 @@ const GamesList = () => {
                   <TextField
                     fullWidth
                     type="number"
-                    label="Step Increase"
-                    name="step_increase"
-                    value={formData.demand_pattern.params?.step_increase || 4}
+                    label="Final Demand"
+                    name="final_demand"
+                    value={formData.demand_pattern.params?.final_demand ?? DEFAULT_CLASSIC_PARAMS.final_demand}
                     onChange={(e) => {
-                      const value = e.target.value;
+                      const parsed = parseInt(e.target.value, 10);
                       setFormData({
                         ...formData,
                         demand_pattern: {
                           ...formData.demand_pattern,
                           params: {
                             ...formData.demand_pattern.params,
-                            step_increase: parseInt(value) || 4,
+                            final_demand: Number.isNaN(parsed) ? 0 : Math.max(0, parsed),
                           },
                         },
                       });
                     }}
                     margin="normal"
-                    inputProps={{ min: 1 }}
+                    inputProps={{ min: 0 }}
                   />
                 </Box>
               )}
