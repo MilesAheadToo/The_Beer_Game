@@ -14,6 +14,24 @@ const roleOptions = [
   { value: 'factory', label: 'Factory' },
 ];
 
+const agentStrategyLabels = {
+  DAYBREAK_DTCE: 'Daybreak - Roles',
+  DAYBREAK_DTCE_CENTRAL: 'Daybreak - Roles + Supervisor',
+  DAYBREAK_DTCE_GLOBAL: 'Daybreak - SC Orchestrator',
+};
+
+const resolveStrategyLabel = (player) => {
+  const raw = player?.agent_type ?? player?.ai_strategy ?? player?.strategy;
+  if (!raw) {
+    return '';
+  }
+  const key =
+    typeof raw === 'string'
+      ? raw.toUpperCase()
+      : String(raw?.value ?? raw?.name ?? '').toUpperCase();
+  return agentStrategyLabels[key] ? ` – ${agentStrategyLabels[key]}` : '';
+};
+
 const PlayersPage = () => {
   const toast = useToast();
   const [games, setGames] = useState([]);
@@ -187,8 +205,9 @@ const PlayersPage = () => {
                   <FormControl>
                     <FormLabel>Agent Type</FormLabel>
                     <Select value={form.agent_type} onChange={(e) => setForm({ ...form, agent_type: e.target.value })}>
-                      <option value="DAYBREAK_DTCE">Daybreak Agent - DTCE</option>
-                      <option value="DAYBREAK_DTCE_CENTRAL">Daybreak Agent - DTCE + Central Override</option>
+                      <option value="DAYBREAK_DTCE">Daybreak - Roles</option>
+                      <option value="DAYBREAK_DTCE_CENTRAL">Daybreak - Roles + Supervisor</option>
+                      <option value="DAYBREAK_DTCE_GLOBAL">Daybreak - SC Orchestrator</option>
                       <option value="LLM_BALANCED">LLM - Balanced</option>
                       <option value="LLM_CONSERVATIVE">LLM - Conservative</option>
                       <option value="LLM_AGGRESSIVE">LLM - Aggressive</option>
@@ -223,7 +242,11 @@ const PlayersPage = () => {
                       <HStack justify="space-between">
                         <Text fontWeight="600">{p.name}</Text>
                         <Text textTransform="capitalize" color="gray.600">{p.role.toLowerCase()}</Text>
-                        <Text color="gray.600">{p.player_type === 'agent' || p.is_ai ? 'AI' : 'Human'}</Text>
+                        <Text color="gray.600">
+                          {p.player_type === 'agent' || p.is_ai
+                            ? `AI${resolveStrategyLabel(p)}`
+                            : 'Human'}
+                        </Text>
                         {p.user_id && <Text color="gray.500">User #{p.user_id}</Text>}
                       </HStack>
                     </Box>
