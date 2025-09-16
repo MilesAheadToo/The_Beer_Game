@@ -2,6 +2,7 @@ import React from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Box, CircularProgress } from '@mui/material';
+import { buildLoginRedirectPath } from '../utils/authUtils';
 
 // Unified ProtectedRoute with optional role checks and children support
 function ProtectedRoute({ children, allowedRoles = [] }) {
@@ -17,8 +18,7 @@ function ProtectedRoute({ children, allowedRoles = [] }) {
   }
 
   if (!isAuthenticated) {
-    const back = encodeURIComponent(location.pathname + location.search);
-    return <Navigate to={`/login?redirect=${back}`} replace />;
+    return <Navigate to={buildLoginRedirectPath(location)} replace />;
   }
 
   if (allowedRoles.length > 0 && !hasAnyRole(allowedRoles)) {

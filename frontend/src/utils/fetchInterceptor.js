@@ -1,3 +1,5 @@
+import { buildLoginRedirectPath } from './authUtils';
+
 // Save the original fetch
 const nativeFetch = window.fetch;
 
@@ -20,8 +22,11 @@ window.fetch = async function(input, init = {}) {
     // Avoid redirect loops if we're already on the login page
     const isLoginPage = window.location.pathname.startsWith('/login');
     if (response.status === 401 && !isAuth && !isLoginPage) {
-      const back = encodeURIComponent(window.location.pathname + window.location.search);
-      window.location.replace(`/login?redirect=${back}`);
+      const loginPath = buildLoginRedirectPath({
+        pathname: window.location.pathname,
+        search: window.location.search,
+      });
+      window.location.replace(loginPath);
       return new Response(null, { status: 401, statusText: 'Unauthorized' });
     }
 

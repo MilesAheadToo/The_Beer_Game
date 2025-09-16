@@ -67,3 +67,39 @@ export const getDefaultLandingPath = (user) => {
 
   return '/dashboard';
 };
+
+/**
+ * Builds the appropriate login URL for redirecting an unauthenticated user.
+ * Avoids appending a redirect back to the root route (`/`) so that the
+ * application doesn't appear to "recycle" to `/login?redirect=%2F` on first
+ * load. Accepts either a React Router location object or a path string.
+ */
+export const buildLoginRedirectPath = (locationLike) => {
+  if (!locationLike) {
+    return '/login';
+  }
+
+  let pathname = '/';
+  let search = '';
+
+  if (typeof locationLike === 'string') {
+    const withoutHash = locationLike.split('#')[0] || '/';
+    const [pathPart, searchPart] = withoutHash.split('?');
+    pathname = pathPart.startsWith('/') ? pathPart : `/${pathPart}`;
+    search = searchPart ? `?${searchPart}` : '';
+  } else {
+    pathname = locationLike.pathname || '/';
+    search = locationLike.search || '';
+  }
+
+  pathname = pathname.startsWith('/') ? pathname : `/${pathname}`;
+
+  const shouldIncludeRedirect = !(pathname === '/' && !search);
+
+  if (!shouldIncludeRedirect) {
+    return '/login';
+  }
+
+  const target = `${pathname}${search}`;
+  return `/login?redirect=${encodeURIComponent(target)}`;
+};
