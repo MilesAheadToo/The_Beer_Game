@@ -1,6 +1,6 @@
-import api from './api';
+import { api } from './api';
 
-const GAME_BASE_URL = '/api/v1/games';
+const GAME_BASE_URL = '/games';
 
 // Game CRUD operations
 export const createGame = async (gameData) => {

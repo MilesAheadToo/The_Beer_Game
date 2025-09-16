@@ -29,10 +29,9 @@ import {
   Save as SaveIcon,
   ArrowBack as ArrowBackIcon
 } from '@mui/icons-material';
-import { useFormik } from 'formik';
-import * as Yup from 'yup';
+import { useFormik } from '../../hooks/useFormik';
 import { useSnackbar } from 'notistack';
-import api from '../../services/api';
+import { api } from '../../services/api';
 
 // Import services
 import {
@@ -108,6 +107,22 @@ const SupplyChainConfigForm = ({
   const [groupsError, setGroupsError] = useState(null);
 
   // Formik form
+  const validateForm = useCallback((values) => {
+    const errors = {};
+    if (!values.name || !values.name.trim()) {
+      errors.name = 'Name is required';
+    }
+
+    if (allowGroupSelection) {
+      const groupValue = values.group_id ?? '';
+      if (!String(groupValue).trim()) {
+        errors.group_id = 'Group is required';
+      }
+    }
+
+    return errors;
+  }, [allowGroupSelection]);
+
   const formik = useFormik({
     initialValues: {
       name: '',
@@ -115,14 +130,7 @@ const SupplyChainConfigForm = ({
       is_active: false,
       group_id: defaultGroupId ? String(defaultGroupId) : '',
     },
-    validationSchema: Yup.object({
-      name: Yup.string().required('Name is required'),
-      description: Yup.string(),
-      is_active: Yup.boolean(),
-      ...(allowGroupSelection
-        ? { group_id: Yup.string().required('Group is required') }
-        : {}),
-    }),
+    validate: validateForm,
     onSubmit: async (values) => {
       try {
         setLoading(true);
@@ -171,7 +179,7 @@ const SupplyChainConfigForm = ({
     const loadGroups = async () => {
       try {
         setGroupsLoading(true);
-        const response = await api.get('/api/v1/groups');
+        const response = await api.get('/groups');
         if (!isMounted) return;
         setGroups(response.data || []);
         setGroupsError(null);

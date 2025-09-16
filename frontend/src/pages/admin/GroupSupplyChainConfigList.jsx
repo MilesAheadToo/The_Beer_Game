@@ -38,6 +38,7 @@ const GroupSupplyChainConfigList = () => {
       title="My Group's Supply Chain Configurations"
       basePath="/admin/group/supply-chain-configs"
       restrictToGroupId={restrictToGroupId}
+      enableTraining
     />
   );
 };

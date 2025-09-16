@@ -1,6 +1,6 @@
-import api from './api';
+import { api } from './api';
 
-const SUPPLY_CHAIN_CONFIG_BASE_URL = '/api/v1/supply-chain-config';
+const SUPPLY_CHAIN_CONFIG_BASE_URL = '/supply-chain-config';
 
 // Supply Chain Config CRUD
 export const getSupplyChainConfigs = async () => {
@@ -25,6 +25,11 @@ export const updateSupplyChainConfig = async (id, configData) => {
 
 export const deleteSupplyChainConfig = async (id) => {
   await api.delete(`${SUPPLY_CHAIN_CONFIG_BASE_URL}/${id}`);
+};
+
+export const trainSupplyChainConfig = async (configId, options = {}) => {
+  const response = await api.post(`${SUPPLY_CHAIN_CONFIG_BASE_URL}/${configId}/train`, options);
+  return response.data;
 };
 
 // Items CRUD

@@ -16,9 +16,8 @@ import {
   Divider
 } from '@mui/material';
 import { Save, Delete } from '@mui/icons-material';
-import { useFormik } from 'formik';
-import * as Yup from 'yup';
-import api from '../../services/api';
+import { useFormik } from '../../hooks/useFormik';
+import { api } from '../../services/api';
 
 const agentTypes = [
   { value: 'base', label: 'Base Agent' },
@@ -26,18 +25,19 @@ const agentTypes = [
   { value: 'reinforcement_learning', label: 'Reinforcement Learning' },
 ];
 
-const validationSchema = Yup.object({
-  role: Yup.string().required('Required'),
-  agent_type: Yup.string().required('Required'),
-  config: Yup.object().test(
-    'config-validation',
-    'Invalid configuration',
-    function(value) {
-      // Add specific validation based on agent_type if needed
-      return true;
-    }
-  )
-});
+const validate = (values) => {
+  const errors = {};
+
+  if (!values.role) {
+    errors.role = 'Required';
+  }
+
+  if (!values.agent_type) {
+    errors.agent_type = 'Required';
+  }
+
+  return errors;
+};
 
 const AgentConfigForm = ({ gameId, configId, onSuccess }) => {
   const [loading, setLoading] = useState(!!configId);
@@ -50,7 +50,7 @@ const AgentConfigForm = ({ gameId, configId, onSuccess }) => {
       agent_type: 'base',
       config: {}
     },
-    validationSchema,
+    validate,
     onSubmit: async (values) => {
       try {
         setError(null);
@@ -60,9 +60,9 @@ const AgentConfigForm = ({ gameId, configId, onSuccess }) => {
         };
         
         if (configId) {
-          await api.put(`/api/agent-configs/${configId}`, data);
+          await api.put(`/agent-configs/${configId}`, data);
         } else {
-          await api.post('/api/agent-configs', data);
+          await api.post('/agent-configs', data);
         }
         
         if (onSuccess) onSuccess();
@@ -77,12 +77,12 @@ const AgentConfigForm = ({ gameId, configId, onSuccess }) => {
     const fetchData = async () => {
       try {
         // Fetch available roles
-        const rolesRes = await api.get(`/api/games/${gameId}/available-roles`);
+        const rolesRes = await api.get(`/games/${gameId}/available-roles`);
         setAvailableRoles(rolesRes.data);
 
         // If editing, load the config
         if (configId) {
-          const configRes = await api.get(`/api/agent-configs/${configId}`);
+          const configRes = await api.get(`/agent-configs/${configId}`);
           formik.setValues(configRes.data);
         }
       } catch (err) {
@@ -264,7 +264,7 @@ const AgentConfigForm = ({ gameId, configId, onSuccess }) => {
                     onClick={async () => {
                       if (window.confirm('Are you sure you want to delete this configuration?')) {
                         try {
-                          await api.delete(`/api/agent-configs/${configId}`);
+                          await api.delete(`/agent-configs/${configId}`);
                           if (onSuccess) onSuccess();
                         } catch (err) {
                           setError('Failed to delete configuration');

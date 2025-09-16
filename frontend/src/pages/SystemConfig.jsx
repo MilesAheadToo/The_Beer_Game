@@ -80,7 +80,7 @@ export default function SystemConfig() {
       }
   
       try {
-        const res = await api.get('/api/v1/supply-chain-config');
+        const res = await api.get('/supply-chain-config');
         const list = res.data || [];
         setConfigs(list);
         const match = list.find((cfg) => cfg.name === cfgName);

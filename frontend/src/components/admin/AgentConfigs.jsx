@@ -20,7 +20,7 @@ import {
   Alert
 } from '@mui/material';
 import { Add as AddIcon, Edit as EditIcon, Delete as DeleteIcon } from '@mui/icons-material';
-import api from '../../services/api';
+import { api } from '../../services/api';
 import AgentConfigForm from './AgentConfigForm';
 
 const AgentConfigs = ({ gameId }) => {
@@ -33,7 +33,7 @@ const AgentConfigs = ({ gameId }) => {
   const fetchConfigs = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await api.get(`/api/games/${gameId}/agent-configs`);
+      const response = await api.get(`/games/${gameId}/agent-configs`);
       setConfigs(response.data);
       setError(null);
     } catch (err) {
@@ -51,7 +51,7 @@ const AgentConfigs = ({ gameId }) => {
   const handleDelete = async (id) => {
     if (window.confirm('Are you sure you want to delete this configuration?')) {
       try {
-        await api.delete(`/api/agent-configs/${id}`);
+        await api.delete(`/agent-configs/${id}`);
         setConfigs(configs.filter(config => config.id !== id));
       } catch (err) {
         setError('Failed to delete configuration');

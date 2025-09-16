@@ -1,6 +1,15 @@
+import hashlib
+import json
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
 from typing import List, Optional, Dict, Any, Iterable, Set
+
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, status, Body
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session, joinedload
 
 from app import crud, models, schemas
 from app.api import deps
@@ -8,8 +17,34 @@ from app.core.config import settings
 from app.services.supply_chain_config_service import SupplyChainConfigService
 from app.models.supply_chain_config import NodeType, SupplyChainConfig
 from app.schemas.game import GameCreate
+from app.rl.data_generator import generate_sim_training_windows
 
 router = APIRouter()
+
+BACKEND_ROOT = Path(__file__).resolve().parents[3]
+TRAINING_ROOT = BACKEND_ROOT / "training_jobs"
+MODEL_ROOT = BACKEND_ROOT / "checkpoints" / "supply_chain_configs"
+
+
+class ConfigTrainingRequest(BaseModel):
+    num_runs: int = Field(32, ge=4, le=512, description="Number of simulation runs to generate")
+    T: int = Field(64, ge=16, le=512, description="Number of periods in each simulation run")
+    window: int = Field(12, ge=1, le=128, description="Input window length for training samples")
+    horizon: int = Field(1, ge=1, le=8, description="Forecast horizon for the temporal model")
+    epochs: int = Field(5, ge=1, le=500, description="Training epochs for the temporal GNN")
+    device: Optional[str] = Field(None, description="Optional device hint passed to the trainer (e.g. 'cpu', 'cuda')")
+    use_simpy: Optional[bool] = Field(None, description="Override simulator backend; defaults to environment setting")
+    sim_alpha: Optional[float] = Field(0.3, ge=0.0, le=1.0, description="Smoothing factor for SimPy simulator")
+    sim_wip_k: Optional[float] = Field(1.0, ge=0.0, le=10.0, description="WIP gain parameter for SimPy simulator")
+
+
+class ConfigTrainingResponse(BaseModel):
+    status: str
+    message: str
+    dataset_path: str
+    model_path: str
+    trained_at: Optional[datetime]
+    log: str
 
 # --- Helper functions ---
 
@@ -98,6 +133,196 @@ def _ensure_user_can_manage_config(
             detail="You do not have access to this configuration",
         )
 
+
+def _json_default(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def _compute_config_hash(db: Session, config_id: int) -> Optional[str]:
+    config = crud.supply_chain_config.get(db, id=config_id)
+    if not config:
+        return None
+
+    items = crud.item.get_multi_by_config(db, config_id=config_id, limit=1000)
+    nodes = crud.node.get_multi_by_config(db, config_id=config_id, limit=1000)
+    lanes = crud.lane.get_by_config(db, config_id=config_id)
+    item_node_configs = crud.item_node_config.get_by_config(db, config_id=config_id)
+    market_demands = crud.market_demand.get_by_config(db, config_id=config_id)
+
+    payload = {
+        "config": {
+            "name": config.name,
+            "description": config.description,
+            "is_active": bool(config.is_active),
+            "group_id": config.group_id,
+        },
+        "items": [
+            {
+                "name": item.name,
+                "unit_cost_range": item.unit_cost_range,
+            }
+            for item in sorted(items, key=lambda obj: obj.id)
+        ],
+        "nodes": [
+            {
+                "name": node.name,
+                "type": getattr(node.type, "value", str(node.type)),
+            }
+            for node in sorted(nodes, key=lambda obj: obj.id)
+        ],
+        "lanes": [
+            {
+                "upstream": lane.upstream_node_id,
+                "downstream": lane.downstream_node_id,
+                "capacity": lane.capacity,
+                "lead_time_days": lane.lead_time_days,
+            }
+            for lane in sorted(lanes, key=lambda obj: obj.id)
+        ],
+        "item_node_configs": [
+            {
+                "item_id": inc.item_id,
+                "node_id": inc.node_id,
+                "inventory_target_range": inc.inventory_target_range,
+                "initial_inventory_range": inc.initial_inventory_range,
+                "holding_cost_range": inc.holding_cost_range,
+                "backlog_cost_range": inc.backlog_cost_range,
+                "selling_price_range": inc.selling_price_range,
+            }
+            for inc in sorted(item_node_configs, key=lambda obj: obj.id)
+        ],
+        "market_demands": [
+            {
+                "item_id": md.item_id,
+                "retailer_id": md.retailer_id,
+                "demand_pattern": md.demand_pattern,
+            }
+            for md in sorted(market_demands, key=lambda obj: obj.id)
+        ],
+    }
+
+    encoded = json.dumps(payload, sort_keys=True, default=_json_default)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _mark_config_requires_training(
+    db: Session,
+    config: SupplyChainConfig,
+    status_label: str = "pending",
+) -> SupplyChainConfig:
+    config.needs_training = True
+    config.training_status = status_label
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+    return config
+
+
+def _set_training_outcome(
+    db: Session,
+    config: SupplyChainConfig,
+    *,
+    status_label: str,
+    needs_training: bool,
+    trained_at: Optional[datetime] = None,
+    model_path: Optional[str] = None,
+    config_hash: Optional[str] = None,
+) -> SupplyChainConfig:
+    config.training_status = status_label
+    config.needs_training = needs_training
+    config.trained_at = trained_at
+    config.trained_model_path = model_path
+    config.last_trained_config_hash = config_hash
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+    return config
+
+
+def _generate_training_dataset(
+    config_id: int,
+    params: ConfigTrainingRequest,
+) -> Dict[str, Any]:
+    TRAINING_ROOT.mkdir(parents=True, exist_ok=True)
+
+    X, A, P, Y = generate_sim_training_windows(
+        num_runs=int(params.num_runs),
+        T=int(params.T),
+        window=int(params.window),
+        horizon=int(params.horizon),
+        supply_chain_config_id=config_id,
+        db_url=settings.SQLALCHEMY_DATABASE_URI or None,
+        use_simpy=params.use_simpy,
+        sim_alpha=float(params.sim_alpha) if params.sim_alpha is not None else 0.3,
+        sim_wip_k=float(params.sim_wip_k) if params.sim_wip_k is not None else 1.0,
+    )
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    dataset_path = TRAINING_ROOT / f"dataset_cfg{config_id}_{timestamp}.npz"
+    np.savez(dataset_path, X=X, A=A, P=P, Y=Y)
+
+    return {
+        "path": str(dataset_path),
+        "samples": int(X.shape[0]),
+        "window": int(params.window),
+        "horizon": int(params.horizon),
+    }
+
+
+def _run_training_process(
+    config_id: int,
+    dataset_path: Path,
+    params: ConfigTrainingRequest,
+) -> Dict[str, Any]:
+    MODEL_ROOT.mkdir(parents=True, exist_ok=True)
+    model_dir = MODEL_ROOT / f"config_{config_id}"
+    model_dir.mkdir(parents=True, exist_ok=True)
+
+    model_path = model_dir / "temporal_gnn.pt"
+    log_path = model_dir / f"train_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.log"
+    script_path = BACKEND_ROOT / "scripts" / "training" / "train_gnn.py"
+
+    cmd = [
+        sys.executable,
+        str(script_path),
+        "--source",
+        "sim",
+        "--window",
+        str(params.window),
+        "--horizon",
+        str(params.horizon),
+        "--epochs",
+        str(params.epochs),
+        "--save-path",
+        str(model_path),
+        "--dataset",
+        str(dataset_path),
+    ]
+    if params.device:
+        cmd.extend(["--device", params.device])
+
+    try:
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+        stdout = result.stdout or ""
+        stderr = result.stderr or ""
+        log_output = stdout + ("\n" + stderr if stderr else "")
+    except subprocess.CalledProcessError as exc:
+        stdout = exc.stdout or ""
+        stderr = exc.stderr or ""
+        log_output = stdout + ("\n" + stderr if stderr else "")
+        log_path.write_text(log_output)
+        raise RuntimeError(log_output.strip() or str(exc)) from exc
+
+    log_path.write_text(log_output)
+
+    return {
+        "model_path": str(model_path),
+        "log": log_output,
+        "log_path": str(log_path),
+        "command": cmd,
+    }
 # --- Configuration Endpoints ---
 
 @router.get("/", response_model=List[schemas.SupplyChainConfig])
@@ -200,7 +425,7 @@ def create_config(
         db.refresh(cfg)
     except Exception:
         pass
-    return cfg
+    return _mark_config_requires_training(db, cfg)
 
 @router.get("/{config_id}", response_model=schemas.SupplyChainConfig)
 def read_config(
@@ -248,7 +473,83 @@ def update_config(
             )
         update_data.pop("group_id", None)
 
-    return crud.supply_chain_config.update(db, db_obj=config, obj_in=update_data)
+    updated = crud.supply_chain_config.update(db, db_obj=config, obj_in=update_data)
+    changed_keys = set(update_data.keys())
+    if not changed_keys or changed_keys <= {"is_active"}:
+        return updated
+    return _mark_config_requires_training(db, updated)
+
+
+@router.post("/{config_id}/train", response_model=ConfigTrainingResponse)
+def train_supply_chain_config(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    params: ConfigTrainingRequest = Body(default_factory=ConfigTrainingRequest),
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    """Generate synthetic training data and train the temporal GNN for a configuration."""
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+
+    if config.training_status == "in_progress":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Training is already running for this configuration.",
+        )
+
+    dataset_info = _generate_training_dataset(config_id, params)
+
+    # Mark as in progress before launching the trainer
+    _set_training_outcome(
+        db,
+        config,
+        status_label="in_progress",
+        needs_training=False,
+        trained_at=None,
+        model_path=config.trained_model_path,
+        config_hash=config.last_trained_config_hash,
+    )
+
+    try:
+        training_info = _run_training_process(
+            config_id,
+            Path(dataset_info["path"]),
+            params,
+        )
+        config_hash = _compute_config_hash(db, config_id)
+        updated = _set_training_outcome(
+            db,
+            config,
+            status_label="trained",
+            needs_training=False,
+            trained_at=datetime.utcnow(),
+            model_path=training_info["model_path"],
+            config_hash=config_hash,
+        )
+    except Exception as exc:  # noqa: BLE001 - surface training failure to client
+        _set_training_outcome(
+            db,
+            config,
+            status_label="failed",
+            needs_training=True,
+            trained_at=config.trained_at,
+            model_path=config.trained_model_path,
+            config_hash=config.last_trained_config_hash,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Training failed: {exc}",
+        ) from exc
+
+    return ConfigTrainingResponse(
+        status=updated.training_status,
+        message="Training completed successfully.",
+        dataset_path=dataset_info["path"],
+        model_path=updated.trained_model_path or training_info["model_path"],
+        trained_at=updated.trained_at,
+        log=training_info["log"],
+    )
 
 @router.delete("/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_config(
@@ -297,7 +598,9 @@ def create_item(
             detail="An item with this name already exists in this configuration"
         )
 
-    return crud.item.create_with_config(db, obj_in=item_in, config_id=config_id)
+    created = crud.item.create_with_config(db, obj_in=item_in, config_id=config_id)
+    _mark_config_requires_training(db, config)
+    return created
 
 # ... (Additional endpoints for items, nodes, lanes, item_node_configs, and market_demands)
 # The full implementation would include similar CRUD endpoints for all models
@@ -341,7 +644,9 @@ def create_node(
             detail="A node with this name and type already exists in this configuration"
         )
     
-    return crud.node.create_with_config(db, obj_in=node_in, config_id=config_id)
+    created = crud.node.create_with_config(db, obj_in=node_in, config_id=config_id)
+    _mark_config_requires_training(db, config)
+    return created
 
 # --- Game Integration Endpoints ---
 

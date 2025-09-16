@@ -169,6 +169,23 @@ class SupplyChainConfig(SupplyChainConfigBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    needs_training: bool = Field(True, description="Whether the configuration requires retraining")
+    training_status: Optional[str] = Field(
+        None,
+        description="Human-readable status for the most recent training job",
+    )
+    trained_at: Optional[datetime] = Field(
+        None,
+        description="Timestamp of the last successful training run",
+    )
+    trained_model_path: Optional[str] = Field(
+        None,
+        description="Filesystem path to the most recent trained model",
+    )
+    last_trained_config_hash: Optional[str] = Field(
+        None,
+        description="Hash of the configuration when it was last trained",
+    )
     items: List[Item] = []
     nodes: List[Node] = []
     lanes: List[Lane] = []

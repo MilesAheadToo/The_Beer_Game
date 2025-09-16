@@ -80,7 +80,7 @@ function GroupPlayerManagement() {
 
   const loadGroups = useCallback(async () => {
     try {
-      const response = await api.get('/api/v1/groups');
+      const response = await api.get('/groups');
       const data = Array.isArray(response.data) ? response.data : [];
       setGroups(data);
       return data;
@@ -98,7 +98,7 @@ function GroupPlayerManagement() {
     }
 
     try {
-      const response = await api.get('/api/v1/users', {
+      const response = await api.get('/users', {
         params: { limit: 250, user_type: 'player' },
       });
       const data = Array.isArray(response.data) ? response.data : [];
@@ -203,10 +203,10 @@ function GroupPlayerManagement() {
     setSaving(true);
     try {
       if (editingUser) {
-        await api.put(`/api/v1/users/${editingUser.id}`, payload);
+        await api.put(`/users/${editingUser.id}`, payload);
         toast.success('Player updated successfully');
       } else {
-        await api.post('/api/v1/users', payload);
+        await api.post('/users', payload);
         toast.success('Player created successfully');
       }
 
@@ -226,7 +226,7 @@ function GroupPlayerManagement() {
     if (!window.confirm(confirmMessage)) return;
 
     try {
-      await api.delete(`/api/v1/users/${player.id}`);
+      await api.delete(`/users/${player.id}`);
       toast.success('Player deleted');
       await loadPlayers();
     } catch (error) {

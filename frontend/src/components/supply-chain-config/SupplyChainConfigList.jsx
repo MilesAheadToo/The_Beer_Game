@@ -38,15 +38,21 @@ import {
   ContentCopy as CopyIcon,
   MoreVert as MoreVertIcon,
   SportsEsports as GameIcon,
+  PlayArrow as TrainIcon,
+  HourglassBottom as InProgressIcon,
+  ErrorOutline as ErrorIcon,
+  CheckCircleOutline as TrainedIcon,
 } from '@mui/icons-material';
 import { useSnackbar } from 'notistack';
 import { format } from 'date-fns';
-import api from '../../services/api';
+import { api } from '../../services/api';
+import { trainSupplyChainConfig } from '../../services/supplyChainConfigService';
 
 const SupplyChainConfigList = ({
   title = 'Supply Chain Configurations',
   basePath = '/supply-chain-config',
   restrictToGroupId = null,
+  enableTraining = false,
 } = {}) => {
 
   const [configs, setConfigs] = useState([]);
@@ -57,6 +63,7 @@ const SupplyChainConfigList = ({
   const [anchorEl, setAnchorEl] = useState(null);
   const [selectedConfig, setSelectedConfig] = useState(null);
   const [activatingConfig, setActivatingConfig] = useState(null);
+  const [trainingStatus, setTrainingStatus] = useState({});
 
   const navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar();
@@ -70,10 +77,92 @@ const SupplyChainConfigList = ({
     }
   };
 
+  const normalizedStatus = (config) => String(config?.training_status || '').toLowerCase();
+
+  const isTrainingActive = (config) => {
+    if (!config) return false;
+    if (trainingStatus[config.id]?.inProgress) return true;
+    return normalizedStatus(config) === 'in_progress';
+  };
+
+  const canTrainConfig = (config) => {
+    if (!enableTraining || !config) return false;
+    if (isTrainingActive(config)) return false;
+    const status = normalizedStatus(config);
+    if (config.needs_training) return true;
+    if (status === 'failed' || status === 'error') return true;
+    return false;
+  };
+
+  const renderTrainingChip = (config) => {
+    const status = normalizedStatus(config);
+    let trainedAt = null;
+    if (config?.trained_at) {
+      try {
+        trainedAt = format(new Date(config.trained_at), 'MMM d, yyyy HH:mm');
+      } catch (err) {
+        trainedAt = null;
+      }
+    }
+
+    if (trainingStatus[config?.id]?.inProgress || status === 'in_progress') {
+      return (
+        <Chip
+          icon={<InProgressIcon />}
+          label="Training…"
+          color="info"
+          size="small"
+        />
+      );
+    }
+
+    if (config?.needs_training) {
+      return (
+        <Chip
+          icon={<InProgressIcon />}
+          label="Needs training"
+          color="warning"
+          size="small"
+        />
+      );
+    }
+
+    if (status === 'failed' || status === 'error') {
+      return (
+        <Chip
+          icon={<ErrorIcon />}
+          label="Training failed"
+          color="error"
+          size="small"
+        />
+      );
+    }
+
+    if (status === 'trained' || status === 'complete' || !config?.needs_training) {
+      return (
+        <Chip
+          icon={<TrainedIcon />}
+          label={trainedAt ? `Trained • ${trainedAt}` : 'Trained'}
+          color="success"
+          size="small"
+        />
+      );
+    }
+
+    return (
+      <Chip
+        icon={<InProgressIcon />}
+        label={status ? status.replace(/_/g, ' ') : 'Status unknown'}
+        color="default"
+        size="small"
+      />
+    );
+  };
+
   const fetchConfigs = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await api.get('/api/v1/supply-chain-config');
+      const response = await api.get('/supply-chain-config');
       const data = response.data || [];
       const targetGroupId =
         restrictToGroupId !== null && restrictToGroupId !== undefined
@@ -122,7 +211,7 @@ const SupplyChainConfigList = ({
     if (!configToDelete) return;
 
     try {
-      await api.delete(`/api/v1/supply-chain-config/${configToDelete.id}`);
+      await api.delete(`/supply-chain-config/${configToDelete.id}`);
       enqueueSnackbar('Configuration deleted successfully', { variant: 'success' });
       await fetchConfigs();
     } catch (err) {
@@ -156,7 +245,7 @@ const SupplyChainConfigList = ({
 
     try {
       setActivatingConfig(configId);
-      await api.put(`/api/v1/supply-chain-config/${configId}`, { is_active: true });
+      await api.put(`/supply-chain-config/${configId}`, { is_active: true });
       enqueueSnackbar('Configuration activated successfully', { variant: 'success' });
       await fetchConfigs();
     } catch (err) {
@@ -173,7 +262,7 @@ const SupplyChainConfigList = ({
 
     try {
       const { id, created_at, updated_at, is_active, ...configData } = config;
-      await api.post('/api/v1/supply-chain-config', {
+      await api.post('/supply-chain-config', {
         ...configData,
         group_id: config.group_id ?? configData.group_id ?? null,
         name: `${config.name} (Copy)`,
@@ -189,11 +278,30 @@ const SupplyChainConfigList = ({
     }
   };
 
+  const handleTrainConfig = async (config) => {
+    if (!config || !enableTraining) return;
+    const configId = config.id;
+    setTrainingStatus((prev) => ({ ...prev, [configId]: { inProgress: true } }));
+
+    try {
+      const response = await trainSupplyChainConfig(configId, {});
+      const message = response?.message || 'Training completed successfully';
+      enqueueSnackbar(message, { variant: 'success' });
+    } catch (err) {
+      const detail = err?.response?.data?.detail || err?.message || 'Failed to train configuration';
+      enqueueSnackbar(detail, { variant: 'error' });
+    } finally {
+      setTrainingStatus((prev) => ({ ...prev, [configId]: { inProgress: false } }));
+      await fetchConfigs();
+      handleMenuClose();
+    }
+  };
+
   const renderTableBody = () => {
     if (configs.length === 0) {
       return (
         <TableRow>
-          <TableCell colSpan={6} align="center">
+          <TableCell colSpan={enableTraining ? 7 : 6} align="center">
             {loading ? (
               <CircularProgress size={24} />
             ) : (
@@ -248,6 +356,9 @@ const SupplyChainConfigList = ({
             </TableCell>
             <TableCell>{formatDate(config.created_at)}</TableCell>
             <TableCell>{formatDate(config.updated_at)}</TableCell>
+            {enableTraining && (
+              <TableCell>{renderTrainingChip(config)}</TableCell>
+            )}
             <TableCell align="right">
               <Tooltip title="Edit">
                 <IconButton size="small" onClick={() => handleEdit(config.id)}>
@@ -276,7 +387,7 @@ const SupplyChainConfigList = ({
         ))}
         {loading && (
           <TableRow>
-            <TableCell colSpan={6} align="center">
+            <TableCell colSpan={enableTraining ? 7 : 6} align="center">
               <CircularProgress size={20} />
             </TableCell>
           </TableRow>
@@ -341,6 +452,9 @@ const SupplyChainConfigList = ({
                               sx={{ ml: 1 }}
                               icon={<ActiveIcon />}
                             />
+                          )}
+                          {enableTraining && (
+                            <Box ml={1}>{renderTrainingChip(config)}</Box>
                           )}
                         </Box>
                         <Typography variant="body2" color="textSecondary">
@@ -413,6 +527,7 @@ const SupplyChainConfigList = ({
                 <TableCell>Status</TableCell>
                 <TableCell>Created</TableCell>
                 <TableCell>Updated</TableCell>
+                {enableTraining && <TableCell>Training</TableCell>}
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
             </TableHead>
@@ -432,6 +547,23 @@ const SupplyChainConfigList = ({
         >
           <EditIcon sx={{ mr: 1 }} fontSize="small" /> Edit
         </MenuItem>
+        {enableTraining && (
+          <MenuItem
+            onClick={() => {
+              if (selectedConfig) {
+                handleTrainConfig(selectedConfig);
+              }
+            }}
+            disabled={!canTrainConfig(selectedConfig)}
+          >
+            {isTrainingActive(selectedConfig) || trainingStatus[selectedConfig?.id]?.inProgress ? (
+              <CircularProgress size={20} sx={{ mr: 1 }} />
+            ) : (
+              <TrainIcon sx={{ mr: 1 }} fontSize="small" />
+            )}
+            Train
+          </MenuItem>
+        )}
         <MenuItem onClick={handleCreateGame}>
           <GameIcon sx={{ mr: 1 }} fontSize="small" /> Create Game
         </MenuItem>
