@@ -72,11 +72,46 @@ const agentStrategies = [
   {
     group: 'Daybreak',
     options: [
-      { value: 'DAYBREAK_DTCE', label: 'Daybreak Agent - Decentralized (DTCE)', requiresModel: true },
-      { value: 'DAYBREAK_DTCE_CENTRAL', label: 'Daybreak Agent - DTCE + Central Override', requiresModel: true },
+      { value: 'DAYBREAK_DTCE', label: 'Daybreak - Roles', requiresModel: true },
+      { value: 'DAYBREAK_DTCE_CENTRAL', label: 'Daybreak - Roles + Supervisor', requiresModel: true },
+      { value: 'DAYBREAK_DTCE_GLOBAL', label: 'Daybreak - SC Orchestrator', requiresModel: true },
     ]
   }
 ];
+
+const HUMAN_ASSIGNMENT = 'HUMAN';
+
+const strategyLabelMap = agentStrategies.reduce((acc, group) => {
+  group.options.forEach((option) => {
+    acc[option.value] = option.label;
+  });
+  return acc;
+}, {});
+
+const getStrategyLabel = (strategy) => strategyLabelMap[strategy] || strategy;
+
+const daybreakStrategyDescriptions = {
+  DAYBREAK_DTCE: 'Daybreak - Roles deploys one agent per supply chain role.',
+  DAYBREAK_DTCE_CENTRAL:
+    'Daybreak - Roles + Supervisor allows a network supervisor to adjust orders within the configured percentage.',
+  DAYBREAK_DTCE_GLOBAL: 'Daybreak - SC Orchestrator runs a single agent across the entire supply chain.',
+};
+
+const strategyDescriptions = {
+  NAIVE: 'Basic heuristic that matches orders to demand.',
+  BULLWHIP: 'Tends to overreact to demand changes.',
+  CONSERVATIVE: 'Maintains stable inventory levels.',
+  RANDOM: 'Makes random order decisions.',
+  DEMAND_DRIVEN: 'LLM: demand-driven analysis.',
+  COST_OPTIMIZATION: 'LLM: optimizes for lower cost.',
+  LLM_CONSERVATIVE: 'AI-powered strategy using language models.',
+  LLM_BALANCED: 'Advanced AI with learning capabilities.',
+  LLM_AGGRESSIVE: 'Aggressive AI strategy.',
+  LLM_ADAPTIVE: 'Adaptive AI strategy.',
+  DAYBREAK_DTCE: daybreakStrategyDescriptions.DAYBREAK_DTCE,
+  DAYBREAK_DTCE_CENTRAL: daybreakStrategyDescriptions.DAYBREAK_DTCE_CENTRAL,
+  DAYBREAK_DTCE_GLOBAL: daybreakStrategyDescriptions.DAYBREAK_DTCE_GLOBAL,
+};
 
 const demandPatterns = [
   { value: 'classic', label: 'Classic (Step Increase)' },
@@ -414,51 +449,69 @@ const CreateMixedGame = () => {
 
 
   const handlePlayerTypeChange = (index, type) => {
-    setPlayers(players.map((player, i) => {
-      if (i === index) {
+    setPlayers((prevPlayers) =>
+      prevPlayers.map((player, i) => {
+        if (i !== index) {
+          return player;
+        }
         const updatedPlayer = {
           ...player,
           playerType: type,
-          // Reset strategy when changing to human, set user ID if current user is available
-          ...(type === 'human' && {
-            strategy: agentStrategies[0].options[0].value,
-            // Only set the current user if this is the retailer or no user is selected yet
-            ...(player.role === 'retailer' && !player.userId && user && { userId: user.id })
-          })
         };
-        if (type === 'ai' && !updatedPlayer.llmModel) {
+        if (type === 'human') {
+          updatedPlayer.strategy = agentStrategies[0].options[0].value;
+          if (player.role === 'retailer' && !player.userId && user) {
+            updatedPlayer.userId = user.id;
+          }
+          updatedPlayer.daybreakOverridePct = undefined;
+        } else if (type === 'ai' && !updatedPlayer.llmModel) {
           updatedPlayer.llmModel = 'gpt-4o-mini';
         }
         return updatedPlayer;
-      }
-      return player;
-    }));
+      })
+    );
   };
 
-const handleStrategyChange = (index, strategy) => {
-    setPlayers(players.map((player, i) => {
-      if (i !== index) return player;
-      const updated = { ...player, strategy };
-      if (String(strategy).startsWith('LLM_') && !player.llmModel) {
-        updated.llmModel = 'gpt-4o-mini';
-      }
-      if (strategy === 'DAYBREAK_DTCE_CENTRAL') {
-        updated.daybreakOverridePct = clampOverridePercent(player.daybreakOverridePct);
-      }
-      return updated;
-    }));
+  const handleStrategyChange = (index, strategy) => {
+    setPlayers((prevPlayers) =>
+      prevPlayers.map((player, i) => {
+        if (i !== index) {
+          return player;
+        }
+        const updated = { ...player, strategy };
+        if (String(strategy).startsWith('LLM_') && !updated.llmModel) {
+          updated.llmModel = 'gpt-4o-mini';
+        }
+        if (strategy === 'DAYBREAK_DTCE_CENTRAL') {
+          const basePct = player.daybreakOverridePct ?? 5;
+          updated.daybreakOverridePct = clampOverridePercent(basePct);
+        }
+        return updated;
+      })
+    );
+  };
+
+  const handleAssignmentSelect = (index, assignmentValue) => {
+    if (assignmentValue === HUMAN_ASSIGNMENT) {
+      handlePlayerTypeChange(index, 'human');
+      return;
+    }
+    handlePlayerTypeChange(index, 'ai');
+    handleStrategyChange(index, assignmentValue);
   };
 
   const handleUserChange = (index, userId) => {
-    setPlayers(players.map((player, i) => 
-      i === index ? { ...player, userId: userId || null } : player
-    ));
+    setPlayers((prevPlayers) =>
+      prevPlayers.map((player, i) =>
+        i === index ? { ...player, userId: userId || null } : player
+      )
+    );
   };
 
   const handleCanSeeDemandChange = (index, canSeeDemand) => {
-    setPlayers(players.map((player, i) => 
-      i === index ? { ...player, canSeeDemand } : player
-    ));
+    setPlayers((prevPlayers) =>
+      prevPlayers.map((player, i) => (i === index ? { ...player, canSeeDemand } : player))
+    );
   };
 
   const handleSubmit = async (e) => {
@@ -1001,257 +1054,210 @@ const handleStrategyChange = (index, strategy) => {
                 </CardHeader>
                 <CardBody>
                   <VStack spacing={6} align="stretch">
-              {players.map((player, index) => (
-                <Box 
-                  key={player.role} 
-                  w="full"
-                  p={5} 
-                  borderWidth="1px"
-                  borderRadius="lg"
-                  borderColor={borderColor}
-                  bg={cardBg}
-                  _hover={{
-                    boxShadow: 'md',
-                    transform: 'translateY(-2px)',
-                    transition: 'all 0.2s',
-                  }}
-                >
-                  <HStack justify="space-between" mb={4}>
-                    <HStack>
-                      <Text fontSize="lg" fontWeight="semibold" textTransform="capitalize">
-                        {player.role}
-                      </Text>
-                      {player.role === 'retailer' && (
-                        <Badge colorScheme="blue" variant="subtle" borderRadius="full" px={2}>
-                          Required
-                        </Badge>
-                      )}
-                    </HStack>
-                    
-                    <HStack 
-                      spacing={0} 
-                      bg="gray.100" 
-                      p={1} 
-                      borderRadius="md"
-                      borderWidth="1px"
-                      borderColor="gray.200"
-                      _dark={{
-                        bg: 'gray.700',
-                        borderColor: 'gray.600'
-                      }}
-                    >
-                      <Button 
-                        size="sm" 
-                        variant={player.playerType === 'human' ? 'solid' : 'ghost'}
-                        colorScheme={player.playerType === 'human' ? 'blue' : 'gray'}
-                        onClick={() => handlePlayerTypeChange(index, 'human')}
-                        leftIcon={
-                          <Box 
-                            w={2} 
-                            h={2} 
-                            bg={player.playerType === 'human' ? 'white' : 'gray.500'} 
-                            borderRadius="full" 
-                          />
-                        }
-                        textTransform="none"
-                        fontWeight="500"
-                        borderRadius="md"
-                        flex={1}
-                        _active={{
-                          transform: 'none',
-                          bg: player.playerType === 'human' ? 'blue.600' : 'gray.200',
-                          _dark: {
-                            bg: player.playerType === 'human' ? 'blue.600' : 'gray.600'
-                          }
-                        }}
-                        _hover={{
-                          bg: player.playerType === 'human' ? 'blue.600' : 'gray.200',
-                          _dark: {
-                            bg: player.playerType === 'human' ? 'blue.600' : 'gray.600'
-                          }
-                        }}
-                      >
-                        Human
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant={player.playerType === 'ai' ? 'solid' : 'ghost'}
-                        colorScheme={player.playerType === 'ai' ? 'blue' : 'gray'}
-                        onClick={() => handlePlayerTypeChange(index, 'ai')}
-                        leftIcon={
-                          <Box 
-                            w={2} 
-                            h={2} 
-                            bg={player.playerType === 'ai' ? 'white' : 'gray.500'} 
-                            borderRadius="full" 
-                          />
-                        }
-                        textTransform="none"
-                        fontWeight="500"
-                        borderRadius="md"
-                        flex={1}
-                        _active={{
-                          transform: 'none',
-                          bg: player.playerType === 'ai' ? 'blue.600' : 'gray.200',
-                          _dark: {
-                            bg: player.playerType === 'ai' ? 'blue.600' : 'gray.600'
-                          }
-                        }}
-                        _hover={{
-                          bg: player.playerType === 'ai' ? 'blue.600' : 'gray.200',
-                          _dark: {
-                            bg: player.playerType === 'ai' ? 'blue.600' : 'gray.600'
-                          }
-                        }}
-                      >
-                        AI Agent
-                      </Button>
-                    </HStack>
-                  </HStack>
+              {players.map((player, index) => {
+                const assignmentValue =
+                  player.playerType === 'ai'
+                    ? player.strategy || agentStrategies[0].options[0].value
+                    : HUMAN_ASSIGNMENT;
+                const assignmentLabel =
+                  assignmentValue === HUMAN_ASSIGNMENT
+                    ? 'Human Player'
+                    : getStrategyLabel(assignmentValue);
+                const isDaybreakSelection =
+                  ['DAYBREAK_DTCE', 'DAYBREAK_DTCE_CENTRAL', 'DAYBREAK_DTCE_GLOBAL'].includes(assignmentValue);
+                const daybreakTrainingLocked =
+                  isDaybreakSelection && !(modelStatus && modelStatus.is_trained);
+                const descriptionText =
+                  assignmentValue === HUMAN_ASSIGNMENT
+                    ? 'Assign a participant to control this role.'
+                    : strategyDescriptions[assignmentValue] || 'AI agent will manage ordering for this role.';
+                const helperText = daybreakTrainingLocked
+                  ? `${descriptionText} Training must complete before using Daybreak agents.`
+                  : descriptionText;
 
-                  {player.playerType === 'ai' && (
-                    <FormControl mt={4}>
-                      <FormLabel>Agent Strategy</FormLabel>
-                      <Select 
-                        value={player.strategy}
-                        onChange={(e) => handleStrategyChange(index, e.target.value)}
-                        size="md"
-                        bg="white"
-                        _dark={{
-                          bg: 'gray.700',
-                          borderColor: 'gray.600',
-                          _hover: { borderColor: 'gray.500' },
-                          _focus: { borderColor: 'blue.500', boxShadow: '0 0 0 1px #3182ce' }
-                        }}
-                      >
-                        {agentStrategies.map((group, groupIndex) => (
-                          <optgroup key={groupIndex} label={group.group}>
-                            {group.options.map((option) => (
-                              <option
-                                key={option.value}
-                                value={option.value}
-                                disabled={option.requiresModel && !(modelStatus && modelStatus.is_trained)}
-                              >
-                                {option.label}
-                              </option>
-                            ))}
-                          </optgroup>
-                        ))}
-                      </Select>
-                      {/* LLM Picker */}
-                      {String(player.strategy).startsWith('LLM_') && (
-                        <Box mt={3}>
-                          <FormLabel>Choose LLM</FormLabel>
-                          <Select
-                            value={player.llmModel}
-                            onChange={(e) => setPlayers(players.map((p,i)=> i===index? { ...p, llmModel: e.target.value }: p))}
+                return (
+                  <Box
+                    key={player.role}
+                    w="full"
+                    p={5}
+                    borderWidth="1px"
+                    borderRadius="lg"
+                    borderColor={borderColor}
+                    bg={cardBg}
+                    _hover={{
+                      boxShadow: 'md',
+                      transform: 'translateY(-2px)',
+                      transition: 'all 0.2s',
+                    }}
+                  >
+                    <VStack align="stretch" spacing={4}>
+                      <HStack justify="space-between" align="flex-start">
+                        <HStack spacing={3} align="center">
+                          <Text fontSize="lg" fontWeight="semibold" textTransform="capitalize">
+                            {player.role}
+                          </Text>
+                          {player.role === 'retailer' && (
+                            <Badge colorScheme="blue" variant="subtle" borderRadius="full" px={2}>
+                              Required
+                            </Badge>
+                          )}
+                          <Badge
+                            colorScheme={assignmentValue === HUMAN_ASSIGNMENT ? 'green' : 'purple'}
+                            variant="subtle"
+                            borderRadius="full"
+                            px={2}
                           >
-                            <option value="gpt-4o">GPT-4o</option>
-                            <option value="gpt-4o-mini">GPT-4o Mini</option>
-                            <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
-                            <option value="claude-3-5-haiku">Claude 3.5 Haiku</option>
-                          </Select>
-                          <FormHelperText>Pick the LLM backend for this agent.</FormHelperText>
-                        </Box>
+                            {assignmentLabel}
+                          </Badge>
+                        </HStack>
+                      </HStack>
+
+                      <FormControl>
+                        <FormLabel>Assignment</FormLabel>
+                        <Select
+                          value={assignmentValue}
+                          onChange={(e) => handleAssignmentSelect(index, e.target.value)}
+                          size="md"
+                          bg="white"
+                          _dark={{
+                            bg: 'gray.700',
+                            borderColor: 'gray.600',
+                            _hover: { borderColor: 'gray.500' },
+                            _focus: { borderColor: 'blue.500', boxShadow: '0 0 0 1px #3182ce' }
+                          }}
+                        >
+                          <option value={HUMAN_ASSIGNMENT}>Human Player</option>
+                          {agentStrategies.map((group, groupIndex) => (
+                            <optgroup key={groupIndex} label={group.group}>
+                              {group.options.map((option) => (
+                                <option
+                                  key={option.value}
+                                  value={option.value}
+                                  disabled={option.requiresModel && !(modelStatus && modelStatus.is_trained)}
+                                >
+                                  {option.label}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ))}
+                        </Select>
+                        <FormHelperText>{helperText}</FormHelperText>
+                      </FormControl>
+
+                      {player.playerType === 'ai' && (
+                        <VStack align="stretch" spacing={3}>
+                          {String(player.strategy).startsWith('LLM_') && (
+                            <Box>
+                              <FormLabel>Choose LLM</FormLabel>
+                              <Select
+                                value={player.llmModel}
+                                onChange={(e) =>
+                                  setPlayers((prev) =>
+                                    prev.map((p, i) => (i === index ? { ...p, llmModel: e.target.value } : p))
+                                  )
+                                }
+                              >
+                                <option value="gpt-4o">GPT-4o</option>
+                                <option value="gpt-4o-mini">GPT-4o Mini</option>
+                                <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
+                                <option value="claude-3-5-haiku">Claude 3.5 Haiku</option>
+                              </Select>
+                              <FormHelperText>Pick the LLM backend for this agent.</FormHelperText>
+                            </Box>
+                          )}
+
+                          {player.strategy === 'DAYBREAK_DTCE_CENTRAL' && (
+                            <Box>
+                              <FormLabel>Supervisor Override (±%)</FormLabel>
+                              <NumberInput
+                                min={5}
+                                max={50}
+                                step={1}
+                                value={clampOverridePercent(player.daybreakOverridePct)}
+                                onChange={(valueString, valueNumber) => {
+                                  const raw = Number.isFinite(valueNumber)
+                                    ? valueNumber
+                                    : parseFloat(valueString);
+                                  const next = clampOverridePercent(
+                                    Number.isFinite(raw) ? raw : player.daybreakOverridePct
+                                  );
+                                  setPlayers((prev) =>
+                                    prev.map((p, i) =>
+                                      i === index ? { ...p, daybreakOverridePct: next } : p
+                                    )
+                                  );
+                                }}
+                              >
+                                <NumberInputField />
+                                <NumberInputStepper>
+                                  <NumberIncrementStepper />
+                                  <NumberDecrementStepper />
+                                </NumberInputStepper>
+                              </NumberInput>
+                              <FormHelperText>
+                                Supervisor may adjust the Daybreak recommendation by up to this percentage.
+                              </FormHelperText>
+                            </Box>
+                          )}
+                        </VStack>
                       )}
-                      <FormHelperText>
-                        {player.strategy === 'NAIVE' && 'Basic heuristic that matches orders to demand'}
-                        {player.strategy === 'BULLWHIP' && 'Tends to overreact to demand changes'}
-                        {player.strategy === 'CONSERVATIVE' && 'Maintains stable inventory levels'}
-                        {player.strategy === 'RANDOM' && 'Makes random order decisions'}
-                        {player.strategy === 'DEMAND_DRIVEN' && 'LLM: demand-driven analysis'}
-                        {player.strategy === 'COST_OPTIMIZATION' && 'LLM: optimizes for lower cost'}
-                        {player.strategy === 'LLM_CONSERVATIVE' && 'AI-powered strategy using language models'}
-                        {player.strategy === 'LLM_BALANCED' && 'Advanced AI with learning capabilities'}
-                        {player.strategy === 'LLM_AGGRESSIVE' && 'Aggressive AI strategy'}
-                        {player.strategy === 'LLM_ADAPTIVE' && 'Adaptive AI strategy'}
-                        {['DAYBREAK_DTCE', 'DAYBREAK_DTCE_CENTRAL'].includes(player.strategy) && !(modelStatus && modelStatus.is_trained) && 'Daybreak agent is not trained yet and cannot be used'}
-                        {player.strategy === 'DAYBREAK_DTCE' && modelStatus && modelStatus.is_trained && 'Daybreak DTCE uses decentralized agents at each node.'}
-                        {player.strategy === 'DAYBREAK_DTCE_CENTRAL' && modelStatus && modelStatus.is_trained && 'Daybreak DTCE + Central applies a network override bounded by the configured percentage.'}
-                      </FormHelperText>
-                      {player.strategy === 'DAYBREAK_DTCE_CENTRAL' && (
-                        <Box mt={3}>
-                          <FormLabel>Central Override (±%)</FormLabel>
-                          <NumberInput
-                            min={5}
-                            max={50}
-                            step={1}
-                            value={clampOverridePercent(player.daybreakOverridePct)}
-                            onChange={(valueString, valueNumber) => {
-                              const raw = Number.isFinite(valueNumber)
-                                ? valueNumber
-                                : parseFloat(valueString);
-                              const next = clampOverridePercent(Number.isFinite(raw) ? raw : player.daybreakOverridePct);
-                              setPlayers(prev => prev.map((p, i) => i === index ? { ...p, daybreakOverridePct: next } : p));
+
+                      {player.playerType === 'human' && (
+                        <FormControl>
+                          <FormLabel>Assign User</FormLabel>
+                          <Select
+                            placeholder="Select a user"
+                            value={player.userId || ''}
+                            onChange={(e) => handleUserChange(index, e.target.value || null)}
+                            isDisabled={loadingUsers}
+                            bg="white"
+                            _dark={{
+                              bg: 'gray.700',
+                              borderColor: 'gray.600',
+                              _hover: { borderColor: 'gray.500' },
+                              _focus: { borderColor: 'blue.500', boxShadow: '0 0 0 1px #3182ce' }
                             }}
                           >
-                            <NumberInputField />
-                            <NumberInputStepper>
-                              <NumberIncrementStepper />
-                              <NumberDecrementStepper />
-                            </NumberInputStepper>
-                          </NumberInput>
+                            <option value="">-- Select User --</option>
+                            {availableUsers.map((user) => (
+                              <option
+                                key={user.id}
+                                value={user.id}
+                                disabled={players.some(p => p.userId === user.id && p.role !== player.role)}
+                              >
+                                {user.username} {(user.is_superuser || (Array.isArray(user.roles) && user.roles.includes('admin'))) ? '(Admin)' : ''}
+                                {players.some(p => p.userId === user.id && p.role !== player.role) ? ' (Assigned)' : ''}
+                              </option>
+                            ))}
+                          </Select>
                           <FormHelperText>
-                            Central Daybreak agent may adjust the decentralized recommendation by up to this percentage.
+                            {loadingUsers
+                              ? 'Loading users...'
+                              : player.userId
+                                ? `Assigned to: ${availableUsers.find(u => u.id === player.userId)?.username || 'Unknown'}`
+                                : 'Select a user to assign to this role'}
                           </FormHelperText>
-                        </Box>
+                        </FormControl>
                       )}
-                    </FormControl>
-                  )}
 
-                  {player.playerType === 'human' && (
-                    <FormControl mt={4}>
-                      <FormLabel>Assign User</FormLabel>
-                      <Select
-                        placeholder="Select a user"
-                        value={player.userId || ''}
-                        onChange={(e) => handleUserChange(index, e.target.value || null)}
-                        isDisabled={loadingUsers}
-                        bg="white"
-                        _dark={{
-                          bg: 'gray.700',
-                          borderColor: 'gray.600',
-                          _hover: { borderColor: 'gray.500' },
-                          _focus: { borderColor: 'blue.500', boxShadow: '0 0 0 1px #3182ce' }
-                        }}
-                      >
-                        <option value="">-- Select User --</option>
-                        {availableUsers.map((user) => (
-                          <option 
-                            key={user.id} 
-                            value={user.id}
-                            disabled={players.some(p => p.userId === user.id && p.role !== player.role)}
-                          >
-                            {user.username} {(user.is_superuser || (Array.isArray(user.roles) && user.roles.includes('admin'))) ? '(Admin)' : ''}
-                            {players.some(p => p.userId === user.id && p.role !== player.role) ? ' (Assigned)' : ''}
-                          </option>
-                        ))}
-                      </Select>
-                      <FormHelperText>
-                        {loadingUsers 
-                          ? 'Loading users...' 
-                          : player.userId 
-                            ? `Assigned to: ${availableUsers.find(u => u.id === player.userId)?.username || 'Unknown'}`
-                            : 'Select a user to assign to this role'}
-                      </FormHelperText>
-                    </FormControl>
-                  )}
-                  <FormControl display="flex" alignItems="center" mt={4}>
-                    <Switch
-                      id={`demand-${index}`}
-                      isChecked={player.canSeeDemand}
-                      onChange={(e) => handleCanSeeDemandChange(index, e.target.checked)}
-                      isDisabled={player.role === 'retailer'}
-                      colorScheme="blue"
-                      mr={3}
-                    />
-                    <FormLabel htmlFor={`demand-${index}`} mb={0} opacity={player.role === 'retailer' ? 0.7 : 1}>
-                      Can see customer demand
-                      {player.role === 'retailer' && ' (Always enabled for Retailer)'}
-                    </FormLabel>
-                  </FormControl>
-                </Box>
-              ))}
+                      <FormControl display="flex" alignItems="center">
+                        <Switch
+                          id={`demand-${index}`}
+                          isChecked={player.canSeeDemand}
+                          onChange={(e) => handleCanSeeDemandChange(index, e.target.checked)}
+                          isDisabled={player.role === 'retailer'}
+                          colorScheme="blue"
+                          mr={3}
+                        />
+                        <FormLabel htmlFor={`demand-${index}`} mb={0} opacity={player.role === 'retailer' ? 0.7 : 1}>
+                          Can see customer demand
+                          {player.role === 'retailer' && ' (Always enabled for Retailer)'}
+                        </FormLabel>
+                      </FormControl>
+                    </VStack>
+                  </Box>
+                );
+              })}
                   </VStack>
                 </CardBody>
               </Card>

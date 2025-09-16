@@ -29,6 +29,7 @@ class PlayerStrategy(str, Enum):
     # Daybreak strategies
     DAYBREAK_DTCE = "daybreak_dtce"
     DAYBREAK_DTCE_CENTRAL = "daybreak_dtce_central"
+    DAYBREAK_DTCE_GLOBAL = "daybreak_dtce_global"
 
 class PlayerAssignment(BaseModel):
     """Schema for assigning a player to a game role."""
