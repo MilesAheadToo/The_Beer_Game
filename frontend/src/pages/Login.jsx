@@ -2,7 +2,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import mixedGameApi from '../services/api';
-import { getDefaultLandingPath, isGroupAdmin, isSystemAdmin } from '../utils/authUtils';
+import {
+  isGroupAdmin,
+  isSystemAdmin,
+  resolvePostLoginDestination,
+} from '../utils/authUtils';
 import { toast } from 'react-toastify';
 import ContactSystemAdminForm from '../components/ContactSystemAdminForm';
 
@@ -25,14 +29,15 @@ const Login = () => {
     const maybeRedirect = async () => {
       if (!isAuthenticated) return;
       const redirectTo = searchParams.get('redirect');
+      const destination = resolvePostLoginDestination(user, redirectTo);
 
       // Handle system administrator separately (case-insensitive check, allow role flag)
       if (isSystemAdmin(user)) {
-        navigate(redirectTo || getDefaultLandingPath(user), { replace: true });
+        navigate(destination, { replace: true });
         return;
       }
       if (isGroupAdmin(user)) {
-        navigate(redirectTo || getDefaultLandingPath(user), { replace: true });
+        navigate(destination, { replace: true });
         return;
       }
 
@@ -112,8 +117,9 @@ const Login = () => {
         setErrors({});
         // After successful login: if non-admin, try to jump directly to their assigned game
         const redirectTo = searchParams.get('redirect');
+        const destination = resolvePostLoginDestination(loggedInUser, redirectTo);
         if (isSystemAdmin(loggedInUser)) {
-          navigate(redirectTo || getDefaultLandingPath(loggedInUser), { replace: true });
+          navigate(destination, { replace: true });
           return;
         }
 
@@ -128,9 +134,9 @@ const Login = () => {
           } catch (e) {
             // ignore and fall back
           }
-          navigate(redirectTo || getDefaultLandingPath(loggedInUser), { replace: true });
+          navigate(destination, { replace: true });
         } else {
-          navigate(redirectTo || getDefaultLandingPath(loggedInUser), { replace: true });
+          navigate(destination, { replace: true });
         }
       } else {
         const message = error || 'Login failed. Please check your credentials.';
