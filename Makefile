@@ -48,7 +48,7 @@ endif
 
 DOCKER_COMPOSE_CMD = $(strip $(COMPOSE_ENV) $(DOCKER_COMPOSE))
 
-.PHONY: up gpu-up up-dev down ps logs seed reset-admin help init-env proxy-up proxy-down proxy-restart proxy-recreate proxy-logs proxy-url
+.PHONY: up gpu-up up-dev down ps logs seed reset-admin help init-env proxy-up proxy-down proxy-restart proxy-recreate proxy-logs proxy-url seed-default-group
 
 # Default CPU target
 up:
@@ -161,12 +161,16 @@ proxy-logs:
 	@$(DOCKER_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.proxy.yml logs -f --tail=200 proxy
 
 seed:
-	@echo "\n[+] Seeding default users..."; \
-	$(DOCKER_COMPOSE_CMD) run --rm create-users
+        @echo "\n[+] Seeding default users..."; \
+        $(DOCKER_COMPOSE_CMD) run --rm create-users
+
+seed-default-group:
+	@echo "\n[+] Creating default group, users, and AI-powered game..."; \
+	python backend/scripts/seed_default_group.py
 
 reset-admin:
-	@echo "\n[+] Resetting superadmin password to Daybreak@2025..."; \
-	$(DOCKER_COMPOSE_CMD) exec backend python scripts/reset_admin_password.py
+        @echo "\n[+] Resetting superadmin password to Daybreak@2025..."; \
+        $(DOCKER_COMPOSE_CMD) exec backend python scripts/reset_admin_password.py
 
 proxy-url:
 	@echo "Current host: $(HOST) (set with HOST=ip make ...)"; \
