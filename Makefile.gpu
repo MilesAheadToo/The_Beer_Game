@@ -1,0 +1,32 @@
+# Makefile for GPU support
+
+.PHONY: build up down clean
+
+# Build and start the application with GPU support
+up:
+	docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+
+# Stop and remove containers, networks, and volumes
+down:
+	docker-compose -f docker-compose.yml -f docker-compose.gpu.yml down -v
+
+# Build the application
+build:
+	docker-compose -f docker-compose.yml -f docker-compose.gpu.yml build
+
+# Clean up all Docker resources
+clean:
+	docker-compose -f docker-compose.yml -f docker-compose.gpu.yml down -v --rmi all --remove-orphans
+	docker system prune -a --volumes -f
+
+# View logs
+logs:
+	docker-compose -f docker-compose.yml -f docker-compose.gpu.yml logs -f
+
+# Check GPU status
+gpu-status:
+	docker run --gpus all nvidia/cuda:12.2.0-base-ubuntu22.04 nvidia-smi
+
+# Test PyTorch GPU support
+test-gpu:
+	docker-compose -f docker-compose.yml -f docker-compose.gpu.yml exec backend python3 -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA device count: {torch.cuda.device_count()}'); [torch.cuda.is_available()] and [print(f'Device {i}: {torch.cuda.get_device_properties(i)}') for i in range(torch.cuda.device_count())]"
