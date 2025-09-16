@@ -79,7 +79,7 @@ const GroupManagement = () => {
     async (nextSelectedId = null) => {
       setIsLoading(true);
       try {
-        const response = await api.get('/api/v1/groups');
+        const response = await api.get('/groups');
         const data = Array.isArray(response.data) ? response.data : [];
         setGroups(data);
 
@@ -127,7 +127,7 @@ const GroupManagement = () => {
     };
 
     try {
-      const { data } = await api.post('/api/v1/groups', payload);
+      const { data } = await api.post('/groups', payload);
       toast.success('Group and default setup created successfully');
       closeModal();
       await fetchGroups(data?.id);
@@ -206,7 +206,7 @@ const GroupManagement = () => {
 
     try {
       if (editingGroupId) {
-        await api.put(`/api/v1/groups/${editingGroupId}`, {
+        await api.put(`/groups/${editingGroupId}`, {
           name: trimmedName,
           description: form.description,
           logo: form.logo,
@@ -215,7 +215,7 @@ const GroupManagement = () => {
         closeModal();
         await fetchGroups(editingGroupId);
       } else {
-        const { data } = await api.post('/api/v1/groups', {
+        const { data } = await api.post('/groups', {
           ...form,
           name: trimmedName,
         });
@@ -254,7 +254,7 @@ const GroupManagement = () => {
     const groupId = deleteTarget.id;
 
     try {
-      await api.delete(`/api/v1/groups/${groupId}`);
+      await api.delete(`/groups/${groupId}`);
       toast.success('Group deleted');
       setDeleteTarget(null);
       setSelectedGroupId((prev) => (prev === groupId ? null : prev));

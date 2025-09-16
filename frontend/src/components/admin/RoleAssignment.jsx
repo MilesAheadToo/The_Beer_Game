@@ -14,7 +14,7 @@ import {
   Alert,
   Button
 } from '@mui/material';
-import api from '../../services/api';
+import { api } from '../../services/api';
 
 const RoleAssignment = ({ gameId }) => {
   const [roles, setRoles] = useState([]);
@@ -30,19 +30,19 @@ const RoleAssignment = ({ gameId }) => {
       try {
         setLoading(true);
         // Fetch available roles
-        const rolesRes = await api.get(`/api/games/${gameId}/available-roles`);
+        const rolesRes = await api.get(`/games/${gameId}/available-roles`);
         setRoles(rolesRes.data);
 
         // Fetch current assignments
-        const assignmentsRes = await api.get(`/api/games/${gameId}/roles`);
+        const assignmentsRes = await api.get(`/games/${gameId}/roles`);
         setAssignments(assignmentsRes.data);
 
         // Fetch agent configs
-        const configsRes = await api.get(`/api/games/${gameId}/agent-configs`);
+        const configsRes = await api.get(`/games/${gameId}/agent-configs`);
         setAgentConfigs(configsRes.data);
 
         // Fetch users (you'll need to implement this endpoint)
-        const usersRes = await api.get(`/api/games/${gameId}/users`);
+        const usersRes = await api.get(`/games/${gameId}/users`);
         setUsers(usersRes.data);
 
         setLoading(false);
@@ -74,7 +74,7 @@ const RoleAssignment = ({ gameId }) => {
       // Update each role assignment
       for (const [role, assignment] of Object.entries(assignments)) {
         updates.push(
-          api.put(`/api/games/${gameId}/roles/${role}`, assignment)
+          api.put(`/games/${gameId}/roles/${role}`, assignment)
         );
       }
       

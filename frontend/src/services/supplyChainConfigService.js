@@ -1,6 +1,6 @@
-import api from './api';
+import { api } from './api';
 
-const SUPPLY_CHAIN_CONFIG_BASE_URL = '/api/v1/supply-chain-config';
+const SUPPLY_CHAIN_CONFIG_BASE_URL = '/supply-chain-config';
 
 // Supply Chain Config CRUD
 export const getSupplyChainConfigs = async () => {

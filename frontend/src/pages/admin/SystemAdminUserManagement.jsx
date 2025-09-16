@@ -79,7 +79,7 @@ function SystemAdminUserManagement() {
 
   const loadGroups = useCallback(async () => {
     try {
-      const response = await api.get('/api/v1/groups');
+      const response = await api.get('/groups');
       const data = Array.isArray(response.data) ? response.data : [];
       setGroups(data);
       return data;
@@ -92,7 +92,7 @@ function SystemAdminUserManagement() {
 
   const loadAdmins = useCallback(async () => {
     try {
-      const response = await api.get('/api/v1/users', { params: { user_type: 'group_admin', limit: 250 } });
+      const response = await api.get('/users', { params: { user_type: 'group_admin', limit: 250 } });
       const data = Array.isArray(response.data) ? response.data : [];
       const filtered = data.filter((item) => getUserType(item) === 'group_admin');
       setAdmins(filtered);
@@ -194,10 +194,10 @@ function SystemAdminUserManagement() {
     setSaving(true);
     try {
       if (editingUser) {
-        await api.put(`/api/v1/users/${editingUser.id}`, payload);
+        await api.put(`/users/${editingUser.id}`, payload);
         toast.success('Group administrator updated successfully');
       } else {
-        await api.post('/api/v1/users', payload);
+        await api.post('/users', payload);
         toast.success('Group administrator created successfully');
       }
 
@@ -217,7 +217,7 @@ function SystemAdminUserManagement() {
     if (!window.confirm(confirmMessage)) return;
 
     try {
-      await api.delete(`/api/v1/users/${admin.id}`);
+      await api.delete(`/users/${admin.id}`);
       toast.success('Group administrator deleted');
       await loadAdmins();
     } catch (error) {
