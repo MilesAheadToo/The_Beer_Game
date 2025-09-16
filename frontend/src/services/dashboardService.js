@@ -18,7 +18,7 @@ export const getHumanDashboard = async () => {
         total_cost: response.data.metrics.total_cost,
         avg_weekly_cost: response.data.metrics.avg_weekly_cost,
         service_level: response.data.metrics.service_level,
-        service_level_change: response.data.metrics.service_level_change
+        service_level_change: response.data.metrics.service_level_change,
       },
       time_series: response.data.time_series.map(point => ({
         week: point.week,
@@ -27,7 +27,8 @@ export const getHumanDashboard = async () => {
         cost: point.cost,
         backlog: point.backlog,
         demand: point.demand,
-        supply: point.supply
+        supply: point.supply,
+        reason: point.reason,
       }))
     };
     
@@ -39,9 +40,12 @@ export const getHumanDashboard = async () => {
     if (process.env.NODE_ENV === 'development') {
       console.warn('Using mock dashboard data due to error');
       return {
+        game_id: 1,
         game_name: 'Demo Game',
         current_round: 5,
+        max_rounds: 12,
         player_role: 'RETAILER',
+        player_id: 1,
         metrics: {
           current_inventory: 42,
           inventory_change: 5.5,
@@ -58,7 +62,8 @@ export const getHumanDashboard = async () => {
           cost: Math.floor(Math.random() * 300) + 100,
           backlog: Math.floor(Math.random() * 20) + 5,
           demand: Math.floor(Math.random() * 40) + 5,
-          supply: Math.floor(Math.random() * 40) + 5
+          supply: Math.floor(Math.random() * 40) + 5,
+          reason: 'Simulated decision based on mock data'
         })),
         last_updated: new Date().toISOString()
       };
@@ -84,7 +89,8 @@ export const formatChartData = (timeSeries, role) => {
     cost: point.cost,
     backlog: point.backlog,
     demand: role === 'RETAILER' || role === 'MANUFACTURER' || role === 'DISTRIBUTOR' ? point.demand : undefined,
-    supply: role === 'SUPPLIER' || role === 'MANUFACTURER' || role === 'DISTRIBUTOR' ? point.supply : undefined
+    supply: role === 'SUPPLIER' || role === 'MANUFACTURER' || role === 'DISTRIBUTOR' ? point.supply : undefined,
+    reason: point.reason,
   }));
 };
 

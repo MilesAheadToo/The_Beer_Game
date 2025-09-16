@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   Box,
   Heading,
@@ -19,7 +19,18 @@ import {
   AlertDescription,
   Badge,
   Divider,
-  useToast
+  useToast,
+  FormControl,
+  FormLabel,
+  NumberInput,
+  NumberInputField,
+  Textarea,
+  Button,
+  FormErrorMessage,
+  Slider,
+  SliderTrack,
+  SliderFilledTrack,
+  SliderThumb,
 } from '@chakra-ui/react';
 import { Line } from 'react-chartjs-2';
 import {
@@ -35,7 +46,9 @@ import {
 } from 'chart.js';
 import { format } from 'date-fns';
 import { useAuth } from '../contexts/AuthContext';
+import { useWebSocket } from '../contexts/WebSocketContext';
 import { getHumanDashboard, formatChartData } from '../services/dashboardService';
+import mixedGameApi from '../services/api';
 import PageLayout from '../components/PageLayout';
 
 // Register ChartJS components
@@ -62,35 +75,186 @@ const HumanDashboard = () => {
   const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [orderQuantity, setOrderQuantity] = useState('');
+  const [orderReason, setOrderReason] = useState('');
+  const [orderError, setOrderError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const { user } = useAuth();
+  const { connect, subscribe } = useWebSocket();
   const toast = useToast();
+  const lastRoundRef = useRef(null);
 
   const cardBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.700');
+  const timelineBg = useColorModeValue('gray.50', 'gray.700');
 
-  useEffect(() => {
-    const fetchDashboardData = async () => {
+  const fetchDashboardData = useCallback(
+    async (withLoader = false) => {
       try {
-        setLoading(true);
+        if (withLoader) {
+          setLoading(true);
+        }
+        setError(null);
         const data = await getHumanDashboard();
         setDashboardData(data);
       } catch (err) {
         console.error('Error fetching dashboard data:', err);
         setError('Failed to load dashboard data');
-        toast({
-          title: 'Error',
-          description: 'Failed to load dashboard data. Please try again later.',
-          status: 'error',
-          duration: 5000,
-          isClosable: true,
-        });
+        if (withLoader) {
+          toast({
+            title: 'Error',
+            description: 'Failed to load dashboard data. Please try again later.',
+            status: 'error',
+            duration: 5000,
+            isClosable: true,
+          });
+        }
       } finally {
-        setLoading(false);
+        if (withLoader) {
+          setLoading(false);
+        }
       }
-    };
+    },
+    [toast]
+  );
 
-    fetchDashboardData();
-  }, [toast]);
+  useEffect(() => {
+    fetchDashboardData(true);
+  }, [fetchDashboardData]);
+
+  useEffect(() => {
+    if (!dashboardData?.game_id || !dashboardData?.player_id) {
+      return undefined;
+    }
+
+    connect(dashboardData.game_id, dashboardData.player_id);
+
+    const unsubscribe = subscribe((event, payload) => {
+      if (event !== 'message') {
+        return;
+      }
+
+      const messageType = payload?.type;
+      if (
+        [
+          'game_state',
+          'round_completed',
+          'round_started',
+          'order_submitted',
+          'inventory_update',
+        ].includes(messageType)
+      ) {
+        fetchDashboardData(false);
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [dashboardData?.game_id, dashboardData?.player_id, connect, subscribe, fetchDashboardData]);
+
+  useEffect(() => {
+    if (!dashboardData?.current_round) {
+      return;
+    }
+
+    const currentRound = dashboardData.current_round;
+    if (lastRoundRef.current === currentRound) {
+      return;
+    }
+
+    const series = dashboardData.time_series || [];
+    const matchingEntry =
+      series.find(entry => entry.week === currentRound) ||
+      [...series].sort((a, b) => (a.week ?? 0) - (b.week ?? 0)).pop();
+
+    if (matchingEntry && typeof matchingEntry.order === 'number') {
+      setOrderQuantity(String(matchingEntry.order));
+    } else {
+      setOrderQuantity('');
+    }
+
+    setOrderReason('');
+    setOrderError('');
+    lastRoundRef.current = currentRound;
+  }, [dashboardData, lastRoundRef]);
+
+  const handleOrderSubmit = useCallback(async (event) => {
+    event.preventDefault();
+    setOrderError('');
+
+    if (!dashboardData?.game_id || !dashboardData?.player_id) {
+      setOrderError('Unable to determine the current game or player.');
+      return;
+    }
+
+    if (orderQuantity === '') {
+      setOrderError('Please enter an order quantity.');
+      return;
+    }
+
+    const quantityValue = Number(orderQuantity);
+    if (Number.isNaN(quantityValue) || quantityValue < 0) {
+      setOrderError('Order quantity must be zero or a positive number.');
+      return;
+    }
+
+    try {
+      setIsSubmitting(true);
+      await mixedGameApi.submitOrder(
+        dashboardData.game_id,
+        dashboardData.player_id,
+        quantityValue,
+        orderReason.trim() ? orderReason.trim() : undefined
+      );
+
+      toast({
+        title: 'Order submitted',
+        description: `Your order of ${quantityValue} units has been recorded.`,
+        status: 'success',
+        duration: 4000,
+        isClosable: true,
+      });
+
+      await fetchDashboardData(false);
+    } catch (err) {
+      console.error('Failed to submit order:', err);
+      const detail = err?.response?.data?.detail;
+      const errorMessage = typeof detail === 'string' ? detail : 'Failed to submit order.';
+      setOrderError(errorMessage);
+      toast({
+        title: 'Order submission failed',
+        description: errorMessage,
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [dashboardData, orderQuantity, orderReason, toast, fetchDashboardData]);
+
+  const sliderMax = useMemo(() => {
+    if (!dashboardData) {
+      return 0;
+    }
+    return Math.max(dashboardData.max_rounds || 0, dashboardData.current_round || 0);
+  }, [dashboardData]);
+
+  const sliderDisplayMax = sliderMax || 1;
+  const sliderValue = Math.min(dashboardData?.current_round || 0, sliderDisplayMax);
+  const progressPercent = sliderDisplayMax
+    ? Math.round((sliderValue / sliderDisplayMax) * 100)
+    : 0;
+
+  const reasoningTimeline = useMemo(() => {
+    if (!dashboardData?.time_series?.length) {
+      return [];
+    }
+
+    return [...dashboardData.time_series]
+      .sort((a, b) => (b.week ?? 0) - (a.week ?? 0));
+  }, [dashboardData]);
 
   const renderMetrics = () => {
     if (!dashboardData?.metrics) return null;
@@ -349,15 +513,15 @@ const HumanDashboard = () => {
     <PageLayout title="My Dashboard">
       <VStack spacing={6} align="stretch">
         {/* Header */}
-        <Box 
-          p={6} 
-          bg={cardBg} 
-          borderRadius="lg" 
-          boxShadow="sm" 
-          borderWidth="1px" 
+        <Box
+          p={6}
+          bg={cardBg}
+          borderRadius="lg"
+          boxShadow="sm"
+          borderWidth="1px"
           borderColor={borderColor}
         >
-          <HStack justify="space-between" mb={4}>
+          <HStack justify="space-between" mb={4} align="flex-start">
             <Box>
               <Heading size="lg">{game_name || 'My Game'}</Heading>
               <Text color="gray.500" mt={1}>
@@ -365,7 +529,7 @@ const HumanDashboard = () => {
               </Text>
             </Box>
             <Box textAlign="right">
-              <Badge 
+              <Badge
                 colorScheme={roleColor.toLowerCase()}
                 fontSize="1em"
                 p={2}
@@ -378,10 +542,78 @@ const HumanDashboard = () => {
               </Text>
             </Box>
           </HStack>
-          <Divider my={3} />
-          <Text fontSize="sm" color="gray.500">
-            Last updated: {format(new Date(last_updated), 'PPpp')}
-          </Text>
+          <Divider my={4} />
+          <VStack align="stretch" spacing={3}>
+            <Text fontSize="sm" color="gray.500">
+              Last updated: {last_updated ? format(new Date(last_updated), 'PPpp') : '—'}
+            </Text>
+            <Box>
+              <HStack justify="space-between" mb={2}>
+                <Text fontSize="sm" fontWeight="medium">
+                  Game Progress
+                </Text>
+                <Text fontSize="sm" color="gray.500">
+                  {`${sliderValue} / ${sliderDisplayMax}`} ({progressPercent}% complete)
+                </Text>
+              </HStack>
+              <Slider value={sliderValue} min={0} max={sliderDisplayMax} isReadOnly focusThumbOnChange={false}>
+                <SliderTrack>
+                  <SliderFilledTrack />
+                </SliderTrack>
+                <SliderThumb boxSize={5} fontSize="xs">
+                  <Text fontSize="xs">{sliderValue}</Text>
+                </SliderThumb>
+              </Slider>
+            </Box>
+          </VStack>
+        </Box>
+
+        {/* Order submission */}
+        <Box
+          as="form"
+          onSubmit={handleOrderSubmit}
+          p={6}
+          bg={cardBg}
+          borderRadius="lg"
+          boxShadow="sm"
+          borderWidth="1px"
+          borderColor={borderColor}
+        >
+          <Heading size="md" mb={4}>
+            Submit order for Week {current_round || 1}
+          </Heading>
+          <SimpleGrid columns={{ base: 1, md: 2 }} spacing={4}>
+            <FormControl isRequired isInvalid={Boolean(orderError)}>
+              <FormLabel>Order quantity</FormLabel>
+              <NumberInput
+                min={0}
+                value={orderQuantity}
+                onChange={(valueString) => setOrderQuantity(valueString)}
+                clampValueOnBlur={false}
+                keepWithinRange={false}
+              >
+                <NumberInputField placeholder="Enter units to order" />
+              </NumberInput>
+              <FormErrorMessage>{orderError}</FormErrorMessage>
+            </FormControl>
+            <FormControl>
+              <FormLabel>Reason (optional)</FormLabel>
+              <Textarea
+                value={orderReason}
+                onChange={(event) => setOrderReason(event.target.value)}
+                placeholder="Provide context for your order decision"
+                rows={orderReason ? 4 : 3}
+              />
+            </FormControl>
+          </SimpleGrid>
+          <HStack justify="space-between" mt={4} flexWrap="wrap" spacing={3}>
+            <Text fontSize="sm" color="gray.500">
+              Round {current_round || 1} of {sliderDisplayMax}. Keep orders flowing to avoid backlog.
+            </Text>
+            <Button type="submit" colorScheme="blue" isLoading={isSubmitting} loadingText="Submitting">
+              Submit order
+            </Button>
+          </HStack>
         </Box>
 
         {/* Metrics */}
@@ -398,6 +630,59 @@ const HumanDashboard = () => {
             Weekly Performance
           </Heading>
           {renderChart()}
+        </Box>
+
+        {/* Order reasoning timeline */}
+        <Box>
+          <Heading size="md" mb={4}>
+            Order Reasoning by Week
+          </Heading>
+          <Box
+            p={4}
+            bg={cardBg}
+            borderRadius="lg"
+            boxShadow="sm"
+            borderWidth="1px"
+            borderColor={borderColor}
+          >
+            {reasoningTimeline.length ? (
+              <VStack align="stretch" spacing={3}>
+                {reasoningTimeline.map((entry) => (
+                  <Box
+                    key={`reason-${entry.week}`}
+                    p={4}
+                    borderRadius="md"
+                    borderWidth="1px"
+                    borderColor={borderColor}
+                    bg={timelineBg}
+                  >
+                    <HStack justify="space-between" align="flex-start" spacing={3}>
+                      <HStack spacing={3} align="center">
+                        <Badge colorScheme="blue">Week {entry.week}</Badge>
+                        <Badge colorScheme="purple" variant="subtle">
+                          Order {Math.round(entry.order ?? 0)}
+                        </Badge>
+                      </HStack>
+                      <Text fontSize="sm" color="gray.500">
+                        {entry.reason ? 'Reason documented' : 'No reason provided'}
+                      </Text>
+                    </HStack>
+                    <Text mt={3} fontSize="sm" color="gray.700">
+                      {entry.reason || 'No reasoning provided for this order.'}
+                    </Text>
+                    <HStack spacing={4} mt={3} fontSize="xs" color="gray.500">
+                      <Text>Inventory: {Math.round(entry.inventory ?? 0)}</Text>
+                      <Text>Backlog: {Math.round(entry.backlog ?? 0)}</Text>
+                    </HStack>
+                  </Box>
+                ))}
+              </VStack>
+            ) : (
+              <Text color="gray.500">
+                No order history is available yet. Your reasoning will appear here as you submit orders.
+              </Text>
+            )}
+          </Box>
         </Box>
       </VStack>
     </PageLayout>

@@ -1,20 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Box, 
-  Grid, 
+import {
+  Box,
+  Grid,
   GridItem,
-  Button, 
+  Button,
   CircularProgress,
   Text,
   Heading,
   useColorModeValue,
   VStack,
+  HStack,
   Icon,
   Flex,
   Card,
   CardHeader,
-  CardBody
+  CardBody,
+  Badge,
+  Slider,
+  SliderTrack,
+  SliderFilledTrack,
+  SliderThumb,
 } from '@chakra-ui/react';
 import { FiPlus } from 'react-icons/fi';
 import PageLayout from '../components/PageLayout';
@@ -57,6 +63,40 @@ const stockVsForecast = [
   { name: 'Part F', stock: 6780, forecast: 5200 },
 ];
 
+const totalRounds = 36;
+const currentRound = 18;
+
+const decisionTimeline = [
+  {
+    week: 18,
+    order: 2450,
+    reason: 'Anticipating a regional promotion and aligning safety stock.',
+    inventory: 1820,
+    backlog: 90,
+  },
+  {
+    week: 17,
+    order: 2320,
+    reason: 'Backlog declined after expedited shipment; stabilizing pipeline.',
+    inventory: 1765,
+    backlog: 110,
+  },
+  {
+    week: 16,
+    order: 2280,
+    reason: 'Maintained previous order to absorb variability from supplier delay.',
+    inventory: 1690,
+    backlog: 140,
+  },
+  {
+    week: 15,
+    order: 2200,
+    reason: 'Raised order size to offset three-week moving average increase.',
+    inventory: 1580,
+    backlog: 180,
+  },
+];
+
 // function useQuery() {
 //   const { search } = useLocation();
 //   return new URLSearchParams(search);
@@ -66,6 +106,7 @@ const Dashboard = () => {
   // Theme values - must be called unconditionally at the top level
   const cardBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.700');
+  const timelineBg = useColorModeValue('gray.50', 'gray.700');
   
   // State
   const [loading, setLoading] = useState(true);
@@ -92,6 +133,10 @@ const Dashboard = () => {
     );
   }
 
+  const sliderMax = totalRounds;
+  const sliderValue = currentRound;
+  const progressPercent = Math.round((sliderValue / sliderMax) * 100);
+
   return (
     <PageLayout title="Dashboard">
       <Box p={4}>
@@ -104,7 +149,32 @@ const Dashboard = () => {
           </VStack>
         </Flex>
         <FilterBar />
-        
+
+        <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6} className="card-surface pad-6">
+          <CardHeader pb={2}>
+            <Heading size="md">Game Progress</Heading>
+          </CardHeader>
+          <CardBody pt={0}>
+            <VStack align="stretch" spacing={3}>
+              <Flex justify="space-between" align="center">
+                <Text color="gray.500">Rounds completed</Text>
+                <Text fontWeight="semibold">{progressPercent}%</Text>
+              </Flex>
+              <Slider value={sliderValue} min={0} max={sliderMax} isReadOnly focusThumbOnChange={false}>
+                <SliderTrack>
+                  <SliderFilledTrack />
+                </SliderTrack>
+                <SliderThumb boxSize={5} fontSize="xs">
+                  <Text fontSize="xs">{sliderValue}</Text>
+                </SliderThumb>
+              </Slider>
+              <Text fontSize="sm" color="gray.500">
+                Week {sliderValue} of {sliderMax}
+              </Text>
+            </VStack>
+          </CardBody>
+        </Card>
+
         {/* KPI Cards */}
         <Grid templateColumns={{ base: '1fr', sm: 'repeat(2, 1fr)', lg: 'repeat(4, 1fr)' }} gap={4} mb={6}>
           <GridItem>
@@ -238,6 +308,44 @@ const Dashboard = () => {
         <Card variant="outline" bg={cardBg} borderColor={borderColor} className="card-surface">
           <CardBody p={0} className="pad-6">
             <SkuTable data={[]} />
+          </CardBody>
+        </Card>
+
+        <Card variant="outline" bg={cardBg} borderColor={borderColor} className="card-surface" mt={6}>
+          <CardHeader pb={2}>
+            <Heading size="md">Order Reasoning Timeline</Heading>
+            <Text color="gray.500" fontSize="sm">
+              Most recent decisions are shown first
+            </Text>
+          </CardHeader>
+          <CardBody pt={0}>
+            <VStack align="stretch" spacing={4}>
+              {decisionTimeline.map((entry) => (
+                <Box
+                  key={`timeline-${entry.week}`}
+                  p={4}
+                  borderWidth="1px"
+                  borderRadius="md"
+                  borderColor={borderColor}
+                  bg={timelineBg}
+                >
+                  <Flex justify="space-between" align="flex-start" mb={2} gap={3} flexWrap="wrap">
+                    <HStack spacing={3} align="center">
+                      <Badge colorScheme="blue">Week {entry.week}</Badge>
+                      <Badge colorScheme="purple" variant="subtle">
+                        Order {entry.order}
+                      </Badge>
+                    </HStack>
+                    <Text fontSize="sm" color="gray.500">
+                      Inventory {entry.inventory} · Backlog {entry.backlog}
+                    </Text>
+                  </Flex>
+                  <Text fontSize="sm" color="gray.700">
+                    {entry.reason}
+                  </Text>
+                </Box>
+              ))}
+            </VStack>
           </CardBody>
         </Card>
       </Box>
