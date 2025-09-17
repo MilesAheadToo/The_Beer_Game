@@ -155,40 +155,6 @@ const GroupManagement = () => {
     [triggerAutoCreateDefaultGroup]
   );
 
-  const handleQuickCreateDefaultGroup = useCallback(async () => {
-    if (creatingDefault) return;
-
-    setCreatingDefault(true);
-    const defaults = createDefaultForm();
-    const uniqueSuffix = Math.random().toString(36).slice(-6).toLowerCase();
-    const generatedName = `Daybreak ${uniqueSuffix.toUpperCase()}`;
-
-    const payload = {
-      ...defaults,
-      name: generatedName,
-      description: defaults.description || 'Auto-generated group with default setup',
-      admin: {
-        ...defaults.admin,
-        username: `${defaults.admin.username}_${uniqueSuffix}`,
-        email: `groupadmin+${uniqueSuffix}@daybreak.ai`,
-      },
-    };
-
-    try {
-      const { data } = await api.post('/groups', payload);
-      toast.success('Group and default setup created successfully');
-      closeModal();
-      await fetchGroups(data?.id);
-    } catch (error) {
-      console.error('Failed to auto-create group:', error);
-      const detail = error?.response?.data?.detail;
-      const message = typeof detail === 'string' ? detail : detail?.message || 'Failed to create group. Please try again.';
-      toast.error(message);
-    } finally {
-      setCreatingDefault(false);
-    }
-  }, [closeModal, creatingDefault, fetchGroups]);
-
   useEffect(() => {
     fetchGroups();
   }, [fetchGroups]);
@@ -330,33 +296,8 @@ const GroupManagement = () => {
         <div className="flex flex-wrap gap-3">
           <button
             type="button"
-            onClick={handleQuickCreateDefaultGroup}
-            disabled={creatingDefault}
-            className={`flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-medium ${
-              creatingDefault ? 'opacity-75 cursor-not-allowed' : ''
-            }`}
-          >
-            {creatingDefault ? (
-              <span className="flex items-center gap-2">
-                <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                </svg>
-                Creating…
-              </span>
-            ) : (
-              <>
-                <FaRocket /> Quick Create Default Group
-              </>
-            )}
-          </button>
-          <button
-            type="button"
             onClick={() => openModal(null)}
-            className={`flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium ${
-              creatingDefault ? 'opacity-75 cursor-not-allowed' : ''
-            }`}
-            disabled={creatingDefault}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium"
           >
             <FaPlus /> Add Group
           </button>
