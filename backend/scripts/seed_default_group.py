@@ -5,16 +5,20 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Callable, Dict, Tuple
 
 # Ensure the backend package is importable when running via `python backend/scripts/...`
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.append(str(BACKEND_ROOT))
 
-from sqlalchemy.orm import Session
+from sqlalchemy import create_engine
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.engine import make_url
+from sqlalchemy.orm import Session, sessionmaker
 
-from app.db.base_class import SessionLocal
+from app.core.config import settings
+from app.db.base_class import Base, SessionLocal
 from app.models import (
     AgentConfig,
     Game,
@@ -46,6 +50,41 @@ DEFAULT_ADMIN_FULL_NAME = "Group Administrator"
 DEFAULT_PASSWORD = "Daybreak@2025"
 DEFAULT_GAME_NAME = "The Beer Game"
 DEFAULT_AGENT_TYPE = "naive"
+
+FALLBACK_DB_FILENAME = "seed_default_group.sqlite"
+FALLBACK_DB_PATH = BACKEND_ROOT / FALLBACK_DB_FILENAME
+
+
+def create_sqlite_session_factory() -> Tuple[sessionmaker, Path]:
+    """Create a SQLite session factory for fallback seeding."""
+    FALLBACK_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fallback_uri = f"sqlite:///{FALLBACK_DB_PATH}"
+    engine = create_engine(
+        fallback_uri,
+        connect_args={"check_same_thread": False},
+    )
+    Base.metadata.create_all(bind=engine)
+    factory = sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=engine,
+        expire_on_commit=False,
+    )
+    return factory, FALLBACK_DB_PATH
+
+
+def mask_db_uri(uri: str) -> str:
+    """Return a database URI with any password information masked."""
+    if not uri:
+        return uri
+
+    try:
+        url = make_url(uri)
+        if url.password:
+            url = url.set(password="***")
+        return str(url)
+    except Exception:
+        return uri
 
 
 def ensure_group(session: Session) -> Tuple[Group, bool]:
@@ -313,21 +352,58 @@ def ensure_role_users(session: Session, group: Group) -> None:
         print(f"[info] {role.title()} user {status} ({email}).")
 
 
-def main() -> None:
-    session: Session = SessionLocal()
+def seed_default_data(session: Session) -> None:
+    """Run the seeding workflow using the provided session."""
+    group, _ = ensure_group(session)
+    ensure_role_users(session, group)
+    game = ensure_default_game(session, group)
+    ensure_naive_agents(session, game)
+
+
+def run_seed_with_session(session_factory: Callable[[], Session]) -> None:
+    """Execute the seeding process using the supplied session factory."""
+    session: Session | None = None
     try:
-        group, _ = ensure_group(session)
-        ensure_role_users(session, group)
-        game = ensure_default_game(session, group)
-        ensure_naive_agents(session, game)
+        session = session_factory()
+        seed_default_data(session)
         session.commit()
-        print("[done] Default group, users, and game are ready.")
-    except Exception as exc:  # pragma: no cover - runtime safeguard
-        session.rollback()
-        print(f"[error] {exc}")
+    except Exception:
+        if session is not None:
+            session.rollback()
         raise
     finally:
-        session.close()
+        if session is not None:
+            session.close()
+
+
+def main() -> None:
+    configured_uri = settings.SQLALCHEMY_DATABASE_URI
+    configured_label = mask_db_uri(configured_uri)
+    print(f"[info] Attempting to seed default data using: {configured_label or 'default settings'}")
+
+    try:
+        run_seed_with_session(SessionLocal)
+        print("[done] Default group, users, and game are ready.")
+        if configured_label:
+            print(f"[info] Data stored in: {configured_label}")
+        return
+    except OperationalError as exc:
+        print(
+            "[warning] Could not use the configured database. "
+            f"Error: {exc}"
+        )
+
+    sqlite_factory, sqlite_path = create_sqlite_session_factory()
+    print(f"[info] Falling back to local SQLite database at {sqlite_path}.")
+
+    try:
+        run_seed_with_session(sqlite_factory)
+    except OperationalError as exc:
+        print("[error] Failed to seed using the SQLite fallback database.")
+        raise exc
+
+    print("[done] Default group, users, and game are ready.")
+    print(f"[info] Data stored in fallback SQLite database: {sqlite_path}")
 
 
 if __name__ == "__main__":
