@@ -18,7 +18,8 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import settings
-from app.db.base_class import Base, SessionLocal
+from app.db.base_class import SessionLocal
+from app.models import Base as ModelBase
 from app.models import (
     AgentConfig,
     Game,
@@ -63,7 +64,8 @@ def create_sqlite_session_factory() -> Tuple[sessionmaker, Path]:
         fallback_uri,
         connect_args={"check_same_thread": False},
     )
-    Base.metadata.create_all(bind=engine)
+    # Use the SQLAlchemy Base from the models package so all tables are registered
+    ModelBase.metadata.create_all(bind=engine)
     factory = sessionmaker(
         autocommit=False,
         autoflush=False,
