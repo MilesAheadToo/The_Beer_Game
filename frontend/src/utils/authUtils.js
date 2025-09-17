@@ -69,7 +69,7 @@ export const isGroupAdmin = (user) => {
 
 export const getDefaultLandingPath = (user) => {
   if (isSystemAdmin(user)) {
-    return '/demin/groups';  // System administrators land on dedicated group management
+    return '/admin/groups';
   }
 
   if (isGroupAdmin(user)) {
