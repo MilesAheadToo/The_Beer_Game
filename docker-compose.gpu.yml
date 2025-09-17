@@ -17,7 +17,7 @@ services:
     networks:
       - beer-game-network
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8088"]
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8088/healthz"]
       interval: 15s
       timeout: 5s
       retries: 4
@@ -92,11 +92,11 @@ services:
               count: all
               capabilities: [gpu]
     healthcheck:
-      test: ["CMD", "python", "-c", "import http.client; conn = http.client.HTTPConnection('localhost', 8000); conn.request('GET', '/api/health'); r = conn.getresponse(); exit(0 if r.status == 200 else 1)"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 45s
     runtime: nvidia
     extra_hosts:
       - "host.docker.internal:host-gateway"
