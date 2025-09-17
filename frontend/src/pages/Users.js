@@ -29,6 +29,7 @@ import {
 } from '@chakra-ui/react';
 import { AddIcon, DeleteIcon, EditIcon, UnlockIcon } from '@chakra-ui/icons';
 import { api } from '../services/api';
+import { getUserType as resolveUserType } from '../utils/authUtils';
 
 const Users = () => {
   const bgColor = useColorModeValue('white', 'gray.800');
@@ -73,7 +74,9 @@ const Users = () => {
 
   const toggleAdmin = async (user) => {
     try {
-      await api.put(`/users/${user.id}`, { is_superuser: !user.is_superuser });
+      const currentType = resolveUserType(user);
+      const nextType = currentType === 'systemadmin' ? 'Player' : 'SystemAdmin';
+      await api.put(`/users/${user.id}`, { user_type: nextType });
       toast({ title: 'Role updated', status: 'success', duration: 2000, isClosable: true });
       fetchUsers();
     } catch (e) {
@@ -96,12 +99,13 @@ const Users = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
+      const targetType = formData.is_admin ? 'SystemAdmin' : 'Player';
       if (editingUser) {
         // Update: email/full_name only (password uses change-password endpoint)
         await api.put(`/users/${editingUser.id}`, {
           email: formData.email,
           full_name: formData.full_name || undefined,
-          is_superuser: !!formData.is_admin,
+          user_type: targetType,
         });
         toast({ title: 'User updated', status: 'success', duration: 3000, isClosable: true });
       } else {
@@ -109,7 +113,7 @@ const Users = () => {
           username: formData.username,
           email: formData.email,
           password: formData.password || undefined,
-          is_superuser: !!formData.is_admin,
+          user_type: targetType,
         });
         toast({ title: 'User created', status: 'success', duration: 3000, isClosable: true });
       }
@@ -133,7 +137,7 @@ const Users = () => {
       username: user.username,
       email: user.email,
       password: '',
-      is_admin: user.is_superuser || (Array.isArray(user.roles) && user.roles.includes('admin'))
+      is_admin: resolveUserType(user) === 'systemadmin'
     });
     onOpen();
   };
@@ -216,13 +220,13 @@ const Users = () => {
                       {user.email}
                     </Text>
                   </Td>
-                  <Td>
-                    <HStack>
-                      <Badge colorScheme={user.is_superuser ? 'purple' : 'green'}>
-                        {user.is_superuser ? 'Admin' : 'User'}
+                 <Td>
+                   <HStack>
+                      <Badge colorScheme={resolveUserType(user) === 'systemadmin' ? 'purple' : 'green'}>
+                        {resolveUserType(user) === 'systemadmin' ? 'Admin' : 'User'}
                       </Badge>
-                      <Tooltip label={user.is_superuser ? 'Revoke admin' : 'Make admin'}>
-                        <input type="checkbox" checked={!!user.is_superuser} onChange={() => toggleAdmin(user)} />
+                      <Tooltip label={resolveUserType(user) === 'systemadmin' ? 'Revoke admin' : 'Make admin'}>
+                        <input type="checkbox" checked={resolveUserType(user) === 'systemadmin'} onChange={() => toggleAdmin(user)} />
                       </Tooltip>
                     </HStack>
                   </Td>

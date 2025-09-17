@@ -12,6 +12,7 @@ from ..models import (
     PlayerType,
     PlayerStrategy,
 )
+from ..models.user import UserTypeEnum
 from ..models.supply_chain_config import (
     Item,
     Node,
@@ -53,7 +54,7 @@ class GroupService:
                 email=admin_data.email,
                 full_name=admin_data.full_name,
                 hashed_password=hashed_password,
-                roles=["groupadmin", "admin"],
+                user_type=UserTypeEnum.GROUP_ADMIN,
                 group_id=group.id,
                 is_active=True,
                 is_superuser=False
@@ -192,7 +193,7 @@ class GroupService:
                     email=spec["email"],
                     full_name=spec["full_name"],
                     hashed_password=player_password_hash,
-                    roles=["player"],
+                    user_type=UserTypeEnum.PLAYER,
                     group_id=group.id,
                     is_active=True,
                     is_superuser=False,

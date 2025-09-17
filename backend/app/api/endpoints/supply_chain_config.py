@@ -4,7 +4,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Dict, Any, Iterable, Set
+from typing import List, Optional, Dict, Any
 
 import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, status, Body
@@ -16,6 +16,7 @@ from app.api import deps
 from app.core.config import settings
 from app.services.supply_chain_config_service import SupplyChainConfigService
 from app.models.supply_chain_config import NodeType, SupplyChainConfig
+from app.models.user import UserTypeEnum
 from app.schemas.game import GameCreate
 from app.rl.data_generator import generate_sim_training_windows
 
@@ -76,18 +77,6 @@ def get_node_or_404(db: Session, node_id: int, config_id: int):
     return node
 
 
-def _normalize_roles(roles: Optional[Iterable[str]]) -> Set[str]:
-    """Normalize role strings to a comparable set."""
-    normalized: Set[str] = set()
-    if not roles:
-        return normalized
-
-    for role in roles:
-        if isinstance(role, str):
-            normalized.add(role.strip().lower().replace(" ", "").replace("_", ""))
-    return normalized
-
-
 def _get_user_admin_group_id(db: Session, user: models.User) -> Optional[int]:
     """Return the group ID managed by the provided user, if any."""
     if user.is_superuser:
@@ -102,10 +91,14 @@ def _get_user_admin_group_id(db: Session, user: models.User) -> Optional[int]:
     if direct_group:
         return direct_group.id
 
-    # Fall back to role-based group admins tied to their group's membership
-    normalized_roles = _normalize_roles(getattr(user, "roles", []))
-    is_group_admin = "groupadmin" in normalized_roles or "admin" in normalized_roles
-    if is_group_admin and user.group_id:
+    user_type = getattr(user, "user_type", None)
+    if isinstance(user_type, str):
+        try:
+            user_type = UserTypeEnum(user_type)
+        except ValueError:
+            user_type = None
+
+    if user_type == UserTypeEnum.GROUP_ADMIN and user.group_id:
         group = (
             db.query(models.Group)
             .filter(models.Group.id == user.group_id)

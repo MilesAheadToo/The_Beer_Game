@@ -27,25 +27,13 @@ import { Add as AddIcon, Delete as DeleteIcon, Edit as EditIcon } from '@mui/ico
 import { toast } from 'react-toastify';
 import { api } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
-import { isSystemAdmin as isSystemAdminUser, normalizeRoles } from '../../utils/authUtils';
+import { isSystemAdmin as isSystemAdminUser, getUserType as resolveUserType } from '../../utils/authUtils';
 
 const BASE_FORM = {
   username: '',
   email: '',
   password: '',
   groupId: '',
-};
-
-const getUserType = (user) => {
-  if (!user) return 'player';
-  const roles = normalizeRoles(user.roles || []);
-  if (user.is_superuser || roles.includes('systemadmin')) {
-    return 'system_admin';
-  }
-  if (roles.includes('groupadmin') || roles.includes('admin')) {
-    return 'group_admin';
-  }
-  return 'player';
 };
 
 const parseErrorMessage = (error, fallback) => {
@@ -92,9 +80,9 @@ function SystemAdminUserManagement() {
 
   const loadAdmins = useCallback(async () => {
     try {
-      const response = await api.get('/users', { params: { user_type: 'group_admin', limit: 250 } });
+      const response = await api.get('/users', { params: { user_type: 'GroupAdmin', limit: 250 } });
       const data = Array.isArray(response.data) ? response.data : [];
-      const filtered = data.filter((item) => getUserType(item) === 'group_admin');
+      const filtered = data.filter((item) => resolveUserType(item) === 'groupadmin');
       setAdmins(filtered);
       return filtered;
     } catch (error) {
@@ -178,7 +166,7 @@ function SystemAdminUserManagement() {
       username: trimmedUsername,
       email: trimmedEmail,
       group_id: Number(trimmedGroup),
-      user_type: 'group_admin',
+      user_type: 'GroupAdmin',
     };
 
     if (!editingUser) {

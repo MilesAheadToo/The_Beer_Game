@@ -1,5 +1,6 @@
+import uuid
 from datetime import datetime, timedelta
-from typing import Optional, List, Any, Union, Callable, Awaitable, Dict
+from typing import Optional, Any, Union, Callable, Awaitable, Dict
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status, Request, Response
@@ -10,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
-from app.models.user import User
+from app.models.user import User, UserTypeEnum
 from app.repositories.users import get_user_by_email
 
 # Password hashing
@@ -32,8 +33,8 @@ def get_password_hash(password: str) -> str:
 
 
 def create_access_token(
-    subject: str, 
-    roles: List[str] = None, 
+    subject: str,
+    user_type: Optional[str] = None,
     expires_delta: Optional[timedelta] = None
 ) -> str:
     """
@@ -41,7 +42,7 @@ def create_access_token(
     
     Args:
         subject: The subject of the token (usually user ID or email)
-        roles: List of user roles
+        user_type: Serialized user type string
         expires_delta: Optional timedelta for token expiration
         
     Returns:
@@ -58,7 +59,7 @@ def create_access_token(
         "iat": datetime.utcnow(),
         "jti": str(uuid.uuid4()),
         "type": "access",
-        "roles": roles or []
+        "user_type": user_type,
     }
     
     encoded_jwt = jwt.encode(
@@ -173,8 +174,14 @@ async def get_current_user(
                 detail="User not found",
             )
             
-        # Attach roles from token to user object
-        user.roles = payload.get("roles", [])
+        token_user_type = payload.get("user_type")
+        if token_user_type:
+            try:
+                user.user_type = UserTypeEnum(token_user_type)
+            except ValueError:
+                user.user_type = UserTypeEnum.PLAYER
+        elif getattr(user, "user_type", None) is None:
+            user.user_type = UserTypeEnum.SYSTEM_ADMIN if user.is_superuser else UserTypeEnum.PLAYER
         return user
         
     except JWTError:

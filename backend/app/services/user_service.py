@@ -5,29 +5,22 @@ from fastapi import HTTPException, status
 from .. import models
 from ..schemas import user as user_schemas
 from ..core.security import get_password_hash, verify_password
+from ..models.user import UserTypeEnum
 
 
 class UserService:
     """Service layer for user management."""
 
     TYPE_ALIASES = {
-        "player": "player",
-        "players": "player",
-        "groupadmin": "group_admin",
-        "groupadministrator": "group_admin",
-        "admin": "group_admin",
-        "systemadmin": "system_admin",
-        "systemadministrator": "system_admin",
-        "superadmin": "system_admin",
+        "player": UserTypeEnum.PLAYER,
+        "players": UserTypeEnum.PLAYER,
+        "groupadmin": UserTypeEnum.GROUP_ADMIN,
+        "groupadministrator": UserTypeEnum.GROUP_ADMIN,
+        "admin": UserTypeEnum.GROUP_ADMIN,
+        "systemadmin": UserTypeEnum.SYSTEM_ADMIN,
+        "systemadministrator": UserTypeEnum.SYSTEM_ADMIN,
+        "superadmin": UserTypeEnum.SYSTEM_ADMIN,
     }
-
-    TYPE_ROLE_MAP = {
-        "player": ["player"],
-        "group_admin": ["group_admin", "admin"],
-        "system_admin": ["system_admin"],
-    }
-
-    TYPE_ROLE_TOKENS = {"player", "groupadmin", "admin", "systemadmin", "superadmin"}
 
     def __init__(self, db: Session):
         self.db = db
@@ -36,14 +29,16 @@ class UserService:
     # Helpers
     # ------------------------------------------------------------------
     @staticmethod
-    def _normalize_token(value: Optional[str]) -> str:
+    def _normalize_token(self, value: Optional[Any]) -> str:
         if not value:
             return ""
         return "".join(ch for ch in str(value).lower() if ch.isalnum())
 
-    def _normalize_type(self, user_type: Optional[str]) -> Optional[str]:
+    def _normalize_type(self, user_type: Optional[Any]) -> Optional[UserTypeEnum]:
         if not user_type:
             return None
+        if isinstance(user_type, UserTypeEnum):
+            return user_type
         token = self._normalize_token(user_type)
         if token not in self.TYPE_ALIASES:
             raise HTTPException(
@@ -52,56 +47,23 @@ class UserService:
             )
         return self.TYPE_ALIASES[token]
 
-    def _normalized_roles(self, roles: Optional[List[str]]) -> List[str]:
-        return [
-            token
-            for role in roles or []
-            if (token := self._normalize_token(role))
-        ]
-
-    def _strip_type_roles(self, roles: Optional[List[str]]) -> List[str]:
-        cleaned: List[str] = []
-        for role in roles or []:
-            token = self._normalize_token(role)
-            if token in self.TYPE_ROLE_TOKENS:
-                continue
-            cleaned.append(role)
-        return cleaned
-
-    @staticmethod
-    def _dedupe_roles(roles: List[str]) -> List[str]:
-        seen = set()
-        deduped: List[str] = []
-        for role in roles:
-            if role is None:
-                continue
-            if not isinstance(role, str):
-                role = str(role)
-            if role not in seen:
-                deduped.append(role)
-                seen.add(role)
-        return deduped
-
     def _resolve_user_type(
         self,
-        user_type: Optional[str],
-        roles: Optional[List[str]],
-        is_superuser: Optional[bool],
-        existing_roles: Optional[List[str]],
-        default_is_superuser: bool,
-    ) -> str:
+        user_type: Optional[Any],
+        fallback: Optional[UserTypeEnum] = None,
+        assume_superuser: bool = False,
+    ) -> UserTypeEnum:
         normalized_type = self._normalize_type(user_type)
         if normalized_type:
             return normalized_type
 
-        normalized_roles = set(self._normalized_roles(roles if roles is not None else existing_roles))
-        if is_superuser is True or default_is_superuser:
-            return "system_admin"
-        if "systemadmin" in normalized_roles or "superadmin" in normalized_roles:
-            return "system_admin"
-        if "groupadmin" in normalized_roles or "admin" in normalized_roles:
-            return "group_admin"
-        return "player"
+        if assume_superuser:
+            return UserTypeEnum.SYSTEM_ADMIN
+
+        if fallback is not None:
+            return fallback
+
+        return UserTypeEnum.PLAYER
 
     def _normalize_group_id(self, group_id: Optional[Any]) -> Optional[int]:
         if group_id is None:
@@ -129,7 +91,7 @@ class UserService:
     def _validate_group_assignment(
         self,
         group_id: Optional[Any],
-        user_type: str,
+        user_type: UserTypeEnum,
     ) -> (Optional[models.Group], Optional[int]):
         normalized_group_id = self._normalize_group_id(group_id)
         group: Optional[models.Group] = None
@@ -141,7 +103,7 @@ class UserService:
                     detail="Group not found",
                 )
 
-        if user_type in {"player", "group_admin"} and group is None:
+        if user_type in {UserTypeEnum.PLAYER, UserTypeEnum.GROUP_ADMIN} and group is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="A group assignment is required for this user type",
@@ -158,19 +120,17 @@ class UserService:
         roles.extend(self.TYPE_ROLE_MAP[user_type])
         return self._dedupe_roles(roles)
 
-    def _is_group_admin_user(self, user: models.User) -> bool:
+    def _is_group_admin_user(self, user: Optional[models.User]) -> bool:
         if not user or not user.group_id:
             return False
-        normalized_roles = set(self._normalized_roles(user.roles))
-        return "groupadmin" in normalized_roles or "admin" in normalized_roles
+        return self._get_user_type(user) == UserTypeEnum.GROUP_ADMIN
 
-    def _get_user_type(self, user: models.User) -> str:
+    def _get_user_type(self, user: models.User) -> UserTypeEnum:
+        fallback = UserTypeEnum.SYSTEM_ADMIN if user.is_superuser else user.user_type
         return self._resolve_user_type(
-            user_type=None,
-            roles=user.roles,
-            is_superuser=user.is_superuser,
-            existing_roles=user.roles,
-            default_is_superuser=user.is_superuser,
+            user_type=user.user_type,
+            fallback=fallback,
+            assume_superuser=user.is_superuser,
         )
 
     def _find_group_admins(
@@ -265,7 +225,7 @@ class UserService:
             .order_by(models.User.username.asc())
         )
         users = query.all()
-        players = [user for user in users if self._get_user_type(user) == "player"]
+        players = [user for user in users if self._get_user_type(user) == UserTypeEnum.PLAYER]
 
         if skip or (limit is not None and limit >= 0):
             end = skip + limit if limit is not None else None
@@ -281,8 +241,10 @@ class UserService:
     ) -> List[models.User]:
         normalized_type = self._normalize_type(user_type) if user_type else None
 
-        if current_user.is_superuser:
-            target_type = normalized_type or "group_admin"
+        acting_type = self._get_user_type(current_user)
+
+        if acting_type == UserTypeEnum.SYSTEM_ADMIN:
+            target_type = normalized_type or UserTypeEnum.GROUP_ADMIN
             users = (
                 self.db.query(models.User)
                 .order_by(models.User.username.asc())
@@ -294,8 +256,8 @@ class UserService:
             end = start + limit if limit is not None else None
             return filtered[start:end]
 
-        if self._is_group_admin_user(current_user):
-            if normalized_type and normalized_type != "player":
+        if acting_type == UserTypeEnum.GROUP_ADMIN:
+            if normalized_type and normalized_type != UserTypeEnum.PLAYER:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Group admins can only view players",
@@ -310,7 +272,7 @@ class UserService:
     def is_group_admin(self, user: models.User) -> bool:
         return self._is_group_admin_user(user)
 
-    def get_user_type(self, user: models.User) -> str:
+    def get_user_type(self, user: models.User) -> UserTypeEnum:
         return self._get_user_type(user)
 
     # ------------------------------------------------------------------
@@ -321,8 +283,9 @@ class UserService:
         user: user_schemas.UserCreate,
         current_user: models.User,
     ) -> models.User:
-        acting_is_superuser = bool(current_user and current_user.is_superuser)
-        acting_is_group_admin = self._is_group_admin_user(current_user) if current_user else False
+        acting_type = self._get_user_type(current_user) if current_user else None
+        acting_is_superuser = acting_type == UserTypeEnum.SYSTEM_ADMIN
+        acting_is_group_admin = acting_type == UserTypeEnum.GROUP_ADMIN
 
         if not acting_is_superuser and not acting_is_group_admin:
             raise HTTPException(
@@ -349,22 +312,17 @@ class UserService:
         if acting_is_superuser:
             desired_type = self._resolve_user_type(
                 user_type=user.user_type,
-                roles=user.roles,
-                is_superuser=user.is_superuser,
-                existing_roles=user.roles,
-                default_is_superuser=bool(user.is_superuser),
+                fallback=UserTypeEnum.GROUP_ADMIN,
+                assume_superuser=bool(user.is_superuser),
             )
-            if desired_type == "player" and user.user_type is None:
-                desired_type = "group_admin"
 
-            if desired_type != "group_admin":
+            if desired_type != UserTypeEnum.GROUP_ADMIN:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="System administrators can only create group admin users",
                 )
 
             group, normalized_group_id = self._validate_group_assignment(user.group_id, desired_type)
-            roles_source = user.roles
             is_superuser_flag = False
         else:
             if not current_user or not current_user.group_id:
@@ -379,7 +337,7 @@ class UserService:
                     detail="Group admins can only assign users to their own group",
                 )
 
-            if user.user_type and user.user_type != "player":
+            if user.user_type and self._normalize_type(user.user_type) != UserTypeEnum.PLAYER:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Group admins can only create players",
@@ -391,19 +349,9 @@ class UserService:
                     detail="Group admins cannot grant system permissions",
                 )
 
-            normalized_roles = set(self._normalized_roles(user.roles))
-            if normalized_roles - {"player"}:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Group admins cannot assign custom roles",
-                )
-
-            desired_type = "player"
+            desired_type = UserTypeEnum.PLAYER
             group, normalized_group_id = self._validate_group_assignment(current_user.group_id, desired_type)
-            roles_source = []
             is_superuser_flag = False
-
-        roles = self._prepare_roles_for_type(roles_source, desired_type)
 
         db_user = models.User(
             username=user.username,
@@ -413,14 +361,14 @@ class UserService:
             is_active=True,
             is_superuser=is_superuser_flag,
             group_id=normalized_group_id,
-            roles=roles,
+            user_type=desired_type,
         )
 
         try:
             self.db.add(db_user)
             self.db.flush()
 
-            if desired_type == "group_admin" and group and (group.admin_id is None):
+            if desired_type == UserTypeEnum.GROUP_ADMIN and group and (group.admin_id is None):
                 group.admin_id = db_user.id
                 self.db.add(group)
 
@@ -441,15 +389,16 @@ class UserService:
         current_user: models.User,
     ) -> models.User:
         db_user = self.get_user(user_id)
-        acting_is_superuser = bool(current_user.is_superuser)
-        acting_is_group_admin = self._is_group_admin_user(current_user)
+        acting_type = self._get_user_type(current_user)
+        acting_is_superuser = acting_type == UserTypeEnum.SYSTEM_ADMIN
+        acting_is_group_admin = acting_type == UserTypeEnum.GROUP_ADMIN
         target_type = self._get_user_type(db_user)
 
         is_group_admin_managing_player = (
             acting_is_group_admin
             and not acting_is_superuser
             and user_id != current_user.id
-            and target_type == "player"
+            and target_type == UserTypeEnum.PLAYER
             and db_user.group_id == current_user.group_id
         )
 
@@ -470,7 +419,7 @@ class UserService:
                     detail="Group admins cannot change a player's group",
                 )
 
-            if user_update.user_type and user_update.user_type != "player":
+            if user_update.user_type and self._normalize_type(user_update.user_type) != UserTypeEnum.PLAYER:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Group admins can only manage players",
@@ -481,15 +430,6 @@ class UserService:
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Group admins cannot modify system permissions",
                 )
-
-            if user_update.roles is not None:
-                normalized_roles = set(self._normalized_roles(user_update.roles))
-                disallowed_roles = normalized_roles - {"player"}
-                if disallowed_roles:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Group admins cannot modify player roles",
-                    )
 
             if user_update.is_active is not None:
                 raise HTTPException(
@@ -532,11 +472,8 @@ class UserService:
                     detail="Error updating user",
                 )
 
-        if (
-            acting_is_superuser
-            and user_id != current_user.id
-        ):
-            if target_type != "group_admin":
+        if acting_is_superuser and user_id != current_user.id:
+            if target_type != UserTypeEnum.GROUP_ADMIN:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="System administrators can only manage group admin users",
@@ -547,7 +484,7 @@ class UserService:
                 if user_update.user_type is not None
                 else None
             )
-            if normalized_update_type and normalized_update_type != "group_admin":
+            if normalized_update_type and normalized_update_type != UserTypeEnum.GROUP_ADMIN:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="System administrators can only assign the group admin user type",
@@ -559,15 +496,6 @@ class UserService:
                     detail="System administrators cannot modify system permissions for group admins",
                 )
 
-            if user_update.roles is not None:
-                normalized_roles = set(self._normalized_roles(user_update.roles))
-                disallowed_roles = normalized_roles - {"groupadmin", "admin"}
-                if disallowed_roles:
-                    raise HTTPException(
-                        status_code=status.HTTP_403_FORBIDDEN,
-                        detail="System administrators cannot assign custom roles to group admins",
-                    )
-
             if user_update.is_active is not None:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -575,7 +503,7 @@ class UserService:
                 )
 
             if user_update.group_id is not None:
-                self._validate_group_assignment(user_update.group_id, "group_admin")
+                self._validate_group_assignment(user_update.group_id, UserTypeEnum.GROUP_ADMIN)
 
         if user_update.email is not None:
             existing = self.get_user_by_email(user_update.email)
@@ -612,10 +540,8 @@ class UserService:
 
         desired_type = self._resolve_user_type(
             user_type=user_update.user_type,
-            roles=user_update.roles if user_update.roles is not None else db_user.roles,
-            is_superuser=user_update.is_superuser,
-            existing_roles=db_user.roles,
-            default_is_superuser=(
+            fallback=target_type,
+            assume_superuser=bool(
                 user_update.is_superuser
                 if user_update.is_superuser is not None
                 else db_user.is_superuser
@@ -637,12 +563,6 @@ class UserService:
                     detail="Not enough permissions to change user type",
                 )
 
-            if user_update.roles is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Not enough permissions to change roles",
-                )
-
             if user_update.is_superuser is not None and user_update.is_superuser != db_user.is_superuser:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -650,9 +570,9 @@ class UserService:
                 )
 
         # Prevent removing the last group admin from a group via update
-        if previous_type == "group_admin":
+        if previous_type == UserTypeEnum.GROUP_ADMIN:
             changing_group = normalized_group_id != previous_group_id
-            losing_admin_role = desired_type != "group_admin"
+            losing_admin_role = desired_type != UserTypeEnum.GROUP_ADMIN
             if changing_group or losing_admin_role:
                 other_admins = self._find_group_admins(previous_group_id, exclude_user_id=db_user.id)
                 if not other_admins:
@@ -665,17 +585,14 @@ class UserService:
                     previous_group.admin_id = other_admins[0].id
                     self.db.add(previous_group)
 
-        roles_source = user_update.roles if user_update.roles is not None else db_user.roles
-        roles = self._prepare_roles_for_type(roles_source, desired_type)
-
         db_user.group_id = normalized_group_id
-        db_user.roles = roles
-        db_user.is_superuser = desired_type == "system_admin"
+        db_user.user_type = desired_type
+        db_user.is_superuser = desired_type == UserTypeEnum.SYSTEM_ADMIN
 
         if user_update.password:
             db_user.hashed_password = get_password_hash(user_update.password)
 
-        if desired_type == "group_admin" and group and (group.admin_id is None or group.admin_id == db_user.id):
+        if desired_type == UserTypeEnum.GROUP_ADMIN and group and (group.admin_id is None or group.admin_id == db_user.id):
             group.admin_id = db_user.id
             self.db.add(group)
 
@@ -697,12 +614,13 @@ class UserService:
         replacement_admin_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         db_user = self.get_user(user_id)
-        acting_is_superuser = bool(current_user.is_superuser)
-        acting_is_group_admin = self._is_group_admin_user(current_user)
+        acting_type = self._get_user_type(current_user)
+        acting_is_superuser = acting_type == UserTypeEnum.SYSTEM_ADMIN
+        acting_is_group_admin = acting_type == UserTypeEnum.GROUP_ADMIN
         user_type = self._get_user_type(db_user)
         is_self_delete = user_id == current_user.id
 
-        if acting_is_superuser and not is_self_delete and user_type != "group_admin":
+        if acting_is_superuser and not is_self_delete and user_type != UserTypeEnum.GROUP_ADMIN:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="System administrators can only delete group admin users",
@@ -712,7 +630,7 @@ class UserService:
             acting_is_group_admin
             and not acting_is_superuser
             and user_id != current_user.id
-            and user_type == "player"
+            and user_type == UserTypeEnum.PLAYER
             and db_user.group_id == current_user.group_id
         )
 
@@ -735,7 +653,7 @@ class UserService:
         promoted_user: Optional[models.User] = None
 
         try:
-            if user_type == "system_admin":
+            if user_type == UserTypeEnum.SYSTEM_ADMIN:
                 other_admins = self.db.query(models.User).filter(
                     models.User.id != db_user.id,
                     models.User.is_superuser == True,
@@ -783,9 +701,7 @@ class UserService:
                             detail="Replacement user must be a group admin",
                         )
 
-                    replacement_roles = list(replacement_user.roles or [])
-                    replacement_roles.append("system_admin")
-                    replacement_user.roles = self._dedupe_roles(replacement_roles)
+                    replacement_user.user_type = UserTypeEnum.SYSTEM_ADMIN
                     replacement_user.is_superuser = True
                     self.db.add(replacement_user)
                     promoted_user = replacement_user

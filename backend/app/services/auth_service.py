@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
 from app.core.config import settings
-from app.models.user import User, RefreshToken
+from app.models.user import User, RefreshToken, UserTypeEnum
 from app.models.auth_models import PasswordHistory, PasswordResetToken
 from app.schemas.user import (
     UserCreate, 
@@ -26,6 +26,7 @@ from app.schemas.user import (
 from app.core.security import get_password_hash, verify_password, oauth2_scheme, verify_password_strength, create_access_token
 from app.db.deps import get_db
 from app.core.config import settings
+from app.repositories.users import get_user_by_id
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -126,22 +127,18 @@ class AuthService:
                 },
             )
 
-        roles: List[str] = user.roles or []
-        normalized_roles = [
-            str(role).strip().lower().replace(" ", "") if isinstance(role, str) else ""
-            for role in roles
-        ]
-        normalized_roles = [r.replace("_", "") for r in normalized_roles if r]
+        user_type = getattr(user, "user_type", None)
+        if isinstance(user_type, str):
+            try:
+                user_type = UserTypeEnum(user_type)
+            except ValueError:
+                user_type = None
+        if user_type is None:
+            user_type = UserTypeEnum.SYSTEM_ADMIN if user.is_superuser else UserTypeEnum.PLAYER
 
-        is_system_admin = bool(
-            user.is_superuser
-            or "systemadmin" in normalized_roles
-            or "superadmin" in normalized_roles
-        )
-        is_group_admin = (
-            "groupadmin" in normalized_roles or "admin" in normalized_roles
-        ) and not is_system_admin
-        is_player = "player" in normalized_roles
+        is_system_admin = bool(user.is_superuser or user_type == UserTypeEnum.SYSTEM_ADMIN)
+        is_group_admin = user_type == UserTypeEnum.GROUP_ADMIN
+        is_player = user_type == UserTypeEnum.PLAYER
 
         # Check if the account is locked
         if user.failed_login_attempts >= settings.MAX_LOGIN_ATTEMPTS and \
@@ -262,9 +259,22 @@ class AuthService:
         """Create access and refresh tokens for a user."""
 
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+
+        user_type_value: Optional[str] = None
+        user_type = getattr(user, "user_type", None)
+        if isinstance(user_type, UserTypeEnum):
+            user_type_value = user_type.value
+        elif isinstance(user_type, str):
+            try:
+                user_type_value = UserTypeEnum(user_type).value
+            except ValueError:
+                user_type_value = None
+        if user_type_value is None and user.is_superuser:
+            user_type_value = UserTypeEnum.SYSTEM_ADMIN.value
+
         access_token = create_access_token(
             subject=str(user.id),
-            roles=user.roles,
+            user_type=user_type_value,
             expires_delta=access_token_expires,
         )
 
@@ -305,8 +315,23 @@ class AuthService:
             
         # Create new access token
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        user = await get_user_by_id(self.db, db_token.user_id)
+        user_type_value: Optional[str] = None
+        if user:
+            utype = getattr(user, "user_type", None)
+            if isinstance(utype, UserTypeEnum):
+                user_type_value = utype.value
+            elif isinstance(utype, str):
+                try:
+                    user_type_value = UserTypeEnum(utype).value
+                except ValueError:
+                    user_type_value = None
+            if user_type_value is None and user.is_superuser:
+                user_type_value = UserTypeEnum.SYSTEM_ADMIN.value
+
         access_token = create_access_token(
             subject=str(db_token.user_id),
+            user_type=user_type_value,
             expires_delta=access_token_expires,
         )
         

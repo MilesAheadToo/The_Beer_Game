@@ -3,6 +3,7 @@ from typing import List, Any, Optional
 from sqlalchemy.orm import Session
 from ... import models
 from ...schemas.user import User, UserCreate, UserUpdate, UserInDB, UserPasswordChange
+from ...models.user import UserTypeEnum
 from ...db.session import get_db
 from ...core.security import get_current_active_user
 from ...services.user_service import UserService
@@ -107,7 +108,10 @@ async def read_user(
         return user
 
     if user_service.is_group_admin(current_user):
-        if user.group_id == current_user.group_id and user_service.get_user_type(user) == "player":
+        if (
+            user.group_id == current_user.group_id
+            and user_service.get_user_type(user) == UserTypeEnum.PLAYER
+        ):
             return user
 
     raise HTTPException(

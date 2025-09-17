@@ -3,9 +3,9 @@ import { createContext, useContext, useEffect, useMemo, useState, useCallback, u
 import { mixedGameApi } from '../services/api';
 import { toast } from 'react-toastify';
 import {
-  getNormalizedEmail,
   isSystemAdmin,
-  normalizeRoles,
+  isGroupAdmin as isGroupAdminUtil,
+  getUserType,
 } from '../utils/authUtils';
 
 // Session timeout in milliseconds (30 minutes)
@@ -210,16 +210,23 @@ export function AuthProvider({ children }) {
   // ----- Role helpers -----
   const hasRole = useCallback((role) => {
     if (!user || !role) return false;
-    if (isSystemAdmin(user)) return true;
 
-    const normalizedRoles = normalizeRoles(user.roles || []);
-    const [targetRole] = normalizeRoles([role]);
+    const normalized = String(role).trim().toLowerCase().replace(/[\s_-]+/g, '');
+    const userType = getUserType(user);
 
-    if (!targetRole) {
-      return false;
+    if (normalized === 'systemadmin') {
+      return userType === 'systemadmin';
     }
 
-    return normalizedRoles.includes(targetRole);
+    if (normalized === 'groupadmin' || normalized === 'admin') {
+      return userType === 'groupadmin' || userType === 'systemadmin';
+    }
+
+    if (normalized === 'player') {
+      return userType === 'player';
+    }
+
+    return false;
   }, [user]);
 
   const hasAnyRole = useCallback((roles = []) => {
@@ -235,14 +242,7 @@ export function AuthProvider({ children }) {
   const isGroupAdmin = useMemo(() => {
     if (!user) return false;
     if (isSystemAdmin(user)) return true;
-
-    const normalizedRoles = normalizeRoles(user.roles || []);
-    const normalizedEmail = getNormalizedEmail(user);
-
-    return (
-      normalizedRoles.includes('groupadmin') ||
-      normalizedEmail === 'groupadmin@daybreak.ai'
-    );
+    return isGroupAdminUtil(user);
   }, [user]);
 
   const value = useMemo(() => ({

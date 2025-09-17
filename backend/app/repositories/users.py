@@ -1,7 +1,7 @@
-from typing import Optional, List
+from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy.future import select
-from app.models.user import User
+from app.models.user import User, UserTypeEnum
 
 async def get_user_by_email(db: Session, email: str) -> Optional[User]:
     """
@@ -32,11 +32,11 @@ async def get_user_by_id(db: Session, user_id: int) -> Optional[User]:
     return result.scalars().first()
 
 async def create_user(
-    db: Session, 
-    email: str, 
+    db: Session,
+    email: str,
     hashed_password: str,
     name: Optional[str] = None,
-    roles: Optional[List[str]] = None
+    user_type: Optional[UserTypeEnum] = None,
 ) -> User:
     """
     Create a new user.
@@ -46,16 +46,18 @@ async def create_user(
         email: User's email address
         hashed_password: Hashed password
         name: User's name (optional)
-        roles: List of user roles (optional)
+        user_type: Enumerated user type (optional)
         
     Returns:
         User: The created user
     """
+    normalized_type = user_type or UserTypeEnum.PLAYER
     user = User(
         email=email,
         hashed_password=hashed_password,
-        name=name,
-        roles=roles or []
+        full_name=name,
+        user_type=normalized_type,
+        is_superuser=normalized_type == UserTypeEnum.SYSTEM_ADMIN,
     )
     db.add(user)
     await db.commit()

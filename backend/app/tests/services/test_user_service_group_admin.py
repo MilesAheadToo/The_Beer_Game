@@ -17,6 +17,7 @@ from app import models  # noqa: E402
 from app.core.security import get_password_hash  # noqa: E402
 from app.schemas import user as user_schemas  # noqa: E402
 from app.services.user_service import UserService  # noqa: E402
+from app.models.user import UserTypeEnum  # noqa: E402
 
 
 @pytest.fixture()
@@ -33,7 +34,16 @@ def db_session():
         engine.dispose()
 
 
-def create_user(session, *, username, email, password="StrongPass1!", roles=None, group_id=None, is_superuser=False):
+def create_user(
+    session,
+    *,
+    username,
+    email,
+    password="StrongPass1!",
+    user_type=UserTypeEnum.PLAYER,
+    group_id=None,
+    is_superuser=False,
+):
     user = models.User(
         username=username,
         email=email,
@@ -41,7 +51,7 @@ def create_user(session, *, username, email, password="StrongPass1!", roles=None
         full_name=None,
         is_active=True,
         is_superuser=is_superuser,
-        roles=roles or [],
+        user_type=user_type,
         group_id=group_id,
     )
     session.add(user)
@@ -54,7 +64,7 @@ def create_group_with_admin(session, name, username, email):
         session,
         username=username,
         email=email,
-        roles=["group_admin", "admin"],
+        user_type=UserTypeEnum.GROUP_ADMIN,
     )
     group = models.Group(
         name=name,
@@ -76,7 +86,7 @@ def create_player(session, group, username, email):
         session,
         username=username,
         email=email,
-        roles=["player"],
+        user_type=UserTypeEnum.PLAYER,
         group_id=group.id,
     )
     session.commit()
@@ -113,7 +123,7 @@ def test_group_admin_create_player_defaults_to_group_and_type(db_session):
     )
 
     assert new_player.group_id == group.id
-    assert service.get_user_type(new_player) == "player"
+    assert service.get_user_type(new_player) == UserTypeEnum.PLAYER
     assert new_player.is_superuser is False
 
 
@@ -127,7 +137,7 @@ def test_group_admin_cannot_create_non_player(db_session):
                 username="bad_user",
                 email="bad_user@example.com",
                 password="SecurePass1!",
-                user_type="group_admin",
+                user_type=UserTypeEnum.GROUP_ADMIN,
             ),
             admin,
         )

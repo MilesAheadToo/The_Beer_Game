@@ -1,9 +1,9 @@
 from datetime import datetime
-from typing import Optional, List, TYPE_CHECKING, Any, Dict
-import json
+from enum import Enum
+from typing import Optional, TYPE_CHECKING, Any, Dict, List
 from sqlalchemy import Boolean, Column, Integer, String, DateTime, ForeignKey, Table, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Enum as SAEnum
 from pydantic import BaseModel, EmailStr, Field
 
 from .base import Base
@@ -26,6 +26,13 @@ user_games = Table(
     Column('game_id', Integer, ForeignKey('games.id'), primary_key=True)
 )
 
+class UserTypeEnum(str, Enum):
+    """Application-level user type classification."""
+    SYSTEM_ADMIN = "SystemAdmin"
+    GROUP_ADMIN = "GroupAdmin"
+    PLAYER = "Player"
+
+
 class UserBase(BaseModel):
     """Base Pydantic model for User data validation."""
     email: EmailStr
@@ -34,7 +41,7 @@ class UserBase(BaseModel):
     is_active: bool = True
     is_superuser: bool = False
     group_id: Optional[int] = None
-    roles: List[str] = Field(default_factory=list)
+    user_type: UserTypeEnum = Field(default=UserTypeEnum.PLAYER)
 
     class Config:
         from_attributes = True  # Updated from orm_mode in Pydantic v2
@@ -69,7 +76,6 @@ class UserPublic(UserBase):
     created_at: datetime
     updated_at: datetime
     is_superuser: bool = False
-    roles: List[str] = Field(default_factory=list)
     last_login: Optional[datetime] = None
     
     class Config:
@@ -89,7 +95,12 @@ class User(Base):
     full_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     is_superuser: Mapped[bool] = mapped_column(Boolean, default=False)
-    roles: Mapped[Optional[List[str]]] = mapped_column(JSONB, default=list, nullable=True)
+    user_type: Mapped[UserTypeEnum] = mapped_column(
+        SAEnum(UserTypeEnum, name="user_type_enum"),
+        nullable=False,
+        server_default=UserTypeEnum.PLAYER.value,
+        default=UserTypeEnum.PLAYER,
+    )
     last_login: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_password_change: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     failed_login_attempts: Mapped[int] = mapped_column(Integer, default=0)
@@ -110,12 +121,19 @@ class User(Base):
 
     @property
     def is_admin(self) -> bool:
-        """Check if the user has admin role."""
-        return "admin" in (self.roles or [])
+        """Check if the user is classified as a group administrator."""
+        return self.user_type == UserTypeEnum.GROUP_ADMIN
 
     def has_role(self, role: str) -> bool:
-        """Check if the user has a specific role."""
-        return self.roles and role in self.roles
+        """Legacy role helper for compatibility with older checks."""
+        normalized = (role or "").strip().lower()
+        if normalized in {"systemadmin", "system_admin", "superadmin"}:
+            return self.user_type == UserTypeEnum.SYSTEM_ADMIN
+        if normalized in {"groupadmin", "group_admin", "admin"}:
+            return self.user_type == UserTypeEnum.GROUP_ADMIN
+        if normalized in {"player"}:
+            return self.user_type == UserTypeEnum.PLAYER
+        return False
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert user object to dictionary."""
@@ -127,7 +145,7 @@ class User(Base):
             "is_active": self.is_active,
             "is_superuser": self.is_superuser,
             "group_id": self.group_id,
-            "roles": self.roles or [],
+            "user_type": self.user_type.value,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

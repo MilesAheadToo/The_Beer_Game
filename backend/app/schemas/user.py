@@ -1,7 +1,7 @@
 from typing import Optional, List
 from datetime import datetime
-from typing import List, Optional, Literal
 from pydantic import BaseModel, EmailStr, Field, validator
+from app.models.user import UserTypeEnum
 
 class UserBase(BaseModel):
     """Base user schema with common fields."""
@@ -9,14 +9,14 @@ class UserBase(BaseModel):
     email: EmailStr
     full_name: Optional[str] = Field(None, max_length=100)
     group_id: Optional[int] = None
-    roles: List[str] = Field(default_factory=list)
+    user_type: UserTypeEnum = Field(default=UserTypeEnum.PLAYER)
 
 class UserCreate(UserBase):
     """Schema for creating a new user."""
     password: str = Field(default='Daybreak@2025', min_length=8, max_length=50)
     is_superuser: Optional[bool] = False
-    user_type: Optional[Literal['player', 'group_admin', 'system_admin']] = None
-    
+    user_type: Optional[UserTypeEnum] = None
+
     @validator('password')
     def password_strength(cls, v):
         if len(v) < 8:
@@ -29,6 +29,24 @@ class UserCreate(UserBase):
             raise ValueError('Password must contain at least one number')
         return v
 
+    @validator('user_type', pre=True)
+    def normalize_user_type(cls, value):
+        if value is None or isinstance(value, UserTypeEnum):
+            return value
+        token = ''.join(ch for ch in str(value).strip().lower() if ch.isalnum())
+        mapping = {
+            'systemadmin': UserTypeEnum.SYSTEM_ADMIN,
+            'superadmin': UserTypeEnum.SYSTEM_ADMIN,
+            'systemadministrator': UserTypeEnum.SYSTEM_ADMIN,
+            'groupadmin': UserTypeEnum.GROUP_ADMIN,
+            'groupadministrator': UserTypeEnum.GROUP_ADMIN,
+            'admin': UserTypeEnum.GROUP_ADMIN,
+            'player': UserTypeEnum.PLAYER,
+        }
+        if token in mapping:
+            return mapping[token]
+        raise ValueError('Invalid user type')
+
 class UserUpdate(BaseModel):
     """Schema for updating user information."""
     username: Optional[str] = Field(None, min_length=3, max_length=50, regex="^[a-zA-Z0-9_-]+$")
@@ -38,8 +56,25 @@ class UserUpdate(BaseModel):
     is_active: Optional[bool] = None
     is_superuser: Optional[bool] = None
     group_id: Optional[int] = None
-    roles: Optional[List[str]] = None
-    user_type: Optional[Literal['player', 'group_admin', 'system_admin']] = None
+    user_type: Optional[UserTypeEnum] = None
+
+    @validator('user_type', pre=True)
+    def normalize_user_type(cls, value):
+        if value is None or isinstance(value, UserTypeEnum):
+            return value
+        token = ''.join(ch for ch in str(value).strip().lower() if ch.isalnum())
+        mapping = {
+            'systemadmin': UserTypeEnum.SYSTEM_ADMIN,
+            'superadmin': UserTypeEnum.SYSTEM_ADMIN,
+            'systemadministrator': UserTypeEnum.SYSTEM_ADMIN,
+            'groupadmin': UserTypeEnum.GROUP_ADMIN,
+            'groupadministrator': UserTypeEnum.GROUP_ADMIN,
+            'admin': UserTypeEnum.GROUP_ADMIN,
+            'player': UserTypeEnum.PLAYER,
+        }
+        if token in mapping:
+            return mapping[token]
+        raise ValueError('Invalid user type')
 
 class UserInDBBase(UserBase):
     """Base schema for user data in the database."""

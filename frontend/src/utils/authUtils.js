@@ -1,4 +1,4 @@
-const ROLE_ALIASES = {
+const USER_TYPE_ALIASES = {
   superadmin: 'systemadmin',
   'system admin': 'systemadmin',
   system_admin: 'systemadmin',
@@ -7,19 +7,16 @@ const ROLE_ALIASES = {
   groupadmin: 'groupadmin',
   'group admin': 'groupadmin',
   group_admin: 'groupadmin',
+  player: 'player',
 };
 
-export const normalizeRoles = (roles) => {
-  if (!Array.isArray(roles)) {
-    return [];
+const normalizeUserTypeToken = (value) => {
+  if (typeof value !== 'string') {
+    return '';
   }
 
-  const normalized = roles
-    .map((role) => (typeof role === 'string' ? role.trim().toLowerCase() : ''))
-    .filter(Boolean)
-    .map((role) => ROLE_ALIASES[role] || role.replace(/\s+/g, ''));
-
-  return Array.from(new Set(normalized));
+  const token = value.trim().toLowerCase().replace(/[\s_-]+/g, '');
+  return USER_TYPE_ALIASES[token] || token;
 };
 
 export const getNormalizedEmail = (user) => {
@@ -30,42 +27,44 @@ export const getNormalizedEmail = (user) => {
   return String(user.email).trim().toLowerCase();
 };
 
-export const isSystemAdmin = (user) => {
-  if (!user) return false;
-  
-  const normalizedEmail = getNormalizedEmail(user);
-  const roles = normalizeRoles(user.roles || []);
-
-  // Check for system admin in various possible locations
-  return (
-    user.is_superuser === true ||
-    user.is_superuser === 'true' ||
-    user.isAdmin === true ||
-    user.role === 'systemadmin' ||
-    normalizedEmail === 'systemadmin@daybreak.ai' ||
-    normalizedEmail === 'superadmin@daybreak.ai' ||
-    roles.includes('systemadmin') ||
-    (Array.isArray(user.roles) && user.roles.includes('systemadmin'))
-  );
-};
-
-export const isGroupAdmin = (user) => {
-  if (!user) return false;
-  
-  const roles = normalizeRoles(user.roles || []);
-  const normalizedEmail = getNormalizedEmail(user);
-
-  // System admins should be able to manage groups
-  if (isSystemAdmin(user)) {
-    return true;
+export const getUserType = (user) => {
+  if (!user) {
+    return 'player';
   }
 
-  return (
-    roles.includes('groupadmin') ||
-    normalizedEmail === 'groupadmin@daybreak.ai' ||
-    user.role === 'groupadmin' ||
-    (Array.isArray(user.roles) && user.roles.includes('groupadmin'))
-  );
+  const primary = normalizeUserTypeToken(user.user_type);
+  if (primary) {
+    return primary;
+  }
+
+  const fallback = normalizeUserTypeToken(user.role);
+  if (fallback) {
+    return fallback;
+  }
+
+  if (user.is_superuser === true || user.is_superuser === 'true' || user.isAdmin === true) {
+    return 'systemadmin';
+  }
+
+  const normalizedEmail = getNormalizedEmail(user);
+  if (normalizedEmail === 'systemadmin@daybreak.ai' || normalizedEmail === 'superadmin@daybreak.ai') {
+    return 'systemadmin';
+  }
+  if (normalizedEmail === 'groupadmin@daybreak.ai') {
+    return 'groupadmin';
+  }
+
+  return 'player';
+};
+
+export const isSystemAdmin = (user) => getUserType(user) === 'systemadmin';
+
+export const isGroupAdmin = (user) => {
+  const type = getUserType(user);
+  if (type === 'systemadmin') {
+    return true;
+  }
+  return type === 'groupadmin';
 };
 
 export const getDefaultLandingPath = (user) => {

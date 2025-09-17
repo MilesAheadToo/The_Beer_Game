@@ -22,24 +22,12 @@ import { Add as AddIcon, Delete as DeleteIcon, Edit as EditIcon } from '@mui/ico
 import { toast } from 'react-toastify';
 import { api } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
-import { isSystemAdmin as isSystemAdminUser, normalizeRoles } from '../../utils/authUtils';
+import { isSystemAdmin as isSystemAdminUser, getUserType as resolveUserType } from '../../utils/authUtils';
 
 const BASE_FORM = {
   username: '',
   email: '',
   password: '',
-};
-
-const getUserType = (user) => {
-  if (!user) return 'player';
-  const roles = normalizeRoles(user.roles || []);
-  if (user.is_superuser || roles.includes('systemadmin')) {
-    return 'system_admin';
-  }
-  if (roles.includes('groupadmin') || roles.includes('admin')) {
-    return 'group_admin';
-  }
-  return 'player';
 };
 
 const parseErrorMessage = (error, fallback) => {
@@ -99,11 +87,11 @@ function GroupPlayerManagement() {
 
     try {
       const response = await api.get('/users', {
-        params: { limit: 250, user_type: 'player' },
+        params: { limit: 250, user_type: 'Player' },
       });
       const data = Array.isArray(response.data) ? response.data : [];
       const filtered = data.filter(
-        (item) => getUserType(item) === 'player' && item.group_id === groupId,
+        (item) => resolveUserType(item) === 'player' && item.group_id === groupId,
       );
       setPlayers(filtered);
       return filtered;
@@ -195,7 +183,7 @@ function GroupPlayerManagement() {
       }
       payload.password = form.password;
       payload.group_id = groupId;
-      payload.user_type = 'player';
+      payload.user_type = 'Player';
     } else if (form.password.trim()) {
       payload.password = form.password.trim();
     }
@@ -283,14 +271,18 @@ function GroupPlayerManagement() {
               </TableRow>
             ) : (
               players.map((player) => {
-                const type = getUserType(player);
+                const type = resolveUserType(player);
                 return (
                   <TableRow key={player.id} hover>
                     <TableCell>{player.username}</TableCell>
                     <TableCell>{player.email}</TableCell>
                     <TableCell>{groupMap[player.group_id] || '—'}</TableCell>
                     <TableCell>
-                      <Chip label={type === 'player' ? 'Player' : 'User'} color={type === 'player' ? 'success' : 'default'} size="small" />
+                      <Chip
+                        label={type === 'player' ? 'Player' : type === 'groupadmin' ? 'Group Admin' : 'User'}
+                        color={type === 'player' ? 'success' : 'default'}
+                        size="small"
+                      />
                     </TableCell>
                     <TableCell align="right">
                       <IconButton color="primary" onClick={() => handleEditUser(player)}>

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from ...db.session import get_db
 from ...models import User
+from ...models.user import UserTypeEnum
 from ...schemas.group import Group as GroupSchema, GroupCreate, GroupUpdate
 from ...services.group_service import GroupService
 from ...core.security import get_current_active_user
@@ -15,17 +16,17 @@ def get_group_service(db: Session = Depends(get_db)) -> GroupService:
 
 @router.get("/", response_model=List[GroupSchema])
 def list_groups(group_service: GroupService = Depends(get_group_service), current_user: User = Depends(get_current_active_user)):
-    if current_user.is_superuser:
+    user_type = getattr(current_user, "user_type", None)
+    if isinstance(user_type, str):
+        try:
+            user_type = UserTypeEnum(user_type)
+        except ValueError:
+            user_type = None
+
+    if current_user.is_superuser or user_type == UserTypeEnum.SYSTEM_ADMIN:
         return group_service.get_groups()
 
-    roles = current_user.roles or []
-    normalized_roles = {
-        "".join(ch for ch in str(role).lower() if ch.isalnum())
-        for role in roles
-        if role is not None
-    }
-
-    is_group_admin = "groupadmin" in normalized_roles or "admin" in normalized_roles
+    is_group_admin = user_type == UserTypeEnum.GROUP_ADMIN
 
     if is_group_admin and current_user.group_id:
         group = group_service.get_group(current_user.group_id)

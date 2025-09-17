@@ -39,6 +39,7 @@ from app.models import (
     SupplyChainConfig,
     User,
 )
+from app.models.user import UserTypeEnum
 from app.services.supply_chain_config_service import SupplyChainConfigService
 from app.core.security import get_password_hash
 
@@ -50,9 +51,6 @@ DEFAULT_ADMIN_FULL_NAME = "Group Administrator"
 DEFAULT_PASSWORD = "Daybreak@2025"
 DEFAULT_GAME_NAME = "The Beer Game"
 DEFAULT_AGENT_TYPE = "naive"
-
-DEFAULT_ADMIN_ROLES = ["groupadmin", "admin"]
-DEFAULT_PLAYER_ROLES = ["player"]
 
 FALLBACK_DB_FILENAME = "seed_default_group.sqlite"
 FALLBACK_DB_PATH = BACKEND_ROOT / FALLBACK_DB_FILENAME
@@ -106,12 +104,10 @@ def ensure_group(session: Session) -> Tuple[Group, bool]:
     if existing_group:
         admin = existing_group.admin
         if admin:
-            missing_roles = [
-                role for role in DEFAULT_ADMIN_ROLES if role not in (admin.roles or [])
-            ]
             updated = False
-            if missing_roles:
-                admin.roles = sorted(set((admin.roles or []) + missing_roles))
+            if admin.user_type != UserTypeEnum.SYSTEM_ADMIN:
+                admin.user_type = UserTypeEnum.SYSTEM_ADMIN
+                admin.is_superuser = True
                 updated = True
             if admin.group_id != existing_group.id:
                 admin.group_id = existing_group.id
@@ -141,7 +137,7 @@ def ensure_group(session: Session) -> Tuple[Group, bool]:
             hashed_password=get_password_hash(DEFAULT_PASSWORD),
             is_active=True,
             is_superuser=True,
-            roles=list(DEFAULT_ADMIN_ROLES),
+            user_type=UserTypeEnum.SYSTEM_ADMIN,
         )
         session.add(admin_user)
         session.flush()
@@ -155,12 +151,11 @@ def ensure_group(session: Session) -> Tuple[Group, bool]:
         if admin_user.full_name != DEFAULT_ADMIN_FULL_NAME:
             admin_user.full_name = DEFAULT_ADMIN_FULL_NAME
             updated = True
-        current_roles = set(admin_user.roles or [])
-        if not DEFAULT_ADMIN_ROLES or not current_roles.issuperset(DEFAULT_ADMIN_ROLES):
-            admin_user.roles = sorted(current_roles.union(DEFAULT_ADMIN_ROLES))
-            updated = True
         if not admin_user.is_superuser:
             admin_user.is_superuser = True
+            updated = True
+        if admin_user.user_type != UserTypeEnum.SYSTEM_ADMIN:
+            admin_user.user_type = UserTypeEnum.SYSTEM_ADMIN
             updated = True
         if not admin_user.is_active:
             admin_user.is_active = True
@@ -430,7 +425,7 @@ def ensure_role_users(session: Session, group: Group) -> None:
                 hashed_password=get_password_hash(DEFAULT_PASSWORD),
                 is_active=True,
                 is_superuser=False,
-                roles=list(DEFAULT_PLAYER_ROLES),
+                user_type=UserTypeEnum.PLAYER,
                 group_id=group.id,
             )
             session.add(user)
@@ -448,9 +443,8 @@ def ensure_role_users(session: Session, group: Group) -> None:
         if user.group_id != group.id:
             user.group_id = group.id
             updated = True
-        player_roles = set(user.roles or [])
-        if not player_roles.issuperset(DEFAULT_PLAYER_ROLES):
-            user.roles = sorted(player_roles.union(DEFAULT_PLAYER_ROLES))
+        if user.user_type != UserTypeEnum.PLAYER:
+            user.user_type = UserTypeEnum.PLAYER
             updated = True
         if not user.is_active:
             user.is_active = True

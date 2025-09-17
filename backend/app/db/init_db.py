@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../.
 
 # Import models in the correct order to avoid circular imports
 from app.models.base import Base
-from app.models.user import User, RefreshToken
+from app.models.user import User, RefreshToken, UserTypeEnum
 from app.models.player import Player, PlayerRole, PlayerType, PlayerStrategy
 from app.models.auth_models import PasswordHistory, PasswordResetToken
 from app.models.session import TokenBlacklist, UserSession
@@ -139,6 +139,7 @@ async def init_db():
                     hashed_password=get_password_hash(systemadmin_password),
                     is_superuser=True,
                     is_active=True,
+                    user_type=UserTypeEnum.SYSTEM_ADMIN,
                 )
                 db.add(systemadmin)
                 await db.commit()

@@ -38,6 +38,7 @@ import {
 } from '@chakra-ui/react';
 import PageLayout from '../components/PageLayout';
 import { getAllConfigs } from '../services/supplyChainConfigService';
+import { getUserType as resolveUserType } from '../utils/authUtils';
 import PricingConfigForm from '../components/PricingConfigForm';
 import { api, mixedGameApi } from '../services/api';
 import { getModelStatus } from '../services/modelService';
@@ -1225,7 +1226,7 @@ const CreateMixedGame = () => {
                                 value={user.id}
                                 disabled={players.some(p => p.userId === user.id && p.role !== player.role)}
                               >
-                                {user.username} {(user.is_superuser || (Array.isArray(user.roles) && user.roles.includes('admin'))) ? '(Admin)' : ''}
+                                {user.username} {resolveUserType(user) === 'systemadmin' ? '(Admin)' : ''}
                                 {players.some(p => p.userId === user.id && p.role !== player.role) ? ' (Assigned)' : ''}
                               </option>
                             ))}
