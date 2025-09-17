@@ -156,10 +156,20 @@ export function AuthProvider({ children }) {
       // This will automatically handle CSRF token and cookies
       const result = await mixedGameApi.login(credentials);
 
-      // API returns shape { success, user } on success
       if (result?.success) {
-        const nextUser = result.user;
-        setUser(nextUser);
+        let nextUser = result.user;
+
+        if (!nextUser) {
+          try {
+            nextUser = await mixedGameApi.getCurrentUser();
+          } catch (fetchError) {
+            console.error('Failed to fetch user details after login:', fetchError);
+          }
+        }
+
+        if (nextUser) {
+          setUser(nextUser);
+        }
         setIsAuthenticated(true);
 
         // Reset timers after successful login
