@@ -8,35 +8,22 @@ from sqlalchemy.orm import declarative_base
 from sqlalchemy.pool import NullPool
 from sqlalchemy import create_engine
 
-from app.core.config import settings
-
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Get database connection details from environment variables
-DB_USER = os.getenv("MYSQL_USER", "beer_user")
-DB_PASSWORD = os.getenv("MYSQL_PASSWORD", "beergame123")  # Updated default password to match test script
-
-# Always use localhost for development
-DB_HOST = "localhost"
-DB_NAME = os.getenv("MYSQL_DATABASE", "beer_game")
-DB_PORT = os.getenv("MYSQL_PORT", "3307")  # Default to 3307 which is the mapped port in docker-compose
-
-# Log the actual connection details being used
-print(f"[DEBUG] Database connection - Host: {DB_HOST}, Port: {DB_PORT}, User: {DB_USER}, DB: {DB_NAME}")
+# Get database URL from settings
+from app.core.config import settings
 
 # Log the database connection details for debugging
-logger.info(f"Database connection details - User: {DB_USER}, Host: {DB_HOST}, DB: {DB_NAME}")
+logger.info(f"Using database URL from settings: {settings.SQLALCHEMY_DATABASE_URI}")
 
-if not all([DB_USER, DB_PASSWORD, DB_NAME]):
-    raise ValueError("Missing required database environment variables")
+# Ensure we're using the async driver (aiomysql) for MariaDB
+SQLALCHEMY_DATABASE_URI = settings.SQLALCHEMY_DATABASE_URI.replace(
+    "mysql+pymysql://", "mysql+aiomysql://", 1
+)
 
-# Construct the database URI with async MariaDB dialect
-encoded_password = quote_plus(DB_PASSWORD)
-# Use aiomysql as the async driver for MariaDB
-SQLALCHEMY_DATABASE_URI = f"mysql+aiomysql://{DB_USER}:{encoded_password}@{DB_HOST}:{DB_PORT}/{DB_NAME}?charset=utf8mb4"
-logger.info(f"Connecting to MariaDB with aiomysql: {DB_USER}@{DB_HOST}:{DB_PORT}/{DB_NAME}")
+logger.info(f"Connecting to database with URL: {SQLALCHEMY_DATABASE_URI}")
 
 # Create async engine with connection pooling
 engine = create_async_engine(

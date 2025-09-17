@@ -112,11 +112,18 @@ class Settings(BaseSettings):
         if v is not None and v != "":
             return v
 
+        print("[DEBUG] Assembling database connection...")
+        print(f"[DEBUG] MYSQL_SERVER: {os.getenv('MYSQL_SERVER')}")
+        print(f"[DEBUG] MYSQL_HOST: {os.getenv('MYSQL_HOST')}")
+        print(f"[DEBUG] MARIADB_HOST: {os.getenv('MARIADB_HOST')}")
+        print(f"[DEBUG] DOCKER_COMPOSE: {os.getenv('DOCKER_COMPOSE')}")
+
+        # Default to localhost when not in Docker, otherwise use 'db' as the host
         server = (
             os.getenv("MYSQL_SERVER")
             or os.getenv("MYSQL_HOST")
             or os.getenv("MARIADB_HOST")
-            or "db"
+            or ("db" if os.getenv("DOCKER_COMPOSE") else "127.0.0.1")
         )
         port = (
             os.getenv("MYSQL_PORT")
@@ -131,11 +138,15 @@ class Settings(BaseSettings):
             or "beer_game"
         )
 
+        print(f"[DEBUG] Using server: {server}, port: {port}, user: {user}, db: {db}")
+
         if server == "db":
             try:
                 socket.getaddrinfo(server, None)
+                print(f"[DEBUG] Successfully resolved hostname: {server}")
             except socket.gaierror:
                 fallback_host = "127.0.0.1"
+                print(f"[DEBUG] Could not resolve hostname: {server}, falling back to {fallback_host}")
                 logging.getLogger(__name__).warning(
                     "Database host '%s' is not resolvable. Falling back to '%s'.",
                     server,
@@ -147,6 +158,9 @@ class Settings(BaseSettings):
         from urllib.parse import quote_plus
 
         encoded_password = quote_plus(password)
+        connection_string = f"mysql+pymysql://{user}:*****@{server}:{port}/{db}?charset=utf8mb4&ssl=None"
+        print(f"[DEBUG] Database connection string: {connection_string}")
+        
         # Connection string with SSL disabled and URL-encoded password
         return (
             f"mysql+pymysql://{user}:{encoded_password}@{server}:{port}/{db}?charset=utf8mb4&ssl=None"

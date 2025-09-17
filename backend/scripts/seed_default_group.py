@@ -44,6 +44,7 @@ from app.schemas.group import GroupCreate
 from app.schemas.user import UserCreate
 from app.services.group_service import GroupService
 from app.services.supply_chain_config_service import SupplyChainConfigService
+from app.core.security import get_password_hash
 
 DEFAULT_GROUP_NAME = "Default TBG"
 DEFAULT_GROUP_DESCRIPTION = "Default Daybreak Beer Game group"
@@ -110,23 +111,39 @@ def ensure_group(session: Session) -> Tuple[Group, bool]:
         return existing_group, False
 
     print("[info] Creating default group and administrator user...")
-    service = GroupService(session)
-    group_create = GroupCreate(
+    
+    # Create the group first
+    group = Group(
         name=DEFAULT_GROUP_NAME,
-        description=DEFAULT_GROUP_DESCRIPTION,
-        admin=UserCreate(
-            username=DEFAULT_ADMIN_USERNAME,
-            email=DEFAULT_ADMIN_EMAIL,
-            full_name=DEFAULT_ADMIN_FULL_NAME,
-            password=DEFAULT_PASSWORD,
-        ),
+        description=DEFAULT_GROUP_DESCRIPTION
     )
-    group = service.create_group(group_create)
-    session.refresh(group)
+    session.add(group)
+    session.flush()  # Flush to get the group ID
+    
+    # Create the admin user with only the fields that exist in the database
+    admin_user = User(
+        username=DEFAULT_ADMIN_USERNAME,
+        email=DEFAULT_ADMIN_EMAIL,
+        full_name=DEFAULT_ADMIN_FULL_NAME,
+        hashed_password=get_password_hash(DEFAULT_PASSWORD),
+        is_active=True,
+        is_superuser=True,
+        group_id=group.id
+    )
+    session.add(admin_user)
+    session.flush()
+    
+    # Update the group with the admin ID
+    group.admin_id = admin_user.id
+    session.add(group)
+    session.commit()
+    
     print(
         f"[success] Created group '{group.name}' (id={group.id}) and admin "
         f"'{DEFAULT_ADMIN_EMAIL}'."
     )
+    
+    return group, True
     return group, True
 
 
@@ -348,19 +365,34 @@ def ensure_role_users(session: Session, group: Group) -> None:
     """Log the status of default role users to confirm their existence."""
     expected_emails = {
         "retailer": f"retailer+g{group.id}@daybreak.ai",
+        "wholesaler": f"wholesaler+g{group.id}@daybreak.ai",
         "distributor": f"distributor+g{group.id}@daybreak.ai",
-        "manufacturer": f"manufacturer+g{group.id}@daybreak.ai",
-        "supplier": f"supplier+g{group.id}@daybreak.ai",
+        "factory": f"factory+g{group.id}@daybreak.ai",
     }
+    
+    # Create role users if they don't exist
     for role, email in expected_emails.items():
-        exists = (
-            session.query(User)
-            .filter(User.group_id == group.id, User.email == email)
-            .first()
-            is not None
-        )
-        status = "found" if exists else "missing"
-        print(f"[info] {role.title()} user {status} ({email}).")
+        user = session.query(User).filter(
+            User.group_id == group.id, 
+            User.email == email
+        ).first()
+        
+        if not user:
+            # Create the user with only the fields that exist in the database
+            user = User(
+                username=f"{role}_{group.id}",
+                email=email,
+                full_name=f"{role.capitalize()} User",
+                hashed_password=get_password_hash(DEFAULT_PASSWORD),
+                is_active=True,
+                is_superuser=False,
+                group_id=group.id
+            )
+            session.add(user)
+            session.commit()
+            print(f"[info] Created {role} user: {email}")
+        else:
+            print(f"[info] {role} user already exists: {email}")
 
 
 def seed_default_data(session: Session) -> None:
@@ -388,6 +420,10 @@ def run_seed_with_session(session_factory: Callable[[], Session]) -> None:
 
 
 def main() -> None:
+    from app.db.session import SQLALCHEMY_DATABASE_URI
+    print(f"[DEBUG] Database URL from settings: {settings.SQLALCHEMY_DATABASE_URI}")
+    print(f"[DEBUG] Database URL from session: {SQLALCHEMY_DATABASE_URI}")
+    
     configured_uri = settings.SQLALCHEMY_DATABASE_URI
     configured_label = mask_db_uri(configured_uri)
     print(f"[info] Attempting to seed default data using: {configured_label or 'default settings'}")
@@ -398,23 +434,13 @@ def main() -> None:
         if configured_label:
             print(f"[info] Data stored in: {configured_label}")
         return
-    except OperationalError as exc:
-        print(
-            "[warning] Could not use the configured database. "
-            f"Error: {exc}"
-        )
-
-    sqlite_factory, sqlite_path = create_sqlite_session_factory()
-    print(f"[info] Falling back to local SQLite database at {sqlite_path}.")
-
-    try:
-        run_seed_with_session(sqlite_factory)
-    except OperationalError as exc:
-        print("[error] Failed to seed using the SQLite fallback database.")
-        raise exc
-
-    print("[done] Default group, users, and game are ready.")
-    print(f"[info] Data stored in fallback SQLite database: {sqlite_path}")
+    except Exception as exc:
+        print("\n[error] Failed to seed the database. Please check the following:")
+        print("1. Make sure the MariaDB container is running")
+        print("2. Verify the database credentials in your .env file")
+        print("3. Check that the database 'beer_game' exists and is accessible")
+        print(f"\nError details: {exc}")
+        raise
 
 
 if __name__ == "__main__":
