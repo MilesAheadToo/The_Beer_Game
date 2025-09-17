@@ -13,7 +13,6 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.append(str(BACKEND_ROOT))
 
 from sqlalchemy import create_engine
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.dialects.postgresql import JSONB
@@ -40,9 +39,6 @@ from app.models import (
     SupplyChainConfig,
     User,
 )
-from app.schemas.group import GroupCreate
-from app.schemas.user import UserCreate
-from app.services.group_service import GroupService
 from app.services.supply_chain_config_service import SupplyChainConfigService
 from app.core.security import get_password_hash
 
@@ -54,6 +50,9 @@ DEFAULT_ADMIN_FULL_NAME = "Group Administrator"
 DEFAULT_PASSWORD = "Daybreak@2025"
 DEFAULT_GAME_NAME = "The Beer Game"
 DEFAULT_AGENT_TYPE = "naive"
+
+DEFAULT_ADMIN_ROLES = ["groupadmin", "admin"]
+DEFAULT_PLAYER_ROLES = ["player"]
 
 FALLBACK_DB_FILENAME = "seed_default_group.sqlite"
 FALLBACK_DB_PATH = BACKEND_ROOT / FALLBACK_DB_FILENAME
@@ -105,45 +104,89 @@ def ensure_group(session: Session) -> Tuple[Group, bool]:
         session.query(Group).filter(Group.name == DEFAULT_GROUP_NAME).first()
     )
     if existing_group:
+        admin = existing_group.admin
+        if admin:
+            missing_roles = [
+                role for role in DEFAULT_ADMIN_ROLES if role not in (admin.roles or [])
+            ]
+            updated = False
+            if missing_roles:
+                admin.roles = sorted(set((admin.roles or []) + missing_roles))
+                updated = True
+            if admin.group_id != existing_group.id:
+                admin.group_id = existing_group.id
+                updated = True
+            if updated:
+                session.add(admin)
+                session.flush()
+                print(
+                    f"[info] Updated admin settings for group '{existing_group.name}' (id={existing_group.id})."
+                )
         print(
             f"[info] Group '{DEFAULT_GROUP_NAME}' already exists (id={existing_group.id})."
         )
         return existing_group, False
 
     print("[info] Creating default group and administrator user...")
-    
-    # Create the group first
+
+    admin_user = (
+        session.query(User).filter(User.email == DEFAULT_ADMIN_EMAIL).first()
+    )
+    admin_created = False
+    if admin_user is None:
+        admin_user = User(
+            username=DEFAULT_ADMIN_USERNAME,
+            email=DEFAULT_ADMIN_EMAIL,
+            full_name=DEFAULT_ADMIN_FULL_NAME,
+            hashed_password=get_password_hash(DEFAULT_PASSWORD),
+            is_active=True,
+            is_superuser=True,
+            roles=list(DEFAULT_ADMIN_ROLES),
+        )
+        session.add(admin_user)
+        session.flush()
+        admin_created = True
+    else:
+        # Ensure existing admin has the expected settings
+        updated = False
+        if admin_user.username != DEFAULT_ADMIN_USERNAME:
+            admin_user.username = DEFAULT_ADMIN_USERNAME
+            updated = True
+        if admin_user.full_name != DEFAULT_ADMIN_FULL_NAME:
+            admin_user.full_name = DEFAULT_ADMIN_FULL_NAME
+            updated = True
+        current_roles = set(admin_user.roles or [])
+        if not DEFAULT_ADMIN_ROLES or not current_roles.issuperset(DEFAULT_ADMIN_ROLES):
+            admin_user.roles = sorted(current_roles.union(DEFAULT_ADMIN_ROLES))
+            updated = True
+        if not admin_user.is_superuser:
+            admin_user.is_superuser = True
+            updated = True
+        if not admin_user.is_active:
+            admin_user.is_active = True
+            updated = True
+        if updated:
+            session.add(admin_user)
+            session.flush()
+
     group = Group(
         name=DEFAULT_GROUP_NAME,
-        description=DEFAULT_GROUP_DESCRIPTION
+        description=DEFAULT_GROUP_DESCRIPTION,
+        admin_id=admin_user.id,
     )
     session.add(group)
-    session.flush()  # Flush to get the group ID
-    
-    # Create the admin user with only the fields that exist in the database
-    admin_user = User(
-        username=DEFAULT_ADMIN_USERNAME,
-        email=DEFAULT_ADMIN_EMAIL,
-        full_name=DEFAULT_ADMIN_FULL_NAME,
-        hashed_password=get_password_hash(DEFAULT_PASSWORD),
-        is_active=True,
-        is_superuser=True,
-        group_id=group.id
-    )
-    session.add(admin_user)
     session.flush()
-    
-    # Update the group with the admin ID
-    group.admin_id = admin_user.id
-    session.add(group)
-    session.commit()
-    
+
+    if admin_user.group_id != group.id:
+        admin_user.group_id = group.id
+        session.add(admin_user)
+        session.flush()
+
     print(
         f"[success] Created group '{group.name}' (id={group.id}) and admin "
-        f"'{DEFAULT_ADMIN_EMAIL}'."
+        f"'{DEFAULT_ADMIN_EMAIL}'{' (new user)' if admin_created else ''}."
     )
-    
-    return group, True
+
     return group, True
 
 
@@ -362,35 +405,64 @@ def ensure_naive_agents(session: Session, game: Game) -> None:
 
 
 def ensure_role_users(session: Session, group: Group) -> None:
-    """Log the status of default role users to confirm their existence."""
+    """Ensure default role users exist with the expected configuration."""
     expected_emails = {
         "retailer": f"retailer+g{group.id}@daybreak.ai",
         "wholesaler": f"wholesaler+g{group.id}@daybreak.ai",
         "distributor": f"distributor+g{group.id}@daybreak.ai",
         "factory": f"factory+g{group.id}@daybreak.ai",
     }
-    
-    # Create role users if they don't exist
+
     for role, email in expected_emails.items():
-        user = session.query(User).filter(
-            User.group_id == group.id, 
-            User.email == email
-        ).first()
-        
-        if not user:
-            # Create the user with only the fields that exist in the database
+        user = (
+            session.query(User)
+            .filter(User.email == email)
+            .first()
+        )
+
+        username = f"{role}_{group.id}"
+        full_name = f"{role.capitalize()} User"
+        if user is None:
             user = User(
-                username=f"{role}_{group.id}",
+                username=username,
                 email=email,
-                full_name=f"{role.capitalize()} User",
+                full_name=full_name,
                 hashed_password=get_password_hash(DEFAULT_PASSWORD),
                 is_active=True,
                 is_superuser=False,
-                group_id=group.id
+                roles=list(DEFAULT_PLAYER_ROLES),
+                group_id=group.id,
             )
             session.add(user)
-            session.commit()
+            session.flush()
             print(f"[info] Created {role} user: {email}")
+            continue
+
+        updated = False
+        if user.username != username:
+            user.username = username
+            updated = True
+        if user.full_name != full_name:
+            user.full_name = full_name
+            updated = True
+        if user.group_id != group.id:
+            user.group_id = group.id
+            updated = True
+        player_roles = set(user.roles or [])
+        if not player_roles.issuperset(DEFAULT_PLAYER_ROLES):
+            user.roles = sorted(player_roles.union(DEFAULT_PLAYER_ROLES))
+            updated = True
+        if not user.is_active:
+            user.is_active = True
+            updated = True
+        if user.is_superuser:
+            user.is_superuser = False
+            updated = True
+
+        if updated:
+            session.add(user)
+            session.flush()
+            print(f"[info] Updated {role} user: {email}")
         else:
             print(f"[info] {role} user already exists: {email}")
 
