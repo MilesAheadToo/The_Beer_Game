@@ -181,6 +181,16 @@ const AppContent = () => {
               }
             />
             <Route
+              path="/demin/groups"
+              element={
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <GroupManagement />
+                </>
+              }
+            />
+            <Route
               path="/admin/users"
               element={
                 <>
