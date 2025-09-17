@@ -1,10 +1,12 @@
-from pydantic import BaseSettings, Field, validator
-from typing import List, Optional, Any, Dict, Union, Set
-from datetime import timedelta
-import secrets
+import logging
 import os
-import json
+import secrets
+import socket
+from datetime import timedelta
+from typing import Any, Dict, List, Optional, Set, Union
 from urllib.parse import urlparse
+
+from pydantic import BaseSettings, Field, validator
 
 class Settings(BaseSettings):
     # Application
@@ -109,18 +111,46 @@ class Settings(BaseSettings):
     def assemble_db_connection(cls, v: Optional[str], values: Dict[str, Any]) -> Any:
         if v is not None and v != "":
             return v
-            
-        server = os.getenv("MYSQL_SERVER", "db")
-        port = os.getenv("MYSQL_PORT", "3306")
+
+        server = (
+            os.getenv("MYSQL_SERVER")
+            or os.getenv("MYSQL_HOST")
+            or os.getenv("MARIADB_HOST")
+            or "db"
+        )
+        port = (
+            os.getenv("MYSQL_PORT")
+            or os.getenv("MARIADB_PORT")
+            or "3306"
+        )
         user = os.getenv("MYSQL_USER", "beer_user")
         password = os.getenv("MYSQL_PASSWORD", "beer_password")
-        db = os.getenv("MYSQL_DB", "beer_game")
-        
+        db = (
+            os.getenv("MYSQL_DB")
+            or os.getenv("MYSQL_DATABASE")
+            or "beer_game"
+        )
+
+        if server == "db":
+            try:
+                socket.getaddrinfo(server, None)
+            except socket.gaierror:
+                fallback_host = "127.0.0.1"
+                logging.getLogger(__name__).warning(
+                    "Database host '%s' is not resolvable. Falling back to '%s'.",
+                    server,
+                    fallback_host,
+                )
+                server = fallback_host
+
         # URL encode the password to handle special characters
         from urllib.parse import quote_plus
+
         encoded_password = quote_plus(password)
         # Connection string with SSL disabled and URL-encoded password
-        return f"mysql+pymysql://{user}:{encoded_password}@{server}:{port}/{db}?charset=utf8mb4&ssl=None"
+        return (
+            f"mysql+pymysql://{user}:{encoded_password}@{server}:{port}/{db}?charset=utf8mb4&ssl=None"
+        )
     
     # WebSocket
     WEBSOCKET_PATH: str = "/ws"
