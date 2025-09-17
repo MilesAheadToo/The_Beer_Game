@@ -16,6 +16,8 @@ from sqlalchemy import create_engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.ext.compiler import compiles
 
 from app.core.config import settings
 from app.db.base_class import SessionLocal
@@ -54,6 +56,13 @@ DEFAULT_AGENT_TYPE = "naive"
 
 FALLBACK_DB_FILENAME = "seed_default_group.sqlite"
 FALLBACK_DB_PATH = BACKEND_ROOT / FALLBACK_DB_FILENAME
+
+
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_for_sqlite(type_, compiler, **kw):
+    """Render PostgreSQL JSONB columns as JSON when using SQLite fallback."""
+
+    return "JSON"
 
 
 def create_sqlite_session_factory() -> Tuple[sessionmaker, Path]:
