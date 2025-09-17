@@ -86,80 +86,7 @@ const Navbar = ({ handleDrawerToggle }) => {
           </Typography>
         </Box>
         <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, ml: 4 }}>
-          {systemAdmin ? (
-            <>
-              <Button
-                color="inherit"
-                startIcon={<DashboardIcon />}
-                onClick={() => navigate('/admin')}
-                sx={{
-                  mx: 1,
-                  bgcolor: isActive('/admin') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                  '&:hover': {
-                    bgcolor: 'rgba(255, 255, 255, 0.15)'
-                  }
-                }}
-              >
-                Admin Dashboard
-              </Button>
-              <Button
-                color="inherit"
-                startIcon={<SettingsIcon />}
-                onClick={() => navigate('/system-config')}
-                sx={{
-                  mx: 1,
-                  bgcolor: isActive('/system-config') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                  '&:hover': {
-                    bgcolor: 'rgba(255, 255, 255, 0.15)'
-                  }
-                }}
-              >
-                System Config
-              </Button>
-              <Button
-                color="inherit"
-                startIcon={<GroupsIcon />}
-                onClick={() => navigate('/admin/groups')}
-                sx={{
-                  mx: 1,
-                  bgcolor: isActive('/admin/groups') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                  '&:hover': {
-                    bgcolor: 'rgba(255, 255, 255, 0.15)'
-                  }
-                }}
-              >
-                Group Management
-              </Button>
-              <Button
-                color="inherit"
-                startIcon={<GroupIcon />}
-                onClick={() => navigate('/system/users')}
-                sx={{
-                  mx: 1,
-                  bgcolor: isActive('/system/users') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                  '&:hover': {
-                    bgcolor: 'rgba(255, 255, 255, 0.15)'
-                  }
-                }}
-              >
-                Manage Users
-              </Button>
-              <Button
-                color="inherit"
-                startIcon={<SportsEsportsIcon />}
-                onClick={() => navigate('/games')}
-                sx={{
-                  mx: 1,
-                  bgcolor: isActive('/games') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                  '&:hover': {
-                    bgcolor: 'rgba(255, 255, 255, 0.15)'
-                  }
-                }}
-              >
-                Manage Games
-              </Button>
-            </>
-          ) : groupAdmin ? (
+          {systemAdmin ? null : groupAdmin ? (
             <>
               <Button
                 color="inherit"
@@ -253,16 +180,20 @@ const Navbar = ({ handleDrawerToggle }) => {
         </Box>
         
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          <Tooltip title="Notifications">
-            <IconButton color="inherit">
-              <NotificationsIcon />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Settings">
-            <IconButton color="inherit" onClick={() => navigate('/settings')}>
-              <SettingsIcon />
-            </IconButton>
-          </Tooltip>
+          {!systemAdmin && (
+            <>
+              <Tooltip title="Notifications">
+                <IconButton color="inherit">
+                  <NotificationsIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Settings">
+                <IconButton color="inherit" onClick={() => navigate('/settings')}>
+                  <SettingsIcon />
+                </IconButton>
+              </Tooltip>
+            </>
+          )}
           <IconButton
             onClick={handleClick}
             size="small"

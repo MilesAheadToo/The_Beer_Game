@@ -1,7 +1,7 @@
 # /backend/app/main.py
 from datetime import datetime, timedelta
 import os
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from fastapi import (
     FastAPI,
@@ -18,6 +18,11 @@ from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from pydantic import BaseModel
+
+from app.services.group_service import GroupService
+from app.schemas.group import GroupCreate, GroupUpdate, Group as GroupSchema
+from app.schemas.user import UserCreate
+from app.db.session import sync_engine
 
 # ------------------------------------------------------------------------------
 # Config
@@ -315,7 +320,7 @@ from pydantic import Field, validator
 from typing import List, Optional, Mapping
 import json
 from sqlalchemy import create_engine, Column, Integer, Text, DateTime
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
 
 DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "data"))
@@ -353,6 +358,36 @@ def _build_engine():
 engine = _build_engine()
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 Base = declarative_base()
+SyncSessionLocal = sessionmaker(bind=sync_engine, autocommit=False, autoflush=False)
+
+
+def get_sync_session():
+    db = SyncSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def require_system_admin(user: Dict[str, Any]):
+    role = (user.get("role") or "").lower()
+    if role not in {"systemadmin", "superadmin"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions")
+
+
+def _default_group_payload() -> GroupCreate:
+    return GroupCreate(
+        name="Daybreak",
+        description="Default Daybreak group",
+        logo="/daybreak_logo.png",
+        admin=UserCreate(
+            username="groupadmin",
+            email="groupadmin@daybreak.ai",
+            password="Daybreak@2025",
+            full_name="Group Administrator",
+            user_type="GroupAdmin",
+        ),
+    )
 
 
 class SystemConfigRow(Base):
@@ -740,6 +775,68 @@ async def next_round(game_id: int, user: Dict[str, Any] = Depends(get_current_us
 
 
 # Simple model status for UI banner
+# ------------------------------------------------------------------------------
+# Group management
+# ------------------------------------------------------------------------------
+
+@api.get("/groups", response_model=List[GroupSchema], tags=["groups"])
+def list_groups_endpoint(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_sync_session),
+):
+    require_system_admin(current_user)
+    service = GroupService(db)
+    return service.get_groups()
+
+
+@api.post("/groups/default", response_model=GroupSchema, tags=["groups"])
+def ensure_default_group_endpoint(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_sync_session),
+):
+    require_system_admin(current_user)
+    service = GroupService(db)
+    groups = service.get_groups()
+    if groups:
+        return groups[0]
+    payload = _default_group_payload()
+    return service.create_group(payload)
+
+
+@api.post("/groups", response_model=GroupSchema, status_code=status.HTTP_201_CREATED, tags=["groups"])
+def create_group_endpoint(
+    group_in: GroupCreate,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_sync_session),
+):
+    require_system_admin(current_user)
+    service = GroupService(db)
+    return service.create_group(group_in)
+
+
+@api.put("/groups/{group_id}", response_model=GroupSchema, tags=["groups"])
+def update_group_endpoint(
+    group_id: int,
+    group_update: GroupUpdate,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_sync_session),
+):
+    require_system_admin(current_user)
+    service = GroupService(db)
+    return service.update_group(group_id, group_update)
+
+
+@api.delete("/groups/{group_id}", tags=["groups"])
+def delete_group_endpoint(
+    group_id: int,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    db: Session = Depends(get_sync_session),
+):
+    require_system_admin(current_user)
+    service = GroupService(db)
+    return service.delete_group(group_id)
+
+
 _MODEL_STATUS = {
     "is_trained": True,
     "last_modified": datetime.utcnow().isoformat() + "Z",
