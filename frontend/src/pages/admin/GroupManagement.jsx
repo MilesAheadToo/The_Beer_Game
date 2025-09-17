@@ -1,5 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FaEdit, FaPlus, FaRocket, FaTrash } from 'react-icons/fa';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FaCheck, FaEdit, FaPlus, FaSpinner, FaTrash } from 'react-icons/fa';
 import { api } from '../../services/api';
 import { toast } from 'react-toastify';
 
@@ -29,15 +29,63 @@ const GroupManagement = () => {
   const [logoPreview, setLogoPreview] = useState(DEFAULT_FORM.logo || '');
   const [logoFileName, setLogoFileName] = useState('');
   const [saving, setSaving] = useState(false);
-  const [creatingDefault, setCreatingDefault] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [autoCreation, setAutoCreation] = useState({ open: false, step: 0, completed: false, error: null });
+  const autoCreationRequestedRef = useRef(false);
+
+  const AUTO_CREATION_STEPS = [
+    'Creating default users…',
+    'Creating TBG supply chain configuration…',
+    'Creating TBG game…',
+  ];
 
   const selectedGroup = useMemo(
     () => groups.find((group) => group.id === selectedGroupId) || null,
     [groups, selectedGroupId]
   );
+
+  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const triggerAutoCreateDefaultGroup = useCallback(async () => {
+    if (autoCreationRequestedRef.current) {
+      return;
+    }
+
+    autoCreationRequestedRef.current = true;
+    setAutoCreation({ open: true, step: 0, completed: false, error: null });
+
+    try {
+      const defaults = createDefaultForm();
+
+      setAutoCreation((prev) => ({ ...prev, step: 0 }));
+      await delay(300);
+      setAutoCreation((prev) => ({ ...prev, step: 1 }));
+
+      await api.post('/groups', defaults);
+
+      setAutoCreation((prev) => ({ ...prev, step: 2 }));
+      await delay(300);
+      setAutoCreation((prev) => ({ ...prev, completed: true }));
+      toast.success('Default Daybreak group created successfully');
+
+      const response = await api.get('/groups');
+      const createdGroups = Array.isArray(response.data) ? response.data : [];
+      setGroups(createdGroups);
+      setSelectedGroupId(createdGroups[0]?.id || null);
+    } catch (error) {
+      console.error('Failed to auto-create default group:', error);
+      const detail = error?.response?.data?.detail;
+      const message = typeof detail === 'string' ? detail : detail?.message || 'Failed to create default group. Please try again.';
+      setAutoCreation({ open: true, step: 0, completed: false, error: message });
+      toast.error(message);
+      autoCreationRequestedRef.current = false;
+    } finally {
+      await delay(800);
+      setAutoCreation((prev) => ({ ...prev, open: false }));
+    }
+  }, []);
 
   const openModal = useCallback((group = null) => {
     if (group) {
@@ -85,7 +133,7 @@ const GroupManagement = () => {
 
         if (data.length === 0) {
           setSelectedGroupId(null);
-          openModal(null);
+          await triggerAutoCreateDefaultGroup();
           return;
         }
 
@@ -104,7 +152,7 @@ const GroupManagement = () => {
         setIsLoading(false);
       }
     },
-    [openModal]
+    [triggerAutoCreateDefaultGroup]
   );
 
   const handleQuickCreateDefaultGroup = useCallback(async () => {
@@ -649,6 +697,35 @@ const GroupManagement = () => {
                 {deleting ? 'Deleting…' : 'Delete'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {autoCreation.open && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-800">Creating default Daybreak group…</h2>
+            <ul className="space-y-2 text-sm text-gray-700">
+              {AUTO_CREATION_STEPS.map((step, index) => {
+                const isActive = index === autoCreation.step;
+                const isCompleted = autoCreation.completed && index <= autoCreation.step;
+                return (
+                  <li key={step} className="flex items-center gap-2">
+                    {isCompleted ? (
+                      <FaCheck className="text-emerald-600" />
+                    ) : isActive ? (
+                      <FaSpinner className="animate-spin text-blue-500" />
+                    ) : (
+                      <span className="h-3 w-3 rounded-full bg-gray-300" />
+                    )}
+                    <span>{step}</span>
+                  </li>
+                );
+              })}
+            </ul>
+            {autoCreation.error && (
+              <p className="text-sm text-red-600">{autoCreation.error}</p>
+            )}
           </div>
         </div>
       )}

@@ -29,6 +29,7 @@ import {
   NotificationsNone as NotificationsIcon
 } from '@mui/icons-material';
 import { useAuth } from '../contexts/AuthContext';
+import { isSystemAdmin } from '../utils/authUtils';
 import mixedGameApi from '../services/api';
 
 const Navbar = () => {
@@ -63,11 +64,15 @@ const Navbar = () => {
     fetchGameInfo();
   }, [gameId]);
 
-  const navigation = [
-    { name: 'Dashboard', path: '/dashboard', icon: <DashboardIcon />, auth: true },
-    { name: 'Games', path: '/games', icon: <GamesIcon />, auth: true },
-    { name: 'Players', path: '/players', icon: <PlayersIcon />, auth: true },
-  ];
+  const isSysAdmin = isSystemAdmin(user);
+
+  const navigation = isSysAdmin
+    ? []
+    : [
+        { name: 'Dashboard', path: '/dashboard', icon: <DashboardIcon /> },
+        { name: 'Games', path: '/games', icon: <GamesIcon /> },
+        { name: 'Players', path: '/players', icon: <PlayersIcon /> },
+      ];
 
   const handleMenuOpen = (event) => {
     setAnchorEl(event.currentTarget);
@@ -121,7 +126,7 @@ const Navbar = () => {
           <Typography
             variant="h6"
             component={Link}
-            to="/dashboard"
+            to={isSysAdmin ? '/admin/groups' : '/dashboard'}
             sx={{
               fontWeight: 700,
               color: 'primary.main',
@@ -144,12 +149,13 @@ const Navbar = () => {
           )}
 
           {/* Navigation Links - Desktop */}
-          <Box sx={{ display: { xs: 'none', md: 'flex' }, gap: 1 }}>
-            {navigation.map((item) => (
-              <Button
-                key={item.name}
-                component={Link}
-                to={item.path}
+          {navigation.length > 0 && (
+            <Box sx={{ display: { xs: 'none', md: 'flex' }, gap: 1 }}>
+              {navigation.map((item) => (
+                <Button
+                  key={item.name}
+                  component={Link}
+                  to={item.path}
                 startIcon={item.icon}
                 sx={{
                   color: currentPath === item.path ? 'primary.main' : 'text.secondary',
@@ -162,24 +168,28 @@ const Navbar = () => {
                 {item.name}
               </Button>
             ))}
-          </Box>
+            </Box>
+          )}
         </Box>
 
         {/* Right side - User menu */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Tooltip title="Help">
-            <IconButton color="inherit" onClick={() => navigate('/help')}>
-              <HelpIcon />
-            </IconButton>
-          </Tooltip>
-          
-          <Tooltip title="Notifications">
-            <IconButton color="inherit">
-              <Badge badgeContent={3} color="error">
-                <NotificationsIcon />
-              </Badge>
-            </IconButton>
-          </Tooltip>
+          {!isSysAdmin && (
+            <>
+              <Tooltip title="Help">
+                <IconButton color="inherit" onClick={() => navigate('/help')}>
+                  <HelpIcon />
+                </IconButton>
+              </Tooltip>
+              <Tooltip title="Notifications">
+                <IconButton color="inherit">
+                  <Badge badgeContent={3} color="error">
+                    <NotificationsIcon />
+                  </Badge>
+                </IconButton>
+              </Tooltip>
+            </>
+          )}
 
           {/* User Menu */}
           <Box sx={{ display: 'flex', alignItems: 'center', ml: 1 }}>
