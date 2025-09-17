@@ -76,15 +76,9 @@ RUN pip3 install --no-cache-dir -r requirements.txt && \
 COPY . .
 
 # Ensure scripts have proper permissions and line endings
-RUN chmod +x /app/startup.sh /app/init-db.sh /app/entrypoint.sh \
+RUN chmod +x /app/startup.sh /app/init-db.sh \
     && find /app -name "*.sh" -exec dos2unix {} + 2>/dev/null || true \
     && find /app -name "*.sh" -exec chmod 755 {} +
-
-# Set the entrypoint script
-ENTRYPOINT ["/app/entrypoint.sh"]
-
-# Default command to run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 # Expose the port the app runs on
 EXPOSE 8000
@@ -93,7 +87,7 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Verify GPU is available
+# Verify GPU is available (will print status during build without failing)
 RUN python3 -c "import torch; print(f'PyTorch version: {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA device count: {torch.cuda.device_count()}'); [torch.cuda.is_available()] and [print(f'Device {i}: {torch.cuda.get_device_properties(i)}') for i in range(torch.cuda.device_count())]"
 
 # Command to run the application with uvicorn

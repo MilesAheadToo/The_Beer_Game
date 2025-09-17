@@ -84,7 +84,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    runtime: nvidia
     deploy:
       resources:
         reservations:
@@ -98,14 +97,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    runtime: nvidia
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    security_opt:
-      - seccomp:unconfined
-    ulimits:
-      nofile:
-        soft: 65535
-        hard: 65535
 
   db:
     image: mariadb:10.11
@@ -132,12 +126,6 @@ services:
       start_period: 30s
     networks:
       - beer-game-network
-    security_opt:
-      - seccomp:unconfined
-    ulimits:
-      nofile:
-        soft: 65535
-        hard: 65535
 
   phpmyadmin:
     image: phpmyadmin/phpmyadmin:latest
