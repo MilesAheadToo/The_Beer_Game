@@ -2,9 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   Box,
   Button,
-  Card,
-  CardContent,
-  Divider,
   Grid,
   TextField,
   Typography,
@@ -27,8 +24,6 @@ import {
   Tooltip,
   Chip,
   FormHelperText,
-  FormGroup,
-  FormControlLabel,
   Checkbox,
   TablePagination
 } from '@mui/material';
@@ -40,7 +35,6 @@ import {
   Cancel as CancelIcon,
   Warning as WarningIcon
 } from '@mui/icons-material';
-import RangeInput from './RangeInput';
 
 const ItemNodeConfigForm = ({ 
   configs = [], 
@@ -119,7 +113,7 @@ const ItemNodeConfigForm = ({
     } else {
       setFilteredNodes([]);
     }
-  }, [formData.item_id, nodes, configs, editingConfig]);
+  }, [formData.item_id, formData.node_id, nodes, configs, editingConfig]);
 
   const handleOpenDialog = (config = null) => {
     setEditingConfig(config);

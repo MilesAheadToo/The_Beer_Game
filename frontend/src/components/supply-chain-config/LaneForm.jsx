@@ -2,9 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   Box,
   Button,
-  Card,
-  CardContent,
-  Divider,
   Grid,
   TextField,
   Typography,
@@ -36,7 +33,6 @@ import {
   Cancel as CancelIcon,
   ArrowForward as ArrowForwardIcon
 } from '@mui/icons-material';
-import RangeInput from './RangeInput';
 
 const LaneForm = ({ 
   lanes = [], 
@@ -94,7 +90,7 @@ const LaneForm = ({
     } else {
       setFilteredToNodes([]);
     }
-  }, [formData.from_node_id, nodes]);
+  }, [formData.from_node_id, formData.to_node_id, nodes]);
 
   const handleOpenDialog = (lane = null) => {
     if (lane) {

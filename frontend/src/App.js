@@ -11,7 +11,6 @@ import Login from "./pages/Login.jsx";
 import { WebSocketProvider } from "./contexts/WebSocketContext";
 import { useAuth } from "./contexts/AuthContext";
 import "./utils/fetchInterceptor";
-import ProtectedRoute from "./components/ProtectedRoute";
 import AdminDashboard from "./pages/admin/Dashboard.jsx";
 import AdminTraining from "./pages/admin/Training.jsx";
 import ModelSetup from "./pages/admin/ModelSetup.jsx";

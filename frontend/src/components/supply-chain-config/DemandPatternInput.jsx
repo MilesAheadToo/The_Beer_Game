@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Box, 
   FormControl, 
   InputLabel, 
   Select, 
@@ -11,7 +10,6 @@ import {
   Divider,
   Paper
 } from '@mui/material';
-import RangeInput from './RangeInput';
 
 const DEMAND_PATTERN_TYPES = [
   { value: 'constant', label: 'Constant' },
