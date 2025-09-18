@@ -108,34 +108,6 @@ const Navbar = ({ handleDrawerToggle }) => {
               >
                 Admin Dashboard
               </Button>
-              <Button
-                color="inherit"
-                startIcon={<SportsEsportsIcon />}
-                onClick={() => navigate('/admin?section=game')}
-                sx={{
-                  mx: 1,
-                  bgcolor: isAdminSectionActive('game') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                  '&:hover': {
-                    bgcolor: 'rgba(255, 255, 255, 0.15)'
-                  }
-                }}
-              >
-                Manage Games
-              </Button>
-              <Button
-                color="inherit"
-                startIcon={<GroupIcon />}
-                onClick={() => navigate('/admin?section=users')}
-                sx={{
-                  mx: 1,
-                  bgcolor: isAdminSectionActive('users') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                  '&:hover': {
-                    bgcolor: 'rgba(255, 255, 255, 0.15)'
-                  }
-                }}
-              >
-                Manage Users
-              </Button>
             </>
           ) : (
             <>

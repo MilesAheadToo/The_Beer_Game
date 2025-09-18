@@ -136,8 +136,8 @@ def ensure_group(session: Session) -> Tuple[Group, bool]:
             full_name=DEFAULT_ADMIN_FULL_NAME,
             hashed_password=get_password_hash(DEFAULT_PASSWORD),
             is_active=True,
-            is_superuser=True,
-            user_type=UserTypeEnum.SYSTEM_ADMIN,
+            is_superuser=False,
+            user_type=UserTypeEnum.GROUP_ADMIN,
         )
         session.add(admin_user)
         session.flush()
@@ -151,11 +151,11 @@ def ensure_group(session: Session) -> Tuple[Group, bool]:
         if admin_user.full_name != DEFAULT_ADMIN_FULL_NAME:
             admin_user.full_name = DEFAULT_ADMIN_FULL_NAME
             updated = True
-        if not admin_user.is_superuser:
-            admin_user.is_superuser = True
+        if admin_user.is_superuser:
+            admin_user.is_superuser = False
             updated = True
-        if admin_user.user_type != UserTypeEnum.SYSTEM_ADMIN:
-            admin_user.user_type = UserTypeEnum.SYSTEM_ADMIN
+        if admin_user.user_type != UserTypeEnum.GROUP_ADMIN:
+            admin_user.user_type = UserTypeEnum.GROUP_ADMIN
             updated = True
         if not admin_user.is_active:
             admin_user.is_active = True

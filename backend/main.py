@@ -19,6 +19,8 @@ from fastapi.security import OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
+from sqlalchemy.orm import Session
+
 from app.services.group_service import GroupService
 from app.schemas.group import GroupCreate, GroupUpdate, Group as GroupSchema
 from app.schemas.user import UserCreate
@@ -59,6 +61,8 @@ _FAKE_USERS = {
         # Dev-only password to simplify getting started
         "passwords": {"Daybreak@2025", "Daybreak@2025!"},
         "aliases": {"systemadmin", "superadmin"},
+        "group_id": None,
+        "is_superuser": True,
     }
 }
 
@@ -70,6 +74,8 @@ _FAKE_USERS["groupadmin@daybreak.ai"] = {
     "role": "groupadmin",
     "passwords": {"Daybreak@2025", "DayBreak@2025"},
     "aliases": {"groupadmin", "defaultadmin"},
+    "group_id": 1,
+    "is_superuser": False,
 }
 
 # ------------------------------------------------------------------------------
@@ -694,94 +700,175 @@ from enum import Enum
 from threading import Lock
 
 
-class GameStatus(str, Enum):
-    CREATED = "CREATED"
-    IN_PROGRESS = "IN_PROGRESS"
-    PAUSED = "PAUSED"
-    COMPLETED = "COMPLETED"
+from app.models.game import Game as DbGame, GameStatus as DbGameStatus
+from app.models.user import UserTypeEnum
 
 
-_GAMES_LOCK = Lock()
-_GAMES: Dict[int, Dict[str, Any]] = {}
-_NEXT_ID = 1
+def _is_system_admin_user(user: Any) -> bool:
+    if isinstance(user, dict):
+        if user.get("is_superuser"):
+            return True
+        token = str(user.get("role") or user.get("user_type") or "").lower()
+        return token in {"systemadmin", "system_admin", "superadmin", "systemadministrator"}
+
+    if getattr(user, "is_superuser", False):
+        return True
+
+    user_type = getattr(user, "user_type", None)
+    if isinstance(user_type, UserTypeEnum):
+        return user_type == UserTypeEnum.SYSTEM_ADMIN
+    if isinstance(user_type, str):
+        token = user_type.lower()
+        return token in {"systemadmin", "system_admin", "superadmin", "systemadministrator"}
+    return False
 
 
-def _seed_games() -> None:
-    global _NEXT_ID
-    with _GAMES_LOCK:
-        if _GAMES:
-            return
-        now = datetime.utcnow().isoformat() + "Z"
-        for name in [
-            "Supply Chain Masters",
-            "Beer Game Pro",
-            "Logistics Challenge",
-        ]:
-            gid = _NEXT_ID
-            _NEXT_ID += 1
-            _GAMES[gid] = {
-                "id": gid,
-                "name": name,
-                "status": GameStatus.CREATED,
-                "current_round": 0,
-                "max_rounds": 20,
-                "created_at": now,
-                "updated_at": now,
-                "description": "Demo game",
-                "players": [],
-            }
+def _extract_group_id(user: Any) -> Optional[int]:
+    gid = user.get("group_id") if isinstance(user, dict) else getattr(user, "group_id", None)
+    try:
+        return int(gid) if gid is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _iso(dt: Optional[datetime]) -> Optional[str]:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        return dt.isoformat() + "Z"
+    return dt.isoformat()
+
+
+STATUS_REMAPPING = {
+    DbGameStatus.CREATED: "CREATED",
+    DbGameStatus.STARTED: "IN_PROGRESS",
+    DbGameStatus.ROUND_IN_PROGRESS: "IN_PROGRESS",
+    DbGameStatus.ROUND_COMPLETED: "PAUSED",
+    DbGameStatus.FINISHED: "COMPLETED",
+}
+
+
+def _serialize_game(game: DbGame) -> Dict[str, Any]:
+    if isinstance(game.status, DbGameStatus):
+        status = STATUS_REMAPPING.get(game.status, game.status.value)
+    else:
+        status = str(game.status or "")
+    return {
+        "id": game.id,
+        "name": game.name,
+        "description": game.description,
+        "status": str(status).upper(),
+        "current_round": game.current_round or 0,
+        "max_rounds": game.max_rounds or 0,
+        "created_at": _iso(game.created_at),
+        "updated_at": _iso(game.updated_at),
+        "group_id": game.group_id,
+        "created_by": game.created_by,
+        "config": game.config or {},
+        "demand_pattern": game.demand_pattern or {},
+    }
+
+
+def _get_game_for_user(db: Session, user: Any, game_id: int) -> DbGame:
+    game = db.query(DbGame).filter(DbGame.id == game_id).first()
+    if not game:
+        raise HTTPException(status_code=404, detail="Game not found")
+    if _is_system_admin_user(user):
+        return game
+    user_group_id = _extract_group_id(user)
+    if user_group_id is None or user_group_id != game.group_id:
+        raise HTTPException(status_code=403, detail="Not enough permissions")
+    return game
+
+
+def _touch_game(game: DbGame) -> None:
+    game.updated_at = datetime.utcnow()
 
 
 @api.get("/mixed-games/")
 async def list_mixed_games(user: Dict[str, Any] = Depends(get_current_user)):
-    """Return a minimal list of games for the GamesList UI."""
-    _seed_games()
-    with _GAMES_LOCK:
-        return list(_GAMES.values())
-
-
-def _touch(g: Dict[str, Any]):
-    g["updated_at"] = datetime.utcnow().isoformat() + "Z"
+    db = SyncSessionLocal()
+    try:
+        query = db.query(DbGame).order_by(DbGame.created_at.desc())
+        if not _is_system_admin_user(user):
+            group_id = _extract_group_id(user)
+            if group_id is None:
+                return []
+            query = query.filter(DbGame.group_id == group_id)
+        games = query.all()
+        return [_serialize_game(game) for game in games]
+    finally:
+        db.close()
 
 
 @api.post("/mixed-games/{game_id}/start")
 async def start_game(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
-    with _GAMES_LOCK:
-        g = _GAMES.get(game_id)
-        if not g:
-            raise HTTPException(status_code=404, detail="Game not found")
-        g["status"] = GameStatus.IN_PROGRESS
-        if g["current_round"] == 0:
-            g["current_round"] = 1
-        _touch(g)
-        return g
+    db = SyncSessionLocal()
+    try:
+        game = _get_game_for_user(db, user, game_id)
+        if game.status == DbGameStatus.FINISHED:
+            raise HTTPException(status_code=400, detail="Game is already finished")
+        if game.current_round is None or game.current_round <= 0:
+            game.current_round = 1
+        game.status = DbGameStatus.STARTED
+        _touch_game(game)
+        db.add(game)
+        db.commit()
+        db.refresh(game)
+        return _serialize_game(game)
+    finally:
+        db.close()
 
 
 @api.post("/mixed-games/{game_id}/stop")
 async def stop_game(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
-    with _GAMES_LOCK:
-        g = _GAMES.get(game_id)
-        if not g:
-            raise HTTPException(status_code=404, detail="Game not found")
-        g["status"] = GameStatus.PAUSED
-        _touch(g)
-        return g
+    db = SyncSessionLocal()
+    try:
+        game = _get_game_for_user(db, user, game_id)
+        game.status = DbGameStatus.ROUND_COMPLETED
+        _touch_game(game)
+        db.add(game)
+        db.commit()
+        db.refresh(game)
+        return _serialize_game(game)
+    finally:
+        db.close()
 
 
 @api.post("/mixed-games/{game_id}/next-round")
 async def next_round(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
-    with _GAMES_LOCK:
-        g = _GAMES.get(game_id)
-        if not g:
-            raise HTTPException(status_code=404, detail="Game not found")
-        if g["status"] != GameStatus.IN_PROGRESS:
-            g["status"] = GameStatus.IN_PROGRESS
-        if g["current_round"] < g["max_rounds"]:
-            g["current_round"] += 1
-        if g["current_round"] >= g["max_rounds"]:
-            g["status"] = GameStatus.COMPLETED
-        _touch(g)
-        return g
+    db = SyncSessionLocal()
+    try:
+        game = _get_game_for_user(db, user, game_id)
+        current = game.current_round or 0
+        limit = game.max_rounds or current
+        if current < limit:
+            game.current_round = current + 1
+        game.status = DbGameStatus.ROUND_IN_PROGRESS
+        _touch_game(game)
+        db.add(game)
+        db.commit()
+        db.refresh(game)
+        return _serialize_game(game)
+    finally:
+        db.close()
+
+
+@api.post("/mixed-games/{game_id}/finish")
+async def finish_game(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
+    db = SyncSessionLocal()
+    try:
+        game = _get_game_for_user(db, user, game_id)
+        game.status = DbGameStatus.FINISHED
+        if game.max_rounds:
+            game.current_round = max(game.current_round or 0, game.max_rounds)
+        _touch_game(game)
+        db.add(game)
+        db.commit()
+        db.refresh(game)
+        return _serialize_game(game)
+    finally:
+        db.close()
 
 
 # Simple model status for UI banner
