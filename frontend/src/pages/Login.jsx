@@ -108,8 +108,8 @@ const Login = () => {
         // Fall through to default navigation
       }
 
-      // Default: honor redirect or go to games list
-      navigate(redirectTo || '/games', { replace: true });
+      // Default: honor redirect or fallback destination
+      navigate(destination, { replace: true });
     };
 
     maybeRedirect();

@@ -4,6 +4,7 @@ import { Alert, Box, CircularProgress } from '@mui/material';
 import { useAuth } from '../../contexts/AuthContext';
 import { isGroupAdmin as isGroupAdminUser } from '../../utils/authUtils';
 import SupplyChainConfigList from '../../components/supply-chain-config/SupplyChainConfigList';
+import { TrainingPanel } from './Training';
 
 const GroupSupplyChainConfigList = () => {
   const { user, loading } = useAuth();
@@ -34,12 +35,15 @@ const GroupSupplyChainConfigList = () => {
   }
 
   return (
-    <SupplyChainConfigList
-      title="My Group's Supply Chain Configurations"
-      basePath="/admin/group/supply-chain-configs"
-      restrictToGroupId={restrictToGroupId}
-      enableTraining
-    />
+    <Box display="flex" flexDirection="column" gap={4}>
+      <SupplyChainConfigList
+        title="My Group's Supply Chain Configurations"
+        basePath="/admin/group/supply-chain-configs"
+        restrictToGroupId={restrictToGroupId}
+        enableTraining
+      />
+      <TrainingPanel />
+    </Box>
   );
 };
 

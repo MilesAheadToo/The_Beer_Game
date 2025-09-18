@@ -73,10 +73,10 @@ export const getDefaultLandingPath = (user) => {
   }
 
   if (isGroupAdmin(user)) {
-    return '/games';
+    return '/admin?section=game';
   }
 
-  return '/dashboard';
+  return '/games';
 };
 
 const parseRedirectTarget = (target) => {

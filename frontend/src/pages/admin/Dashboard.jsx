@@ -21,10 +21,10 @@ import GroupGameSupervisionPanel from './GroupGameSupervisionPanel';
 import { mixedGameApi } from '../../services/api';
 
 const tabItems = [
-  { value: 'sc', label: 'SC Config', icon: <StorageIcon fontSize="small" /> },
-  { value: 'game', label: 'Game Config', icon: <SportsEsportsIcon fontSize="small" /> },
-  { value: 'users', label: 'User Config', icon: <GroupIcon fontSize="small" /> },
-  { value: 'supervision', label: 'Game Supervision', icon: <VisibilityIcon fontSize="small" /> },
+  { value: 'game', label: 'Games', icon: <SportsEsportsIcon fontSize="small" /> },
+  { value: 'users', label: 'Players', icon: <GroupIcon fontSize="small" /> },
+  { value: 'sc', label: 'Supply Chains', icon: <StorageIcon fontSize="small" /> },
+  { value: 'supervision', label: 'Supervision', icon: <VisibilityIcon fontSize="small" /> },
 ];
 
 const AdminDashboard = () => {
@@ -32,8 +32,8 @@ const AdminDashboard = () => {
   const isSystemAdmin = isSystemAdminUser(user);
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const initialTab = searchParams.get('section') || 'sc';
-  const [activeTab, setActiveTab] = useState(tabItems.some((tab) => tab.value === initialTab) ? initialTab : 'sc');
+  const initialTab = searchParams.get('section') || 'game';
+  const [activeTab, setActiveTab] = useState(tabItems.some((tab) => tab.value === initialTab) ? initialTab : 'game');
 
   useEffect(() => {
     const section = searchParams.get('section') || 'sc';

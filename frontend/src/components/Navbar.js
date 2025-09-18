@@ -47,13 +47,6 @@ const Navbar = ({ handleDrawerToggle }) => {
            (path !== '/' && location.pathname.startsWith(path));
   };
 
-  const isAdminSectionActive = (section) => {
-    if (location.pathname !== '/admin') return false;
-    const params = new URLSearchParams(location.search);
-    const current = params.get('section') || 'sc';
-    return current === section;
-  };
-
   const handleClick = (event) => {
     setAnchorEl(event.currentTarget);
   };
@@ -92,22 +85,18 @@ const Navbar = ({ handleDrawerToggle }) => {
         </Box>
         <Box sx={{ flexGrow: 1, display: { xs: 'none', md: 'flex' }, ml: 4 }}>
           {systemAdmin ? null : groupAdmin ? (
-            <>
-              <Button
-                color="inherit"
-                startIcon={<DashboardIcon />}
-                onClick={() => navigate('/admin')}
-                sx={{
-                  mx: 1,
-                  bgcolor: isAdminSectionActive('sc') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                  '&:hover': {
-                    bgcolor: 'rgba(255, 255, 255, 0.15)'
-                  }
-                }}
-              >
-                Admin Dashboard
-              </Button>
-            </>
+            <Typography
+              variant="h6"
+              component="div"
+              sx={{
+                mx: 1,
+                fontWeight: 600,
+                cursor: 'default',
+                opacity: isActivePath('/admin') ? 1 : 0.7,
+              }}
+            >
+              Admin Dashboard
+            </Typography>
           ) : (
             <>
               <Button

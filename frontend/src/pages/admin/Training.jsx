@@ -3,7 +3,7 @@ import PageLayout from '../../components/PageLayout';
 import { Box, Grid, FormControl, FormLabel, Input, Select, NumberInput, NumberInputField, Button, Text, useToast, Textarea, HStack } from '@chakra-ui/react';
 import { mixedGameApi } from '../../services/api';
 
-export default function Training() {
+export const TrainingPanel = () => {
   const [serverHost, setServerHost] = useState('aiserver.local');
   const [source, setSource] = useState('sim');
   const [windowSize, setWindowSize] = useState(12);
@@ -78,8 +78,7 @@ export default function Training() {
   };
 
   return (
-    <PageLayout title="Daybreak Agent Training">
-      <Box className="card-surface pad-6">
+    <Box className="card-surface pad-6">
         <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={6}>
           <FormControl>
             <FormLabel>Server Host</FormLabel>
@@ -185,6 +184,13 @@ export default function Training() {
           </Box>
         )}
       </Box>
-    </PageLayout>
   );
-}
+};
+
+const Training = () => (
+  <PageLayout title="Daybreak Agent Training">
+    <TrainingPanel />
+  </PageLayout>
+);
+
+export default Training;
