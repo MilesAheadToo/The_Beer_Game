@@ -3,10 +3,19 @@ import os
 import secrets
 import socket
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 from urllib.parse import urlparse
 
 from pydantic import BaseSettings, Field, validator
+
+
+def _can_connect(host: str, port: int, timeout: float = 1.0) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout):
+            return True
+    except OSError:
+        return False
 
 class Settings(BaseSettings):
     # Application
@@ -160,7 +169,22 @@ class Settings(BaseSettings):
         encoded_password = quote_plus(password)
         connection_string = f"mysql+pymysql://{user}:*****@{server}:{port}/{db}?charset=utf8mb4&ssl=None"
         print(f"[DEBUG] Database connection string: {connection_string}")
-        
+
+        # If the MySQL instance isn't reachable (common for local dev), fall back to SQLite.
+        port_int = int(port)
+        if not _can_connect(server, port_int, timeout=0.5):
+            fallback_path = (
+                Path(__file__).resolve().parents[2] / "data" / "beer_game_dev.db"
+            )
+            fallback_path.parent.mkdir(parents=True, exist_ok=True)
+            logging.getLogger(__name__).warning(
+                "MySQL at %s:%s is unreachable; using SQLite fallback at %s",
+                server,
+                port,
+                fallback_path,
+            )
+            return f"sqlite:///{fallback_path}"
+
         # Connection string with SSL disabled and URL-encoded password
         return (
             f"mysql+pymysql://{user}:{encoded_password}@{server}:{port}/{db}?charset=utf8mb4&ssl=None"
@@ -258,15 +282,15 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get the application settings with MySQL configuration."""
     settings = Settings()
-    # Use MySQL configuration from environment variables
-    server = os.getenv("MYSQL_SERVER", "db")
-    port = os.getenv("MYSQL_PORT", "3306")
-    user = os.getenv("MYSQL_USER", "beer_user")
-    password = os.getenv("MYSQL_PASSWORD", "beer_password")
-    db = os.getenv("MYSQL_DB", "beer_game")
-    
-    settings.SQLALCHEMY_DATABASE_URI = f"mysql+pymysql://{user}:{password}@{server}:{port}/{db}?charset=utf8mb4"
-    print(f"Using MySQL database at: {user}@{server}:{port}/{db}")
+    uri = settings.SQLALCHEMY_DATABASE_URI
+    if uri.startswith("mysql"):
+        parsed = urlparse(uri)
+        server = parsed.hostname or "db"
+        port = parsed.port or 3306
+        db = parsed.path.lstrip("/") or "beer_game"
+        print(f"Using MySQL database at: {server}:{port}/{db}")
+    else:
+        print(f"Using SQLite database at: {uri}")
     return settings
 
 # Global settings instance

@@ -22,8 +22,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.services.group_service import GroupService
+from app.services.bootstrap import build_default_group_payload, ensure_default_group_and_game
 from app.schemas.group import GroupCreate, GroupUpdate, Group as GroupSchema
-from app.schemas.user import UserCreate
 from app.db.session import sync_engine
 
 # ------------------------------------------------------------------------------
@@ -392,18 +392,7 @@ def require_system_admin(user: Dict[str, Any]):
 
 
 def _default_group_payload() -> GroupCreate:
-    return GroupCreate(
-        name="Daybreak",
-        description="Default Daybreak group",
-        logo="/daybreak_logo.png",
-        admin=UserCreate(
-            username="groupadmin",
-            email="groupadmin@daybreak.ai",
-            password="Daybreak@2025",
-            full_name="Group Administrator",
-            user_type="GroupAdmin",
-        ),
-    )
+    return build_default_group_payload()
 
 
 class SystemConfigRow(Base):
@@ -759,7 +748,7 @@ def _serialize_game(game: DbGame) -> Dict[str, Any]:
         "current_round": game.current_round or 0,
         "max_rounds": game.max_rounds or 0,
         "created_at": _iso(game.created_at),
-        "updated_at": _iso(game.updated_at),
+        "updated_at": _iso(getattr(game, "updated_at", None)),
         "group_id": game.group_id,
         "created_by": game.created_by,
         "config": game.config or {},
@@ -794,6 +783,10 @@ async def list_mixed_games(user: Dict[str, Any] = Depends(get_current_user)):
                 return []
             query = query.filter(DbGame.group_id == group_id)
         games = query.all()
+        if not games:
+            ensure_default_group_and_game(db)
+            db.expire_all()
+            games = query.all()
         return [_serialize_game(game) for game in games]
     finally:
         db.close()
