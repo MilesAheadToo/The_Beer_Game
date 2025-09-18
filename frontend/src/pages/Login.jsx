@@ -10,6 +10,61 @@ import {
 import { toast } from 'react-toastify';
 import ContactSystemAdminForm from '../components/ContactSystemAdminForm';
 
+const BeerCaseGraphic = () => (
+  <svg
+    viewBox="0 0 220 180"
+    role="img"
+    aria-labelledby="beer-case-title"
+    className="w-40 h-32 text-green-600"
+  >
+    <title id="beer-case-title">3D case of beer with Daybreak logo</title>
+    <defs>
+      <linearGradient id="beerCaseFront" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%" stopColor="#fbd38d" />
+        <stop offset="100%" stopColor="#dd6b20" />
+      </linearGradient>
+      <linearGradient id="beerCaseTop" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#fed7aa" />
+        <stop offset="100%" stopColor="#f97316" />
+      </linearGradient>
+      <linearGradient id="beerCaseSide" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="#f6ad55" />
+        <stop offset="100%" stopColor="#c05621" />
+      </linearGradient>
+    </defs>
+    <polygon points="40,50 140,20 200,50 100,80" fill="url(#beerCaseTop)" />
+    <polygon points="40,50 40,140 100,170 100,80" fill="url(#beerCaseSide)" />
+    <polygon points="100,80 200,50 200,140 100,170" fill="url(#beerCaseFront)" />
+    <g>
+      {[0, 1, 2, 3].map((idx) => (
+        <rect
+          key={idx}
+          x={70 + idx * 25}
+          y={32 - idx * 2}
+          width="18"
+          height="28"
+          rx="4"
+          fill="#facc15"
+          stroke="#b45309"
+          strokeWidth="2"
+        />
+      ))}
+    </g>
+    <rect x="120" y="90" width="60" height="36" rx="6" fill="#ffffff" opacity="0.95" />
+    <circle cx="135" cy="108" r="10" fill="#047857" />
+    <rect x="150" y="100" width="24" height="6" rx="3" fill="#047857" />
+    <rect x="150" y="110" width="24" height="6" rx="3" fill="#047857" />
+    <image
+      href="/daybreak_logo.png"
+      x="118"
+      y="88"
+      width="64"
+      height="40"
+      preserveAspectRatio="xMidYMid meet"
+    />
+  </svg>
+);
+
 const Login = () => {
   const [formData, setFormData] = useState({
     email: '',
@@ -179,7 +234,11 @@ const Login = () => {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-md w-full space-y-8">
-        <div>
+        <div className="flex flex-col items-center gap-6 text-center">
+          <BeerCaseGraphic />
+          <p className="font-semibold text-gray-800 text-[1.75rem]">
+            DayBreak - The Beer Game
+          </p>
           <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
             Sign in to your account
           </h2>

@@ -44,27 +44,30 @@ class GroupService:
     def create_group(self, group_in: GroupCreate) -> Group:
         admin_data = group_in.admin
         hashed_password = get_password_hash(admin_data.password)
-        group = Group(name=group_in.name, description=group_in.description, logo=group_in.logo)
         try:
-            self.db.add(group)
-            self.db.flush()
-
             admin_user = User(
                 username=admin_data.username,
                 email=admin_data.email,
                 full_name=admin_data.full_name,
                 hashed_password=hashed_password,
                 user_type=UserTypeEnum.GROUP_ADMIN,
-                group_id=group.id,
                 is_active=True,
-                is_superuser=False
+                is_superuser=False,
             )
             self.db.add(admin_user)
             self.db.flush()
 
-            group.admin_id = admin_user.id
+            group = Group(
+                name=group_in.name,
+                description=group_in.description,
+                logo=group_in.logo,
+                admin_id=admin_user.id,
+            )
             self.db.add(group)
             self.db.flush()
+
+            admin_user.group_id = group.id
+            self.db.add(admin_user)
 
             sc_config = SupplyChainConfig(
                 name="Default TBG",

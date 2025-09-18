@@ -57,23 +57,27 @@ const GroupManagement = () => {
     setAutoCreation({ open: true, step: 0, completed: false, error: null });
 
     try {
-      const defaults = createDefaultForm();
-
       setAutoCreation((prev) => ({ ...prev, step: 0 }));
       await delay(300);
       setAutoCreation((prev) => ({ ...prev, step: 1 }));
 
-      await api.post('/groups', defaults);
+      const response = await api.post('/groups/default');
+      const createdGroup = response?.data || response;
 
       setAutoCreation((prev) => ({ ...prev, step: 2 }));
       await delay(300);
       setAutoCreation((prev) => ({ ...prev, completed: true }));
       toast.success('Default Daybreak group created successfully');
 
-      const response = await api.get('/groups');
-      const createdGroups = Array.isArray(response.data) ? response.data : [];
-      setGroups(createdGroups);
-      setSelectedGroupId(createdGroups[0]?.id || null);
+      if (createdGroup) {
+        const listResponse = await api.get('/groups');
+        const createdGroups = Array.isArray(listResponse.data) ? listResponse.data : [];
+        setGroups(createdGroups);
+        setSelectedGroupId(createdGroups[0]?.id || null);
+      }
+
+      await delay(600);
+      setAutoCreation((prev) => ({ ...prev, open: false }));
     } catch (error) {
       console.error('Failed to auto-create default group:', error);
       const detail = error?.response?.data?.detail;
@@ -81,10 +85,13 @@ const GroupManagement = () => {
       setAutoCreation({ open: true, step: 0, completed: false, error: message });
       toast.error(message);
       autoCreationRequestedRef.current = false;
-    } finally {
-      await delay(800);
-      setAutoCreation((prev) => ({ ...prev, open: false }));
     }
+  }, []);
+
+
+  const dismissAutoCreationError = useCallback(() => {
+    autoCreationRequestedRef.current = false;
+    setAutoCreation({ open: false, step: 0, completed: false, error: null });
   }, []);
 
   const openModal = useCallback((group = null) => {
@@ -664,8 +671,19 @@ const GroupManagement = () => {
                 );
               })}
             </ul>
-            {autoCreation.error && (
-              <p className="text-sm text-red-600">{autoCreation.error}</p>
+            {autoCreation.error ? (
+              <div className="flex items-center justify-between pt-3">
+                <p className="text-sm text-red-600">{autoCreation.error}</p>
+                <button
+                  type="button"
+                  onClick={dismissAutoCreationError}
+                  className="px-3 py-1 rounded-md text-sm font-medium bg-red-500 text-white hover:bg-red-600"
+                >
+                  Dismiss
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-gray-500">This may take a few moments…</p>
             )}
           </div>
         </div>

@@ -180,20 +180,16 @@ const Navbar = ({ handleDrawerToggle }) => {
         </Box>
         
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
-          {!systemAdmin && (
-            <>
-              <Tooltip title="Notifications">
-                <IconButton color="inherit">
-                  <NotificationsIcon />
-                </IconButton>
-              </Tooltip>
-              <Tooltip title="Settings">
-                <IconButton color="inherit" onClick={() => navigate('/settings')}>
-                  <SettingsIcon />
-                </IconButton>
-              </Tooltip>
-            </>
-          )}
+          <Tooltip title="Notifications">
+            <IconButton color="inherit">
+              <NotificationsIcon />
+            </IconButton>
+          </Tooltip>
+          <Tooltip title="Settings">
+            <IconButton color="inherit" onClick={() => navigate('/settings')}>
+              <SettingsIcon />
+            </IconButton>
+          </Tooltip>
           <IconButton
             onClick={handleClick}
             size="small"
