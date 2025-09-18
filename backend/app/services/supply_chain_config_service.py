@@ -71,10 +71,10 @@ class SupplyChainConfigService:
             
             # Use first item's config or defaults
             if node_item_configs:
-                config = node_item_configs[0]
-                init_inventory = config.initial_inventory_range.get('min', 12)
-                price = config.selling_price_range.get('min', 10.0)
-                standard_cost = config.holding_cost_range.get('min', 2.0)
+                node_item_config = node_item_configs[0]
+                init_inventory = node_item_config.initial_inventory_range.get('min', 12)
+                price = node_item_config.selling_price_range.get('min', 10.0)
+                standard_cost = node_item_config.holding_cost_range.get('min', 2.0)
             else:
                 init_inventory = 12
                 price = 10.0

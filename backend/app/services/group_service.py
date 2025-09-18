@@ -1,3 +1,5 @@
+import logging
+
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, status
 
@@ -24,6 +26,8 @@ from ..models.supply_chain_config import (
 from ..schemas.group import GroupCreate, GroupUpdate
 from ..core.security import get_password_hash
 from .supply_chain_config_service import SupplyChainConfigService
+
+logger = logging.getLogger(__name__)
 
 class GroupService:
     def __init__(self, db: Session):
@@ -212,8 +216,10 @@ class GroupService:
                     user_id=user_obj.id,
                     name=display_name,
                     role=role_enum,
-                    type=PlayerType.HUMAN,
+                    type=PlayerType.AI,
                     strategy=PlayerStrategy.MANUAL,
+                    is_ai=True,
+                    ai_strategy="naive",
                 )
                 players.append(player)
 
@@ -221,9 +227,10 @@ class GroupService:
 
             game.role_assignments = {
                 role_enum.value: {
-                    "is_ai": False,
+                    "is_ai": True,
                     "agent_config_id": None,
                     "user_id": user_obj.id,
+                    "strategy": "naive",
                 }
                 for user_obj, role_enum, _ in player_users
             }
@@ -234,6 +241,7 @@ class GroupService:
             return group
         except Exception:
             self.db.rollback()
+            logger.exception("Failed to create group %s", group_in.name)
             raise HTTPException(status_code=500, detail="Error creating group")
 
     def update_group(self, group_id: int, group_update: GroupUpdate) -> Group:

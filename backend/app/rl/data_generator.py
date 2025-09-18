@@ -1,7 +1,6 @@
 import json
 import logging
-import os
-from pathlib import Path
+import math
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -212,6 +211,157 @@ def load_sequences_from_db(
     Y = np.stack(Y_windows, axis=0)  # [B, H, N]
     P = np.stack(P_windows, axis=0)  # [B, 0]
     return X, A, P, Y
+
+
+def _load_param_ranges_from_config(
+    supply_chain_config_id: int,
+    db_url: Optional[str] = None,
+) -> Dict[str, Tuple[float, float]]:
+    """Derive simulator parameter ranges from a stored supply chain config."""
+
+    resolved_url = db_url or _os.getenv("DATABASE_URL")
+    if not resolved_url:
+        logger.warning(
+            "No database URL available when loading config %s; using defaults.",
+            supply_chain_config_id,
+        )
+        return {}
+
+    def _parse_range(raw) -> Optional[Tuple[float, float]]:
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            raw = raw.strip()
+            if not raw:
+                return None
+            try:
+                raw = json.loads(raw)
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse JSON range: %s", raw)
+                return None
+        if isinstance(raw, dict):
+            lo = raw.get("min")
+            hi = raw.get("max", lo)
+            if lo is None and hi is None:
+                return None
+            if lo is None:
+                lo = hi
+            if hi is None:
+                hi = lo
+            try:
+                return float(lo), float(hi)
+            except (TypeError, ValueError):
+                return None
+        if isinstance(raw, (list, tuple)) and raw:
+            try:
+                return float(raw[0]), float(raw[-1])
+            except (TypeError, ValueError):
+                return None
+        if isinstance(raw, (int, float)):
+            val = float(raw)
+            return val, val
+        return None
+
+    def _merge_range(
+        bucket: Dict[str, Tuple[float, float]],
+        name: str,
+        candidate: Optional[Tuple[float, float]],
+        *,
+        as_int: bool = False,
+    ) -> None:
+        if not candidate:
+            return
+        lo, hi = candidate
+        if lo is None or hi is None:
+            return
+        if as_int:
+            lo = int(math.floor(lo))
+            hi = int(math.ceil(hi))
+        existing = bucket.get(name)
+        if existing:
+            lo = min(lo, existing[0])
+            hi = max(hi, existing[1])
+        bucket[name] = (lo, hi)
+
+    ranges: Dict[str, Tuple[float, float]] = {}
+
+    engine: Optional[Engine] = None
+    try:
+        engine = create_engine(resolved_url)
+        with engine.connect() as conn:
+            node_rows = conn.execute(
+                text(
+                    """
+                    SELECT
+                        inc.initial_inventory_range AS initial_inventory_range,
+                        inc.inventory_target_range AS inventory_target_range,
+                        inc.holding_cost_range AS holding_cost_range,
+                        inc.backlog_cost_range AS backlog_cost_range
+                    FROM item_node_configs inc
+                    JOIN nodes n ON inc.node_id = n.id
+                    WHERE n.config_id = :cfg_id
+                    """
+                ),
+                {"cfg_id": supply_chain_config_id},
+            ).mappings().all()
+
+            for row in node_rows:
+                init_range = _parse_range(row.get("initial_inventory_range"))
+                _merge_range(ranges, "init_inventory", init_range, as_int=True)
+
+                target_range = _parse_range(row.get("inventory_target_range"))
+                _merge_range(ranges, "max_order", target_range, as_int=True)
+
+                holding_range = _parse_range(row.get("holding_cost_range"))
+                _merge_range(ranges, "holding_cost", holding_range)
+
+                backlog_range = _parse_range(row.get("backlog_cost_range"))
+                _merge_range(ranges, "backlog_cost", backlog_range)
+
+            lane_rows = conn.execute(
+                text(
+                    """
+                    SELECT capacity, lead_time_days
+                    FROM lanes
+                    WHERE config_id = :cfg_id
+                    """
+                ),
+                {"cfg_id": supply_chain_config_id},
+            ).mappings().all()
+
+            for row in lane_rows:
+                capacity = row.get("capacity")
+                if capacity is not None:
+                    _merge_range(
+                        ranges,
+                        "max_inbound_per_link",
+                        (float(capacity), float(capacity)),
+                        as_int=True,
+                    )
+
+                lead_range = _parse_range(row.get("lead_time_days"))
+                if lead_range:
+                    week_lo = max(0.0, lead_range[0] / 7.0)
+                    week_hi = max(week_lo, lead_range[1] / 7.0)
+                    _merge_range(
+                        ranges,
+                        "ship_delay",
+                        (week_lo, week_hi),
+                        as_int=True,
+                    )
+
+    except Exception as exc:
+        logger.warning(
+            "Failed to derive parameter ranges for config %s: %s",
+            supply_chain_config_id,
+            exc,
+        )
+        return {}
+    finally:
+        if engine is not None:
+            engine.dispose()
+
+    return ranges
 
 # ---------- Simulator (synthetic data) ----------------------------------------
 
@@ -449,72 +599,6 @@ def _sample_params_uniform(base: BeerGameParams, ranges: Optional[Dict[str, Tupl
         max_order=pick("max_order", base.max_order),
     )
 
-
-def _load_param_ranges_from_config(
-    config_id: int,
-    db_url: Optional[str] = None,
-) -> Dict[str, Tuple[float, float]]:
-    """Load parameter ranges from SupplyChainConfig and system config.
-
-    Looks for ItemNodeConfig ranges (init_inventory, holding_cost, backlog_cost)
-    associated with the provided ``config_id`` and combines them with global
-    ranges defined in ``data/system_config.json`` for parameters like
-    ``info_delay`` and ``ship_delay``.
-    """
-
-    ranges: Dict[str, Tuple[float, float]] = {}
-
-    # --- Read system config ranges -----------------------------------------
-    try:
-        cfg_path = Path(__file__).resolve().parents[3] / "data" / "system_config.json"
-        if cfg_path.exists():
-            data = json.loads(cfg_path.read_text())
-            for key in [
-                "info_delay",
-                "ship_delay",
-                "init_inventory",
-                "holding_cost",
-                "backlog_cost",
-                "max_inbound_per_link",
-                "max_order",
-            ]:
-                val = data.get(key)
-                if isinstance(val, dict) and "min" in val and "max" in val:
-                    ranges[key] = (float(val["min"]), float(val["max"]))
-    except Exception as exc:
-        logger.warning("Failed to read system config ranges: %s", exc)
-
-    # --- Aggregate ItemNodeConfig ranges -----------------------------------
-    try:
-        engine = create_engine(db_url or os.getenv("DATABASE_URL", ""))
-        sql = text(
-            """
-            SELECT
-                inc.initial_inventory_range,
-                inc.holding_cost_range,
-                inc.backlog_cost_range
-            FROM item_node_configs inc
-            JOIN nodes n ON inc.node_id = n.id
-            WHERE n.config_id = :cid
-            """
-        )
-        with engine.connect() as conn:
-            rows = conn.execute(sql, {"cid": config_id}).mappings().all()
-
-        def merge(json_key: str, out_key: str):
-            mins = [r[json_key]["min"] for r in rows if r[json_key] and "min" in r[json_key]]
-            maxs = [r[json_key]["max"] for r in rows if r[json_key] and "max" in r[json_key]]
-            if mins and maxs:
-                ranges[out_key] = (float(min(mins)), float(max(maxs)))
-
-        merge("initial_inventory_range", "init_inventory")
-        merge("holding_cost_range", "holding_cost")
-        merge("backlog_cost_range", "backlog_cost")
-    except Exception as exc:
-        logger.warning("Failed to load ranges from DB: %s", exc)
-
-    return ranges
-
 def generate_sim_training_windows(
     num_runs: int,
     T: int,
@@ -533,9 +617,7 @@ def generate_sim_training_windows(
     Create imitation-learning windows from the simulator.
 
     If `randomize` is True, each run samples parameters uniformly within
-    the provided ``param_ranges``. When ``supply_chain_config_id`` is given,
-    ranges are read from the database/system configuration and used instead of
-    the broad defaults (overridden further by ``param_ranges`` if supplied).
+    `param_ranges` (or sensible defaults if not provided).
     """
     Xs, Ys, Ps = [], [], []
     A_ship = np.zeros((4, 4), dtype=np.float32)
@@ -557,13 +639,12 @@ def generate_sim_training_windows(
         "max_order": (50, 300),
     }
 
-    # Replace defaults with ranges from config if provided
+    cfg_ranges: Dict[str, Tuple[float, float]] = {}
     if supply_chain_config_id is not None:
         cfg_ranges = _load_param_ranges_from_config(
-            supply_chain_config_id, db_url=db_url
+            supply_chain_config_id,
+            db_url=db_url,
         )
-    else:
-        cfg_ranges = {}
 
     ranges = default_ranges.copy()
     ranges.update(cfg_ranges)
@@ -573,15 +654,23 @@ def generate_sim_training_windows(
     # Decide simulator backend; default to SimPy unless USE_SIMPY="0"
     if use_simpy is None:
         use_simpy = (_os.getenv("USE_SIMPY", "1") != "0")
+    use_simpy = bool(use_simpy and simpy is not None)
+    if use_simpy is False and simpy is None:
+        logger.debug("SimPy not available; using discrete simulator")
 
     for _ in range(num_runs):
         sim_params = _sample_params_uniform(params, ranges) if randomize else params
         demand = SimDemand()  # flat, then step up (classic Beer Game)
-        trace = (
-            simulate_beer_game_simpy(T=T, params=sim_params, demand_fn=demand, alpha=sim_alpha, wip_k=sim_wip_k)
-            if use_simpy else
-            simulate_beer_game(T=T, params=sim_params, demand_fn=demand)
-        )
+        if use_simpy:
+            trace = simulate_beer_game_simpy(
+                T=T,
+                params=sim_params,
+                demand_fn=demand,
+                alpha=sim_alpha,
+                wip_k=sim_wip_k,
+            )
+        else:
+            trace = simulate_beer_game(T=T, params=sim_params, demand_fn=demand)
         # slide windows
         for start in range(0, T - (window + horizon) + 1):
             X = np.zeros((window, 4, len(NODE_FEATURES)), dtype=np.float32)
