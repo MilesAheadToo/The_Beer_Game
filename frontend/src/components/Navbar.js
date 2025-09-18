@@ -19,7 +19,6 @@ import NotificationsIcon from '@mui/icons-material/Notifications';
 import SettingsIcon from '@mui/icons-material/Settings';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
-import GroupIcon from '@mui/icons-material/Group';
 import Logout from '@mui/icons-material/Logout';
 import { styled } from '@mui/material/styles';
 import { useAuth } from '../contexts/AuthContext';

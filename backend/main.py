@@ -696,8 +696,6 @@ def put_model_config(cfg: ModelConfig, user: Dict[str, Any] = Depends(get_curren
 # ------------------------------------------------------------------------------
 # Minimal in-memory Mixed Games API to support the UI
 # ------------------------------------------------------------------------------
-from enum import Enum
-from threading import Lock
 
 
 from app.models.game import Game as DbGame, GameStatus as DbGameStatus

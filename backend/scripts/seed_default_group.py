@@ -105,9 +105,11 @@ def ensure_group(session: Session) -> Tuple[Group, bool]:
         admin = existing_group.admin
         if admin:
             updated = False
-            if admin.user_type != UserTypeEnum.SYSTEM_ADMIN:
-                admin.user_type = UserTypeEnum.SYSTEM_ADMIN
-                admin.is_superuser = True
+            if admin.user_type != UserTypeEnum.GROUP_ADMIN:
+                admin.user_type = UserTypeEnum.GROUP_ADMIN
+                updated = True
+            if admin.is_superuser:
+                admin.is_superuser = False
                 updated = True
             if admin.group_id != existing_group.id:
                 admin.group_id = existing_group.id
