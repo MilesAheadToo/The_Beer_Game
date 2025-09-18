@@ -35,6 +35,13 @@ const AdminDashboard = () => {
   const initialTab = searchParams.get('section') || 'sc';
   const [activeTab, setActiveTab] = useState(tabItems.some((tab) => tab.value === initialTab) ? initialTab : 'sc');
 
+  useEffect(() => {
+    const section = searchParams.get('section') || 'sc';
+    if (tabItems.some((tab) => tab.value === section) && section !== activeTab) {
+      setActiveTab(section);
+    }
+  }, [searchParams, activeTab]);
+
   const handleTabChange = (_event, newValue) => {
     setActiveTab(newValue);
     setSearchParams({ section: newValue });

@@ -20,7 +20,6 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import SportsEsportsIcon from '@mui/icons-material/SportsEsports';
 import GroupIcon from '@mui/icons-material/Group';
-import GroupsIcon from '@mui/icons-material/Groups';
 import Logout from '@mui/icons-material/Logout';
 import { styled } from '@mui/material/styles';
 import { useAuth } from '../contexts/AuthContext';
@@ -44,9 +43,16 @@ const Navbar = ({ handleDrawerToggle }) => {
   const systemAdmin = isSystemAdminUser(user);
   const groupAdmin = isGroupAdmin || isGroupAdminUser(user);
   
-  const isActive = (path) => {
-    return location.pathname === path || 
+  const isActivePath = (path) => {
+    return location.pathname === path ||
            (path !== '/' && location.pathname.startsWith(path));
+  };
+
+  const isAdminSectionActive = (section) => {
+    if (location.pathname !== '/admin') return false;
+    const params = new URLSearchParams(location.search);
+    const current = params.get('section') || 'sc';
+    return current === section;
   };
 
   const handleClick = (event) => {
@@ -94,7 +100,7 @@ const Navbar = ({ handleDrawerToggle }) => {
                 onClick={() => navigate('/admin')}
                 sx={{
                   mx: 1,
-                  bgcolor: isActive('/admin') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  bgcolor: isAdminSectionActive('sc') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
                   '&:hover': {
                     bgcolor: 'rgba(255, 255, 255, 0.15)'
                   }
@@ -105,10 +111,10 @@ const Navbar = ({ handleDrawerToggle }) => {
               <Button
                 color="inherit"
                 startIcon={<SportsEsportsIcon />}
-                onClick={() => navigate('/games')}
+                onClick={() => navigate('/admin?section=game')}
                 sx={{
                   mx: 1,
-                  bgcolor: isActive('/games') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  bgcolor: isAdminSectionActive('game') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
                   '&:hover': {
                     bgcolor: 'rgba(255, 255, 255, 0.15)'
                   }
@@ -118,25 +124,11 @@ const Navbar = ({ handleDrawerToggle }) => {
               </Button>
               <Button
                 color="inherit"
-                startIcon={<GroupsIcon />}
-                onClick={() => navigate('/admin/groups')}
-                sx={{
-                  mx: 1,
-                  bgcolor: isActive('/admin/groups') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
-                  '&:hover': {
-                    bgcolor: 'rgba(255, 255, 255, 0.15)'
-                  }
-                }}
-              >
-                Group Management
-              </Button>
-              <Button
-                color="inherit"
                 startIcon={<GroupIcon />}
-                onClick={() => navigate('/admin/users')}
+                onClick={() => navigate('/admin?section=users')}
                 sx={{
                   mx: 1,
-                  bgcolor: isActive('/admin/users') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  bgcolor: isAdminSectionActive('users') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
                   '&:hover': {
                     bgcolor: 'rgba(255, 255, 255, 0.15)'
                   }
@@ -153,7 +145,7 @@ const Navbar = ({ handleDrawerToggle }) => {
                 onClick={() => navigate('/dashboard')}
                 sx={{
                   mx: 1,
-                  bgcolor: isActive('/dashboard') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  bgcolor: isActivePath('/dashboard') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
                   '&:hover': {
                     bgcolor: 'rgba(255, 255, 255, 0.15)'
                   }
@@ -167,7 +159,7 @@ const Navbar = ({ handleDrawerToggle }) => {
                 onClick={() => navigate('/games')}
                 sx={{
                   mx: 1,
-                  bgcolor: isActive('/games') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
+                  bgcolor: isActivePath('/games') ? 'rgba(255, 255, 255, 0.1)' : 'transparent',
                   '&:hover': {
                     bgcolor: 'rgba(255, 255, 255, 0.15)'
                   }
