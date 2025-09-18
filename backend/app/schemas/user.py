@@ -85,7 +85,7 @@ class UserInDBBase(UserBase):
     updated_at: datetime
     
     class Config:
-        from_attributes = True
+        orm_mode = True
 
 class User(UserInDBBase):
     """Schema for returning user data (without sensitive information)."""

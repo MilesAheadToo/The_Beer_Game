@@ -24,4 +24,4 @@ class Group(BaseModel):
     admin: User
 
     class Config:
-        from_attributes = True
+        orm_mode = True

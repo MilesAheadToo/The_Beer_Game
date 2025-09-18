@@ -62,6 +62,16 @@ _FAKE_USERS = {
     }
 }
 
+# Allow default group admin to sign in using the same lightweight auth shim.
+_FAKE_USERS["groupadmin@daybreak.ai"] = {
+    "id": 2,
+    "email": "groupadmin@daybreak.ai",
+    "name": "Group Administrator",
+    "role": "groupadmin",
+    "passwords": {"Daybreak@2025", "DayBreak@2025"},
+    "aliases": {"groupadmin", "defaultadmin"},
+}
+
 # ------------------------------------------------------------------------------
 # Models
 # ------------------------------------------------------------------------------

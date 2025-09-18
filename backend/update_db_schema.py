@@ -1,16 +1,42 @@
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, text
 from sqlalchemy.orm import sessionmaker
+from urllib.parse import quote_plus
 import os
 
 def update_database():
     # Database connection details from environment variables
-    db_user = "beer_user"
-    db_password = "Daybreak@2025"
-    db_host = "db"
-    db_name = "beer_game"
-    
+    db_user = (
+        os.getenv("MYSQL_USER")
+        or os.getenv("MARIADB_USER")
+        or "beer_user"
+    )
+    db_password = (
+        os.getenv("MYSQL_PASSWORD")
+        or os.getenv("MARIADB_PASSWORD")
+        or "beer_password"
+    )
+    db_host = (
+        os.getenv("MYSQL_SERVER")
+        or os.getenv("MYSQL_HOST")
+        or os.getenv("MARIADB_HOST")
+        or "db"
+    )
+    db_port = (
+        os.getenv("MYSQL_PORT")
+        or os.getenv("MARIADB_PORT")
+        or "3306"
+    )
+    db_name = (
+        os.getenv("MYSQL_DATABASE")
+        or os.getenv("MARIADB_DATABASE")
+        or "beer_game"
+    )
+
     # Create SQLAlchemy engine
-    DATABASE_URL = f"mysql+pymysql://{db_user}:{db_password}@{db_host}/{db_name}"
+    safe_password = quote_plus(db_password)
+    DATABASE_URL = (
+        f"mysql+pymysql://{db_user}:{safe_password}@{db_host}:{db_port}/{db_name}?charset=utf8mb4"
+    )
     engine = create_engine(DATABASE_URL)
     
     # Create a session
