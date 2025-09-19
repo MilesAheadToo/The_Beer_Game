@@ -6,17 +6,15 @@ import argparse
 import asyncio
 import json
 import logging
+import subprocess
+import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
 from sqlalchemy import select
 
-from app.api.endpoints.supply_chain_config import (  # type: ignore
-    ConfigTrainingRequest,
-    MODEL_ROOT,
-    TRAINING_ROOT,
-    _run_training_process,
-)
+from app.core.config import settings
 from app.db.session import async_session_factory
 from app.models.supply_chain_config import SupplyChainConfig
 
@@ -24,6 +22,66 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 DEFAULT_CONFIG_NAME = "Default TBG"
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+TRAINING_ROOT = BACKEND_ROOT / "training_jobs"
+MODEL_ROOT = BACKEND_ROOT / "checkpoints" / "supply_chain_configs"
+TRAIN_SCRIPT = BACKEND_ROOT / "scripts" / "training" / "train_gnn.py"
+
+
+@dataclass
+class TrainingParams:
+    window: int
+    horizon: int
+    epochs: int
+    device: str
+    dataset: Path
+
+
+def _latest_dataset_path(config_id: int) -> Optional[Path]:
+    matches = sorted(TRAINING_ROOT.glob(f"dataset_cfg{config_id}_*.npz"))
+    return matches[-1] if matches else None
+
+
+def _model_path(config_id: int) -> Path:
+    model_dir = MODEL_ROOT / f"config_{config_id}"
+    model_dir.mkdir(parents=True, exist_ok=True)
+    return model_dir / "temporal_gnn.pt"
+
+
+def _run_training_process(config_id: int, params: TrainingParams) -> Dict[str, Any]:
+    log_path = params.dataset.parent / f"train_{Path(params.dataset).stem}.log"
+
+    cmd = [
+        sys.executable,
+        str(TRAIN_SCRIPT),
+        "--source",
+        "sim",
+        "--window",
+        str(params.window),
+        "--horizon",
+        str(params.horizon),
+        "--epochs",
+        str(params.epochs),
+        "--save-path",
+        str(_model_path(config_id)),
+        "--dataset",
+        str(params.dataset),
+    ]
+    if params.device:
+        cmd.extend(["--device", params.device])
+
+    completed = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    stdout = completed.stdout or ""
+    stderr = completed.stderr or ""
+    log_output = stdout + ("\n" + stderr if stderr else "")
+    log_path.write_text(log_output)
+
+    return {
+        "model_path": str(_model_path(config_id)),
+        "log": log_output,
+        "log_path": str(log_path),
+        "command": cmd,
+    }
 
 
 async def _resolve_config(config_id: Optional[int], config_name: str) -> SupplyChainConfig:
@@ -32,8 +90,7 @@ async def _resolve_config(config_id: Optional[int], config_name: str) -> SupplyC
 
     async with async_session_factory() as session:
         stmt = (
-            select(SupplyChainConfig)
-            .where(SupplyChainConfig.id == config_id)
+            select(SupplyChainConfig).where(SupplyChainConfig.id == config_id)
             if config_id is not None
             else select(SupplyChainConfig).where(SupplyChainConfig.name == config_name)
         )
@@ -44,16 +101,6 @@ async def _resolve_config(config_id: Optional[int], config_name: str) -> SupplyC
             raise RuntimeError(f"Supply chain configuration not found ({identifier}).")
         await session.commit()
         return config
-
-
-def _latest_dataset_path(config_id: int) -> Optional[Path]:
-    matches = sorted(TRAINING_ROOT.glob(f"dataset_cfg{config_id}_*.npz"))
-    return matches[-1] if matches else None
-
-
-def _model_path(config_id: int) -> Path:
-    model_dir = MODEL_ROOT / f"config_{config_id}"
-    return model_dir / "temporal_gnn.pt"
 
 
 def parse_args() -> argparse.Namespace:
@@ -94,14 +141,15 @@ def main() -> None:
         print(json.dumps(output))
         return
 
-    params = ConfigTrainingRequest(
+    params = TrainingParams(
         window=int(args.window),
         horizon=int(args.horizon),
         epochs=int(args.epochs),
         device=args.device,
+        dataset=dataset_path,
     )
 
-    result = _run_training_process(config.id, dataset_path, params)
+    result = _run_training_process(config.id, params)
     result.update({
         "status": "trained",
         "config_id": config.id,

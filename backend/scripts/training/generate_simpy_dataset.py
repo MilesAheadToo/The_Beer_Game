@@ -6,16 +6,16 @@ import argparse
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
+import numpy as np
 from sqlalchemy import select
 
-from app.api.endpoints.supply_chain_config import (  # type: ignore
-    ConfigTrainingRequest,
-    TRAINING_ROOT,
-    _generate_training_dataset,
-)
+from app.core.config import settings
+from app.rl.data_generator import generate_sim_training_windows
 from app.db.session import async_session_factory
 from app.models.supply_chain_config import SupplyChainConfig
 
@@ -23,6 +23,46 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 DEFAULT_CONFIG_NAME = "Default TBG"
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+TRAINING_ROOT = BACKEND_ROOT / "training_jobs"
+
+
+@dataclass
+class TrainingParams:
+    num_runs: int
+    timesteps: int
+    window: int
+    horizon: int
+    sim_alpha: float
+    sim_wip_k: float
+    use_simpy: bool = True
+
+
+def _generate_training_dataset(config_id: int, params: TrainingParams) -> Dict[str, Any]:
+    TRAINING_ROOT.mkdir(parents=True, exist_ok=True)
+
+    X, A, P, Y = generate_sim_training_windows(
+        num_runs=params.num_runs,
+        T=params.timesteps,
+        window=params.window,
+        horizon=params.horizon,
+        supply_chain_config_id=config_id,
+        db_url=settings.SQLALCHEMY_DATABASE_URI or None,
+        use_simpy=params.use_simpy,
+        sim_alpha=params.sim_alpha,
+        sim_wip_k=params.sim_wip_k,
+    )
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    dataset_path = TRAINING_ROOT / f"dataset_cfg{config_id}_{timestamp}.npz"
+    np.savez(dataset_path, X=X, A=A, P=P, Y=Y)
+
+    return {
+        "path": str(dataset_path),
+        "samples": int(X.shape[0]),
+        "window": params.window,
+        "horizon": params.horizon,
+    }
 
 
 async def _resolve_config(config_id: Optional[int], config_name: str) -> SupplyChainConfig:
@@ -31,8 +71,7 @@ async def _resolve_config(config_id: Optional[int], config_name: str) -> SupplyC
 
     async with async_session_factory() as session:
         stmt = (
-            select(SupplyChainConfig)
-            .where(SupplyChainConfig.id == config_id)
+            select(SupplyChainConfig).where(SupplyChainConfig.id == config_id)
             if config_id is not None
             else select(SupplyChainConfig).where(SupplyChainConfig.name == config_name)
         )
@@ -84,12 +123,11 @@ def main() -> None:
         print(json.dumps(output))
         return
 
-    params = ConfigTrainingRequest(
+    params = TrainingParams(
         num_runs=int(args.num_runs),
-        T=int(args.timesteps),
+        timesteps=int(args.timesteps),
         window=int(args.window),
         horizon=int(args.horizon),
-        use_simpy=True,
         sim_alpha=float(args.sim_alpha),
         sim_wip_k=float(args.sim_wip_k),
     )

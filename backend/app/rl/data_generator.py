@@ -658,6 +658,15 @@ def generate_sim_training_windows(
     if use_simpy is False and simpy is None:
         logger.debug("SimPy not available; using discrete simulator")
 
+    def _safe_lookup(role: str, key: str, index: int, default: int = 0) -> int:
+        try:
+            sequence = trace[role][key]
+            if index < 0 or index >= len(sequence):
+                return default
+            return int(sequence[index])
+        except (KeyError, TypeError, ValueError):
+            return default
+
     for _ in range(num_runs):
         sim_params = _sample_params_uniform(params, ranges) if randomize else params
         demand = SimDemand()  # flat, then step up (classic Beer Game)
@@ -680,19 +689,18 @@ def generate_sim_training_windows(
                 for role in NODES:
                     X[t, NODE_INDEX[role]] = assemble_node_features(
                         role=role,
-                        inventory=int(trace[role]["inventory"][start + t]),
-                        backlog=int(trace[role]["backlog"][start + t]),
-                        incoming_orders=int(trace[role]["incoming_orders"][start + t]),
-                        incoming_shipments=int(trace[role]["incoming_shipments"][start + t]),
-                        on_order=int(trace[role]["on_order"][start + t]),
+                        inventory=_safe_lookup(role, "inventory", start + t),
+                        backlog=_safe_lookup(role, "backlog", start + t),
+                        incoming_orders=_safe_lookup(role, "incoming_orders", start + t),
+                        incoming_shipments=_safe_lookup(role, "incoming_shipments", start + t),
+                        on_order=_safe_lookup(role, "on_order", start + t),
                         params=sim_params,
                     )
 
             for t in range(horizon):
                 for role in NODES:
-                    Y[t, NODE_INDEX[role]] = order_units_to_action_idx(
-                        int(trace[role]["placed_order"][start + window + t])
-                    )
+                    order_val = _safe_lookup(role, "placed_order", start + window + t)
+                    Y[t, NODE_INDEX[role]] = order_units_to_action_idx(order_val)
 
             Xs.append(X)
             Ys.append(Y)

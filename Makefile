@@ -294,7 +294,7 @@ train-gpu:
 
 generate-simpy-data:
 	@echo "\n[+] Generating SimPy training dataset inside backend container..."; \
-	@set -e; \
+	set -e; \
 	force_flag=""; \
 	if [ -n "$(SIMPY_FORCE)" ]; then force_flag="--force"; fi; \
 	$(DOCKER_COMPOSE_CMD) exec backend python scripts/training/generate_simpy_dataset.py \
@@ -308,7 +308,7 @@ generate-simpy-data:
 
 train-default-gpu:
 	@echo "\n[+] Training default Daybreak agent with GPU inside backend container..."; \
-	@set -e; \
+	set -e; \
 	dataset_flag=""; \
 	force_flag=""; \
 	if [ -n "$(TRAIN_DATASET)" ]; then dataset_flag="--dataset $(TRAIN_DATASET)"; fi; \
