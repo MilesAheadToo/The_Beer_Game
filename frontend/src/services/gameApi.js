@@ -1,10 +1,26 @@
-import { api } from './api';
+import { api, mixedGameApi } from './api';
+
+const shouldTryMixedGames = (error) => {
+  const status = error?.response?.status;
+  if (status && [401, 403, 404, 405, 409, 422, 500].includes(status)) {
+    return true;
+  }
+  const message = error?.message || '';
+  return message.includes('AsyncSession') || message.includes('query');
+};
 
 const gameApi = {
   // Get all available games
   async getGames() {
-    const response = await api.get('/games/');
-    return response.data;
+    try {
+      const response = await api.get('/games/');
+      return response.data;
+    } catch (error) {
+      if (shouldTryMixedGames(error)) {
+        return mixedGameApi.getGames();
+      }
+      throw error;
+    }
   },
   
   // Get a specific game by ID
@@ -27,8 +43,16 @@ const gameApi = {
 
   // Delete a game
   async deleteGame(gameId) {
-    const response = await api.delete(`/games/${gameId}`);
-    return response.data;
+    try {
+      const response = await api.delete(`/games/${gameId}`);
+      return response.data;
+    } catch (error) {
+      if (shouldTryMixedGames(error)) {
+        const { data } = await api.delete(`/mixed-games/${gameId}`);
+        return data;
+      }
+      throw error;
+    }
   },
   
   // Join an existing game
@@ -45,8 +69,15 @@ const gameApi = {
   
   // Start a game (game master only)
   async startGame(gameId) {
-    const response = await api.post(`/games/${gameId}/start/`);
-    return response.data;
+    try {
+      const response = await api.post(`/games/${gameId}/start/`);
+      return response.data;
+    } catch (error) {
+      if (shouldTryMixedGames(error)) {
+        return mixedGameApi.startGame(gameId);
+      }
+      throw error;
+    }
   },
   
   // End a game (game master only)

@@ -34,6 +34,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { isGroupAdmin as isGroupAdminUser } from '../utils/authUtils';
 import gameApi from '../services/gameApi';
+import { getModelStatus } from '../services/modelService';
 // Removed Chakra UI components to avoid runtime errors when the Chakra provider
 // isn't available. Using MUI components exclusively ensures the page renders
 // correctly without additional providers.
@@ -104,7 +105,7 @@ const GamesList = () => {
   // Fetch model status
   const fetchModelStatus = async () => {
     try {
-      const status = await gameApi.getModelStatus();
+      const status = await getModelStatus();
       setModelStatus(status);
     } catch (error) {
       console.error('Failed to fetch model status:', error);
@@ -306,7 +307,12 @@ const GamesList = () => {
 
   // Format date
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleString();
+    if (!dateString) return '—';
+    const date = new Date(dateString);
+    if (Number.isNaN(date.getTime())) {
+      return String(dateString);
+    }
+    return date.toLocaleString();
   };
 
   // Get status color

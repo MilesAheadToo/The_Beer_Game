@@ -148,6 +148,19 @@ def update_game(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
+@router.delete("/mixed-games/{game_id}", response_model=dict)
+def delete_game(
+    game_id: int,
+    current_user: User = Depends(get_current_user),
+    game_service: MixedGameService = Depends(get_mixed_game_service)
+):
+    try:
+        return game_service.delete_game(game_id, current_user)
+    except PermissionError:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not enough permissions to delete this game")
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
 @router.get("/mixed-games/", response_model=List[GameInDBBase])
 def list_games(
     status: Optional[GameStatus] = None,

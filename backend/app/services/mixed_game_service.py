@@ -437,6 +437,27 @@ class MixedGameService:
         self.db.commit()
         self.db.refresh(game)
         return game
+
+    def delete_game(self, game_id: int, current_user: User) -> Dict[str, Any]:
+        """Delete a game if the requester is allowed to manage it."""
+        game = self.db.query(Game).filter(Game.id == game_id).first()
+        if not game:
+            raise ValueError("Game not found")
+
+        user_type = self._resolve_user_type(current_user)
+        if not current_user.is_superuser and user_type != UserTypeEnum.SYSTEM_ADMIN:
+            group_id = getattr(current_user, "group_id", None)
+            owns_group = group_id and group_id == getattr(game, "group_id", group_id)
+            config_group = None
+            cfg = self._coerce_dict(getattr(game, "config", {}) or {})
+            if cfg:
+                config_group = cfg.get("group_id")
+            if not owns_group and config_group not in (group_id, None):
+                raise PermissionError("Not enough permissions to delete this game")
+
+        self.db.delete(game)
+        self.db.commit()
+        return {"status": "deleted", "game_id": game_id}
     
     def start_new_round(self, game: Game) -> GameRound:
         """Start a new round of the game."""
