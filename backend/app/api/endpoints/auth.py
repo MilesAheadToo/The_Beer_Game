@@ -26,6 +26,7 @@ from app.models.user import (
     UserUpdate,
     UserBase,
     UserPasswordChange,
+    UserTypeEnum,
 )
 from app.repositories.users import (
     create_user as create_user_repo,
@@ -351,6 +352,13 @@ async def read_users_me(current_user: User = Depends(get_current_active_user)):
 
     Requires authentication.
     """
+    if (
+        getattr(current_user, "user_type", None) == UserTypeEnum.GROUP_ADMIN
+        and getattr(current_user, "group_id", None) in (None, 0)
+    ):
+        admin_group = getattr(current_user, "admin_of_group", None)
+        if admin_group:
+            current_user.group_id = admin_group.id
     return current_user
 
 

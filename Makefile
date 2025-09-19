@@ -22,6 +22,19 @@ DOCKER_BUILD_ARGS_GPU = --build-arg FORCE_GPU=1
 # Docker runtime arguments
 DOCKER_RUN_ARGS = -e FORCE_GPU=$(FORCE_GPU)
 
+# Default configuration name and training parameters (overridable via environment)
+CONFIG_NAME ?= Default TBG
+
+SIMPY_NUM_RUNS ?= 64
+SIMPY_TIMESTEPS ?= 64
+SIMPY_WINDOW ?= 12
+SIMPY_HORIZON ?= 1
+
+TRAIN_EPOCHS ?= 10
+TRAIN_WINDOW ?= 12
+TRAIN_HORIZON ?= 1
+TRAIN_DEVICE ?= cuda
+
 # Prefer the modern Docker Compose plugin when available, but allow overriding.
 DOCKER ?= docker
 DOCKER_COMPOSE ?= $(shell if command -v $(DOCKER) >/dev/null 2>&1 && $(DOCKER) compose version >/dev/null 2>&1; then echo "$(DOCKER) compose"; elif command -v docker-compose >/dev/null 2>&1; then echo "docker-compose"; else echo "$(DOCKER) compose"; fi)
@@ -220,6 +233,8 @@ help:
 	echo "  make train-setup   - create Python venv and install training deps"; \
 	echo "  make train-cpu     - run local CPU training"; \
 	echo "  make train-gpu     - run local GPU training"; \
+	echo "  make generate-simpy-data - exec backend task to build SimPy dataset"; \
+	echo "  make train-default-gpu   - exec backend task to train default model on GPU"; \
 	echo "  make remote-train  - train on remote server"; \
 	echo ""; \
 	echo "Environment Variables:"; \
@@ -276,3 +291,33 @@ train-cpu:
 train-gpu:
 	@echo "\n[+] Running local GPU training..."; \
 	cd backend && bash run_training_gpu.sh
+
+generate-simpy-data:
+	@echo "\n[+] Generating SimPy training dataset inside backend container..."; \
+	@set -e; \
+	force_flag=""; \
+	if [ -n "$(SIMPY_FORCE)" ]; then force_flag="--force"; fi; \
+	$(DOCKER_COMPOSE_CMD) exec backend python scripts/training/generate_simpy_dataset.py \
+	  --config-name "$(CONFIG_NAME)" \
+	  --num-runs $(SIMPY_NUM_RUNS) \
+	  --timesteps $(SIMPY_TIMESTEPS) \
+	  --window $(SIMPY_WINDOW) \
+	  --horizon $(SIMPY_HORIZON) \
+	  $$force_flag
+	@echo "\n[✓] Dataset generation task completed."
+
+train-default-gpu:
+	@echo "\n[+] Training default Daybreak agent with GPU inside backend container..."; \
+	@set -e; \
+	dataset_flag=""; \
+	force_flag=""; \
+	if [ -n "$(TRAIN_DATASET)" ]; then dataset_flag="--dataset $(TRAIN_DATASET)"; fi; \
+	if [ -n "$(TRAIN_FORCE)" ]; then force_flag="--force"; fi; \
+	$(DOCKER_COMPOSE_CMD) exec backend python scripts/training/train_gpu_default.py \
+	  --config-name "$(CONFIG_NAME)" \
+	  --device "$(TRAIN_DEVICE)" \
+	  --epochs $(TRAIN_EPOCHS) \
+	  --window $(TRAIN_WINDOW) \
+	  --horizon $(TRAIN_HORIZON) \
+	  $$dataset_flag $$force_flag
+	@echo "\n[✓] GPU training task completed."

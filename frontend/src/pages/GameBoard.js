@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 import RoundTimer from '../components/RoundTimer';
@@ -62,6 +62,9 @@ const GameBoard = () => {
   const [myGames, setMyGames] = useState([]);
   const [orderComment, setOrderComment] = useState('');
   const [orderHistory, setOrderHistory] = useState([]);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [gameReport, setGameReport] = useState(null);
+  const [reportError, setReportError] = useState(null);
   
   const { isOpen, onClose } = useDisclosure();
   const { gameStatus } = useWebSocket();
@@ -170,6 +173,64 @@ const GameBoard = () => {
     
     fetchGameDetails();
   }, [gameId, navigate, toast, user?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!gameId || gameDetails?.status !== 'completed') {
+      setGameReport(null);
+      setReportError(null);
+      setReportLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const loadReport = async () => {
+      try {
+        setReportLoading(true);
+        const data = await mixedGameApi.getReport(gameId);
+        if (!cancelled) {
+          setGameReport(data);
+          setReportError(null);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setReportError(error?.response?.data?.detail || error?.message || 'Failed to load game report');
+          setGameReport(null);
+        }
+      } finally {
+        if (!cancelled) {
+          setReportLoading(false);
+        }
+      }
+    };
+
+    loadReport();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [gameId, gameDetails?.status]);
+
+  const handleDownloadReport = useCallback(() => {
+    if (!gameReport) return;
+    const blob = new Blob([JSON.stringify(gameReport, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `game-${gameId}-report.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [gameReport, gameId]);
+
+  const formatCurrency = useCallback((value) => {
+    if (typeof value !== 'number' || Number.isNaN(value)) {
+      return '—';
+    }
+    return `$${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  }, []);
   
   // Check if it's the player's turn
   useEffect(() => {
@@ -296,7 +357,60 @@ const GameBoard = () => {
                 </Box>
               )}
             </HStack>
-            
+
+            {gameDetails?.status === 'completed' && (
+              <Box p={4} bg={cardBg} borderRadius="lg" borderWidth="1px" borderColor={borderColor}>
+                <HStack justifyContent="space-between" alignItems="center" mb={3}>
+                  <Text fontSize="lg" fontWeight="bold">Game Summary</Text>
+                  <HStack spacing={2}>
+                    {reportLoading && <Spinner size="sm" />}
+                    {gameReport && (
+                      <Button size="sm" onClick={handleDownloadReport}>
+                        Download JSON
+                      </Button>
+                    )}
+                  </HStack>
+                </HStack>
+                {reportError && (
+                  <Alert status="error" mb={3} borderRadius="md">
+                    <AlertIcon />
+                    {reportError}
+                  </Alert>
+                )}
+                {!reportLoading && gameReport && (
+                  <VStack align="stretch" spacing={3}>
+                    <Text fontWeight="semibold">
+                      Total Supply Chain Cost: {formatCurrency(gameReport.total_cost)}
+                    </Text>
+                    <Table size="sm" variant="simple">
+                      <Thead>
+                        <Tr>
+                          <Th>Role</Th>
+                          <Th isNumeric>Inventory</Th>
+                          <Th isNumeric>Backlog</Th>
+                          <Th isNumeric>Holding Cost</Th>
+                          <Th isNumeric>Backorder Cost</Th>
+                          <Th isNumeric>Total Cost</Th>
+                        </Tr>
+                      </Thead>
+                      <Tbody>
+                        {Object.entries(gameReport.totals || {}).map(([role, metrics]) => (
+                          <Tr key={role}>
+                            <Td textTransform="capitalize">{role}</Td>
+                            <Td isNumeric>{metrics.inventory ?? '—'}</Td>
+                            <Td isNumeric>{metrics.backlog ?? '—'}</Td>
+                            <Td isNumeric>{formatCurrency(metrics.holding_cost)}</Td>
+                            <Td isNumeric>{formatCurrency(metrics.backorder_cost)}</Td>
+                            <Td isNumeric>{formatCurrency(metrics.total_cost)}</Td>
+                          </Tr>
+                        ))}
+                      </Tbody>
+                    </Table>
+                  </VStack>
+                )}
+              </Box>
+            )}
+
             {/* Rest of the game board content */}
             <Box p={4} bg={cardBg} borderRadius="lg" borderWidth="1px" borderColor={borderColor}>
               <VStack align="stretch" spacing={4}>

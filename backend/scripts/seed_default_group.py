@@ -3,14 +3,19 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
 from pathlib import Path
-from typing import Callable, Dict, Tuple
+from typing import Callable, Dict, Optional, Tuple
 
 # Ensure the backend package is importable when running via `python backend/scripts/...`
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.append(str(BACKEND_ROOT))
+
+SCRIPTS_ROOT = Path(__file__).resolve().parent
+TRAINING_SCRIPTS_DIR = SCRIPTS_ROOT / "training"
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
@@ -463,12 +468,80 @@ def ensure_role_users(session: Session, group: Group) -> None:
             print(f"[info] {role} user already exists: {email}")
 
 
+def _run_post_seed_tasks(config_id: int) -> None:
+    """Run data generation and GPU training scripts for the supplied configuration ID."""
+
+    if not TRAINING_SCRIPTS_DIR.exists():
+        print("[warn] Training scripts directory not found; skipping automatic training.")
+        return
+
+    dataset_info: Optional[Dict[str, str]] = None
+    commands = [
+        (
+            "Generate SimPy dataset",
+            [
+                sys.executable,
+                str(TRAINING_SCRIPTS_DIR / "generate_simpy_dataset.py"),
+                "--config-id",
+                str(config_id),
+            ],
+        ),
+        (
+            "Train GPU model",
+            [
+                sys.executable,
+                str(TRAINING_SCRIPTS_DIR / "train_gpu_default.py"),
+                "--config-id",
+                str(config_id),
+                "--device",
+                "cuda",
+            ],
+        ),
+    ]
+
+    for label, cmd in commands:
+        if "train_gpu_default.py" in cmd[1] and dataset_info and dataset_info.get("path"):
+            cmd.extend(["--dataset", dataset_info["path"]])
+
+        print(f"[info] {label} (config_id={config_id})...")
+        completed = subprocess.run(cmd, check=True, capture_output=True, text=True)
+
+        stdout = completed.stdout.strip()
+        payload: Optional[Dict[str, str]] = None
+        if stdout:
+            try:
+                payload = json.loads(stdout.splitlines()[-1])
+            except json.JSONDecodeError:
+                print(stdout)
+        if completed.stderr:
+            print(completed.stderr.strip(), file=sys.stderr)
+
+        if payload:
+            status = payload.get("status", "unknown")
+            print(f"[success] {label}: {status}")
+            if label.startswith("Generate"):
+                dataset_info = payload
+                if payload.get("path"):
+                    print(f"          Dataset: {payload['path']}")
+            elif label.startswith("Train") and payload.get("model_path"):
+                print(f"          Model: {payload['model_path']}")
+
+
 def seed_default_data(session: Session) -> None:
     """Run the seeding workflow using the provided session."""
     group, _ = ensure_group(session)
     ensure_role_users(session, group)
     game = ensure_default_game(session, group)
     ensure_naive_agents(session, game)
+
+    config = (
+        session.query(SupplyChainConfig)
+        .filter(SupplyChainConfig.group_id == group.id)
+        .order_by(SupplyChainConfig.id.asc())
+        .first()
+    )
+    if config:
+        _run_post_seed_tasks(config.id)
 
 
 def run_seed_with_session(session_factory: Callable[[], Session]) -> None:

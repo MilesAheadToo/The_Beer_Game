@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
+  Alert,
   Box,
   Button,
   Chip,
@@ -104,10 +105,12 @@ function GroupPlayerManagement() {
 
   useEffect(() => {
     if (!isGroupAdmin || systemAdmin) {
+      setLoading(false);
       return;
     }
 
     if (!groupId) {
+      setLoading(false);
       return;
     }
 
@@ -225,6 +228,16 @@ function GroupPlayerManagement() {
 
   if (!isGroupAdmin || systemAdmin) {
     return null;
+  }
+
+  if (!groupId) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
+        <Alert severity="warning">
+          Your account is not linked to a group. Ask a system administrator to assign you before managing players.
+        </Alert>
+      </Box>
+    );
   }
 
   if (loading) {

@@ -241,7 +241,7 @@ class GameService:
         self.db.refresh(player_round)
         
         # Check if all players have submitted orders
-        if current_round.all_players_submitted(self.db):
+        if self._all_players_submitted(game_id, current_round.id):
             # Mark the round as completed
             current_round.is_completed = True
             current_round.completed_at = datetime.datetime.utcnow()
@@ -365,10 +365,10 @@ class GameService:
         current_round.completed_at = datetime.utcnow()
         
         # Process the round
-        await self.advance_round(game_id)
+        self.advance_round(game_id)
         self.db.commit()
     
-    async def advance_round(self, game_id: int) -> Game:
+    def advance_round(self, game_id: int) -> Game:
         """
         Advance the game to the next round.
         
@@ -413,7 +413,7 @@ class GameService:
             
         # Create next round if not the last round
         game.current_round += 1
-        
+
         try:
             # Get demand for the next round from the pre-generated pattern
             next_demand = self._generate_demand(game.current_round, game.max_rounds)
@@ -430,16 +430,20 @@ class GameService:
             # Schedule the end of the next round
             if game.round_time_limit > 0:
                 game.current_round_ends_at = datetime.utcnow() + timedelta(seconds=game.round_time_limit)
-                # Schedule the background task
-                task = asyncio.create_task(
-                    self.task_manager.schedule_round_end(game_id, game.round_time_limit)
-                )
-                self.task_manager.add_task(game_id, task)
-            
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+                if loop:
+                    task = loop.create_task(
+                        self.task_manager.schedule_round_end(game_id, game.round_time_limit)
+                    )
+                    self.task_manager.add_task(game_id, task)
+
             # Update game status if this is the last round
             if game.current_round == game.max_rounds:
                 game.status = GameStatus.COMPLETED
-            
+
             self.db.commit()
             self.db.refresh(game)
             
