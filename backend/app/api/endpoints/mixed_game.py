@@ -154,5 +154,5 @@ def list_games(
     current_user: User = Depends(get_current_user),
     game_service: MixedGameService = Depends(get_mixed_game_service)
 ):
-    """List all games, optionally filtered by status."""
-    return game_service.list_games(status=status)
+    """List all games the current user is allowed to view."""
+    return game_service.list_games(current_user=current_user, status=status)

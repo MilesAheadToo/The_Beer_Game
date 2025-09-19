@@ -44,3 +44,4 @@ backend/checkpoints/
 # SSL keys (avoid committing new local certs)
 config/nginx/ssl/*.pem
 
+*.db

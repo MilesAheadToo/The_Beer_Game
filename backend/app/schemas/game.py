@@ -143,6 +143,8 @@ class GameInDBBase(GameBase):
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
     created_by: Optional[int] = Field(None, description="User ID of the game creator")
+    group_id: Optional[int] = Field(None, description="Owning group ID for the game")
+    config: Dict[str, Any] = Field(default_factory=dict, description="Raw configuration blob as stored in the database")
     players: List[PlayerResponse] = Field(default_factory=list)
     
     class Config:

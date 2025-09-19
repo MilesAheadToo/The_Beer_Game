@@ -1,13 +1,24 @@
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Sequence
 from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
+from enum import Enum
 import random
 import json
 
-from app.models.game import Game, GameStatus
+from sqlalchemy import inspect, or_
+from sqlalchemy.orm import Session
+
+from app.models.game import Game, GameStatus as GameStatusDB
 from app.models.player import Player, PlayerRole
 from app.models.supply_chain import PlayerInventory, Order, GameRound, PlayerRound
-from app.schemas.game import GameCreate, GameUpdate, GameState, PlayerState, GameStatus
+from app.models.user import User, UserTypeEnum
+from app.schemas.game import (
+    GameCreate,
+    GameUpdate,
+    GameState,
+    PlayerState,
+    GameStatus,
+    GameInDBBase,
+)
 from app.schemas.player import PlayerAssignment, PlayerType, PlayerStrategy
 from app.services.agents import AgentManager, AgentType, AgentStrategy as AgentStrategyEnum
 from app.api.endpoints.config import _read_cfg as read_system_cfg
@@ -23,6 +34,163 @@ class MixedGameService:
     def __init__(self, db: Session):
         self.db = db
         self.agent_manager = AgentManager()
+        self._game_columns_cache: Optional[Sequence[str]] = None
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    def _get_game_columns(self) -> Sequence[str]:
+        if self._game_columns_cache is not None:
+            return self._game_columns_cache
+
+        try:
+            inspector = inspect(self.db.bind)
+            columns = inspector.get_columns(Game.__tablename__)
+            self._game_columns_cache = [column['name'] for column in columns]
+        except Exception:
+            # Fallback to model metadata if inspection fails
+            self._game_columns_cache = [column.name for column in Game.__table__.columns]
+        return self._game_columns_cache
+
+    @staticmethod
+    def _coerce_dict(value: Any) -> Dict[str, Any]:
+        if isinstance(value, dict):
+            return value
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return {}
+        return {}
+
+    @staticmethod
+    def _resolve_user_type(user: Optional[User]) -> Optional[UserTypeEnum]:
+        user_type = getattr(user, "user_type", None)
+        if isinstance(user_type, UserTypeEnum):
+            return user_type
+        if isinstance(user_type, Enum):
+            try:
+                return UserTypeEnum(user_type.value)
+            except ValueError:
+                return None
+        if isinstance(user_type, str):
+            try:
+                return UserTypeEnum(user_type)
+            except ValueError:
+                return None
+        return None
+
+    @staticmethod
+    def _schema_status_to_db_values(status: GameStatus) -> List[str]:
+        mapping = {
+            GameStatus.CREATED: [GameStatusDB.CREATED.value],
+            GameStatus.IN_PROGRESS: [
+                GameStatusDB.STARTED.value,
+                getattr(GameStatusDB, "IN_PROGRESS", GameStatusDB.STARTED).value
+                if hasattr(GameStatusDB, "IN_PROGRESS")
+                else GameStatusDB.STARTED.value,
+                getattr(GameStatusDB, "ROUND_IN_PROGRESS", GameStatusDB.STARTED).value,
+                getattr(GameStatusDB, "ROUND_COMPLETED", GameStatusDB.STARTED).value,
+                GameStatus.IN_PROGRESS.value,
+            ],
+            GameStatus.COMPLETED: [
+                getattr(GameStatusDB, "FINISHED", GameStatusDB.CREATED).value,
+                GameStatus.COMPLETED.value,
+            ],
+            GameStatus.PAUSED: [GameStatus.PAUSED.value, "paused"],
+        }
+        return mapping.get(status, [status.value])
+
+    @staticmethod
+    def _map_status_to_schema(status_value: Any) -> GameStatus:
+        if isinstance(status_value, GameStatus):
+            return status_value
+        if isinstance(status_value, GameStatusDB):
+            raw = status_value.value
+        elif isinstance(status_value, Enum):
+            raw = status_value.value
+        else:
+            raw = str(status_value or "").lower()
+
+        mapping = {
+            GameStatusDB.CREATED.value: GameStatus.CREATED,
+            "created": GameStatus.CREATED,
+            GameStatusDB.STARTED.value: GameStatus.IN_PROGRESS,
+            getattr(GameStatusDB, "IN_PROGRESS", GameStatusDB.STARTED).value: GameStatus.IN_PROGRESS,
+            getattr(GameStatusDB, "ROUND_IN_PROGRESS", GameStatusDB.STARTED).value: GameStatus.IN_PROGRESS,
+            getattr(GameStatusDB, "ROUND_COMPLETED", GameStatusDB.STARTED).value: GameStatus.IN_PROGRESS,
+            GameStatusDB.FINISHED.value if hasattr(GameStatusDB, "FINISHED") else "finished": GameStatus.COMPLETED,
+            "finished": GameStatus.COMPLETED,
+            "completed": GameStatus.COMPLETED,
+            "paused": GameStatus.PAUSED,
+        }
+
+        normalized = mapping.get(raw)
+        if normalized:
+            return normalized
+
+        if raw in GameStatus.__members__:
+            return GameStatus[raw]
+
+        if raw in GameStatus._value2member_map_:
+            return GameStatus(raw)
+
+        return GameStatus.CREATED
+
+    @staticmethod
+    def _compute_updated_at(game: Game) -> datetime:
+        for attr in ("updated_at", "finished_at", "completed_at", "started_at", "created_at"):
+            value = getattr(game, attr, None)
+            if value:
+                return value
+        return datetime.utcnow()
+
+    def _serialize_game(self, game: Game) -> GameInDBBase:
+        config = self._coerce_dict(getattr(game, "config", {}) or {})
+        demand_pattern_source = getattr(game, "demand_pattern", None) or config.get("demand_pattern") or DEFAULT_DEMAND_PATTERN
+        try:
+            demand_pattern = normalize_demand_pattern(demand_pattern_source)
+        except Exception:
+            demand_pattern = normalize_demand_pattern(DEFAULT_DEMAND_PATTERN)
+
+        group_id = getattr(game, "group_id", None) or config.get("group_id")
+        if group_id is not None and "group_id" not in config:
+            config["group_id"] = group_id
+
+        payload: Dict[str, Any] = {
+            "id": game.id,
+            "name": getattr(game, "name", f"Game {game.id}") or f"Game {game.id}",
+            "status": self._map_status_to_schema(getattr(game, "status", None)),
+            "current_round": getattr(game, "current_round", 0) or 0,
+            "max_rounds": getattr(game, "max_rounds", 0) or 0,
+            "demand_pattern": demand_pattern,
+            "created_at": getattr(game, "created_at", datetime.utcnow()),
+            "updated_at": self._compute_updated_at(game),
+            "started_at": getattr(game, "started_at", None),
+            "completed_at": getattr(game, "completed_at", None) or getattr(game, "finished_at", None),
+            "created_by": getattr(game, "created_by", None),
+            "group_id": group_id,
+            "config": config,
+            "players": [],
+        }
+
+        if config.get("pricing_config"):
+            payload["pricing_config"] = config["pricing_config"]
+        if config.get("node_policies"):
+            payload["node_policies"] = config["node_policies"]
+        if config.get("system_config"):
+            payload["system_config"] = config["system_config"]
+        if config.get("global_policy"):
+            payload["global_policy"] = config["global_policy"]
+
+        try:
+            return GameInDBBase.model_validate(payload)
+        except Exception:
+            # Fallback to minimal payload if custom config fails validation
+            for key in ("pricing_config", "node_policies", "system_config", "global_policy"):
+                payload.pop(key, None)
+            payload["demand_pattern"] = normalize_demand_pattern(DEFAULT_DEMAND_PATTERN)
+            return GameInDBBase.model_validate(payload)
     
     def create_game(self, game_data: GameCreate, created_by: int = None) -> Game:
         """Create a new game with mixed human/agent players.
@@ -528,83 +696,37 @@ class MixedGameService:
         # Default demand
         return DEFAULT_CLASSIC_PARAMS['initial_demand']
     
-    def list_games(self, status: Optional[GameStatus] = None) -> List[Dict[str, Any]]:
-        """List all games, optionally filtered by status."""
-        from sqlalchemy import text
-        
-        # Build the base query
-        query = """
-            SELECT 
-                g.id, g.name, g.status, g.current_round, g.max_rounds,
-                g.created_at, g.updated_at, g.started_at, g.completed_at,
-                g.is_public, g.description, g.created_by, g.demand_pattern, g.config,
-                (SELECT COUNT(*) FROM players WHERE game_id = g.id) as player_count
-            FROM games g
-        """
-        
-        # Add status filter if provided
-        params = {}
+    def list_games(
+        self,
+        current_user: User,
+        status: Optional[GameStatus] = None,
+    ) -> List[GameInDBBase]:
+        """Return games visible to the requesting user, with safe defaults."""
+
+        query = self.db.query(Game)
+
         if status:
-            query += " WHERE g.status = :status"
-            params["status"] = status
-            
-        # Execute the query
-        result = self.db.execute(text(query), params)
-        
-        # Convert result to list of dicts matching GameInDBBase schema
-        games = []
-        for row in result:
-            try:
-                raw_pattern = json.loads(row[11]) if row[11] else DEFAULT_DEMAND_PATTERN.copy()
-            except (json.JSONDecodeError, TypeError):
-                raw_pattern = DEFAULT_DEMAND_PATTERN.copy()
-            demand_pattern = normalize_demand_pattern(raw_pattern)
-            # Unpack optional config
-            node_policies = {}
-            system_config = {}
-            try:
-                cfg = json.loads(row[12]) if row[12] else {}
-                if isinstance(cfg, dict):
-                    node_policies = cfg.get('node_policies', {})
-                    system_config = cfg.get('system_config', {})
-                    pricing_config = cfg.get('pricing_config', {})
-                    global_policy = cfg.get('global_policy', {})
-                    if not node_policies:
-                        node_policies = demand_pattern.get('params', {}).get('node_policies', {}) if isinstance(demand_pattern, dict) else {}
-                    if not system_config:
-                        system_config = demand_pattern.get('params', {}).get('system_config', {}) if isinstance(demand_pattern, dict) else {}
-            except Exception:
-                pass
-                
-            game_data = {
-                "id": row[0],
-                "name": row[1],
-                "status": row[2],
-                "current_round": row[3] or 0,
-                "max_rounds": row[4],
-                "demand_pattern": demand_pattern,
-                "created_at": row[5],
-                "updated_at": row[6],
-                "started_at": row[7],
-                "completed_at": row[8],
-                "is_public": bool(row[9]) if row[9] is not None else False,
-                "description": row[10] or "",
-                "created_by": row[12],
-                "node_policies": node_policies,
-                "system_config": system_config,
-                "pricing_config": pricing_config if 'pricing_config' in locals() else {},
-                "global_policy": global_policy if 'global_policy' in locals() else {},
-                "players": []  # Will be populated separately if needed
-            }
-            
-            # Ensure all required fields have values
-            for field in ["current_round", "max_rounds"]:
-                if game_data[field] is None:
-                    game_data[field] = 0
-                    
-            games.append(game_data)
-            
-        return games
+            status_values = self._schema_status_to_db_values(status)
+            if status_values:
+                query = query.filter(Game.status.in_(status_values))
+
+        user_type = self._resolve_user_type(current_user)
+        if not current_user.is_superuser and user_type != UserTypeEnum.SYSTEM_ADMIN:
+            column_names = set(self._get_game_columns())
+            group_id = getattr(current_user, "group_id", None)
+
+            if user_type == UserTypeEnum.GROUP_ADMIN and group_id and "group_id" in column_names:
+                query = query.filter(or_(Game.group_id == group_id, Game.created_by == current_user.id))
+            elif "created_by" in column_names:
+                query = query.filter(Game.created_by == current_user.id)
+
+        ordered_games = query.order_by(getattr(Game, "created_at", None) or Game.id).all()
+
+        serialized_games: List[GameInDBBase] = []
+        for game in ordered_games:
+            serialized_games.append(self._serialize_game(game))
+
+        return serialized_games
     
     def get_game_state(self, game_id: int) -> GameState:
         """Get the current state of a game."""
