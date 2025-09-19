@@ -2,6 +2,21 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Optional, Any, Union, Callable, Awaitable, Dict
 from jose import JWTError, jwt
+
+# Passlib expects the bcrypt module to expose an ``__about__`` attribute which
+# newer releases no longer ship.  Patch it in once here so every importer sees a
+# consistent interface and we avoid noisy warnings from the underlying handler.
+try:  # pragma: no cover - best-effort compatibility shim
+    import bcrypt  # type: ignore
+except ImportError:  # pragma: no cover - bcrypt optional in some environments
+    bcrypt = None  # type: ignore
+else:  # pragma: no cover - executed when bcrypt is available
+    if bcrypt is not None and not hasattr(bcrypt, "__about__"):
+        from types import SimpleNamespace
+
+        version = getattr(bcrypt, "__version__", "")
+        bcrypt.__about__ = SimpleNamespace(__version__=version)  # type: ignore[attr-defined]
+
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status, Request, Response
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm

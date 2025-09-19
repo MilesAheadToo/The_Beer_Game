@@ -167,7 +167,7 @@ class Settings(BaseSettings):
         from urllib.parse import quote_plus
 
         encoded_password = quote_plus(password)
-        connection_string = f"mysql+pymysql://{user}:*****@{server}:{port}/{db}?charset=utf8mb4&ssl=None"
+        connection_string = f"mysql+pymysql://{user}:*****@{server}:{port}/{db}?charset=utf8mb4"
         print(f"[DEBUG] Database connection string: {connection_string}")
 
         # If the MySQL instance isn't reachable (common for local dev), fall back to SQLite.
@@ -186,9 +186,7 @@ class Settings(BaseSettings):
             return f"sqlite:///{fallback_path}"
 
         # Connection string with SSL disabled and URL-encoded password
-        return (
-            f"mysql+pymysql://{user}:{encoded_password}@{server}:{port}/{db}?charset=utf8mb4&ssl=None"
-        )
+        return f"mysql+pymysql://{user}:{encoded_password}@{server}:{port}/{db}?charset=utf8mb4"
     
     # WebSocket
     WEBSOCKET_PATH: str = "/ws"

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -13,10 +12,11 @@ from typing import Optional, Dict, Any
 
 import numpy as np
 from sqlalchemy import select
+from sqlalchemy.orm import Session as SyncSession
 
 from app.core.config import settings
 from app.rl.data_generator import generate_sim_training_windows
-from app.db.session import async_session_factory
+from app.db.session import sync_engine
 from app.models.supply_chain_config import SupplyChainConfig
 
 logger = logging.getLogger(__name__)
@@ -65,23 +65,21 @@ def _generate_training_dataset(config_id: int, params: TrainingParams) -> Dict[s
     }
 
 
-async def _resolve_config(config_id: Optional[int], config_name: str) -> SupplyChainConfig:
-    if async_session_factory is None:
-        raise RuntimeError("Async session factory is not configured; cannot access the database.")
+def _resolve_config_id(config_id: Optional[int], config_name: str) -> int:
+    if sync_engine is None:
+        raise RuntimeError("Synchronous database engine is not configured; cannot access the database.")
 
-    async with async_session_factory() as session:
+    with SyncSession(sync_engine) as session:
         stmt = (
-            select(SupplyChainConfig).where(SupplyChainConfig.id == config_id)
+            select(SupplyChainConfig.id).where(SupplyChainConfig.id == config_id)
             if config_id is not None
-            else select(SupplyChainConfig).where(SupplyChainConfig.name == config_name)
+            else select(SupplyChainConfig.id).where(SupplyChainConfig.name == config_name)
         )
-        result = await session.execute(stmt)
-        config = result.scalars().first()
-        if not config:
+        result = session.execute(stmt).scalar()
+        if result is None:
             identifier = f"id={config_id}" if config_id is not None else f"name='{config_name}'"
             raise RuntimeError(f"Supply chain configuration not found ({identifier}).")
-        await session.commit()
-        return config
+        return int(result)
 
 
 def _latest_dataset_path(config_id: int) -> Optional[Path]:
@@ -110,15 +108,19 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    config = asyncio.run(_resolve_config(args.config_id, args.config_name))
+    config_id = _resolve_config_id(args.config_id, args.config_name)
 
-    latest_dataset = _latest_dataset_path(config.id)
+    latest_dataset = _latest_dataset_path(config_id)
     if latest_dataset and not args.force:
-        logger.info("Existing dataset found for config %s at %s; skipping generation.", config.id, latest_dataset)
+        logger.info(
+            "Existing dataset found for config %s at %s; skipping generation.",
+            config_id,
+            latest_dataset,
+        )
         output = {
             "status": "skipped",
             "path": str(latest_dataset),
-            "config_id": config.id,
+            "config_id": config_id,
         }
         print(json.dumps(output))
         return
@@ -132,14 +134,14 @@ def main() -> None:
         sim_wip_k=float(args.sim_wip_k),
     )
 
-    dataset_info = _generate_training_dataset(config.id, params)
+    dataset_info = _generate_training_dataset(config_id, params)
     dataset_info.update({
         "status": "created",
-        "config_id": config.id,
+        "config_id": config_id,
     })
     logger.info(
         "Generated dataset for config %s with %s samples at %s",
-        config.id,
+        config_id,
         dataset_info.get("samples"),
         dataset_info.get("path"),
     )
