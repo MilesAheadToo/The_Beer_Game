@@ -14,9 +14,17 @@ import {
   Typography,
   Stack,
   Alert,
+  IconButton,
+  Tooltip,
 } from '@mui/material';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
+import VisibilityIcon from '@mui/icons-material/Visibility';
 import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
+import { useSnackbar } from 'notistack';
+import { mixedGameApi } from '../../services/api';
 
 const formatDate = (value) => {
   if (!value) return '—';
@@ -45,6 +53,7 @@ const GroupGameConfigPanel = ({
   currentUserId = null,
 }) => {
   const navigate = useNavigate();
+  const { enqueueSnackbar } = useSnackbar();
 
   const filteredGames = useMemo(() => {
     if (!Array.isArray(games) || games.length === 0) {
@@ -70,8 +79,35 @@ const GroupGameConfigPanel = ({
     navigate('/games/new');
   };
 
-  const handleViewGame = (gameId) => {
-    navigate(`/games/${gameId}`);
+  const handleViewGame = (gameId, status) => {
+    if (String(status || '').toLowerCase() === 'completed') {
+      navigate(`/games/${gameId}/report`);
+    } else {
+      navigate(`/games/${gameId}`);
+    }
+  };
+
+  const runAction = async (gameId, action, apiCall, successMessage) => {
+    try {
+      await apiCall(gameId);
+      enqueueSnackbar(successMessage, { variant: 'success' });
+      if (onRefresh) {
+        await onRefresh();
+      }
+    } catch (err) {
+      const detail = err?.response?.data?.detail || err?.message || 'Action failed';
+      enqueueSnackbar(detail, { variant: 'error' });
+    }
+  };
+
+  const handleRestart = (gameId) => runAction(gameId, 'restart', mixedGameApi.startGame, 'Game restarted');
+  const handleDelete = async (gameId, name) => {
+    if (!window.confirm(`Delete game "${name}"? This cannot be undone.`)) return;
+    await runAction(gameId, 'delete', mixedGameApi.deleteGame, 'Game deleted');
+  };
+  const handleEdit = (game) => {
+    onRefresh?.();
+    navigate(`/games/${game.id}`);
   };
 
   return (
@@ -117,31 +153,42 @@ const GroupGameConfigPanel = ({
           </Typography>
         </Box>
       ) : (
-        <TableContainer>
-          <Table size="small">
+        <TableContainer sx={{ overflowX: 'auto' }}>
+          <Table size="small" sx={{ tableLayout: 'fixed' }}>
             <TableHead>
               <TableRow>
-                <TableCell>Name</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Mode</TableCell>
-                <TableCell>Current Round</TableCell>
-                <TableCell>Max Rounds</TableCell>
-                <TableCell>Last Updated</TableCell>
-                <TableCell align="right">Actions</TableCell>
+                <TableCell rowSpan={2} sx={{ width: { xs: '60vw', md: 'auto' } }}>Name</TableCell>
+                <TableCell rowSpan={2}>Mode</TableCell>
+                <TableCell rowSpan={2}>Status</TableCell>
+                <TableCell align="center" colSpan={2}>Rounds</TableCell>
+                <TableCell rowSpan={2} sx={{ width: { xs: 90, md: 120 } }}>Last Updated</TableCell>
+                <TableCell rowSpan={2} align="right" sx={{ width: { xs: 140, md: 210 } }}>Actions</TableCell>
+              </TableRow>
+              <TableRow>
+                <TableCell sx={{ width: 80 }}>Current</TableCell>
+                <TableCell sx={{ width: 80 }}>Max</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
               {filteredGames.map((game) => (
                 <TableRow hover key={game.id}>
-                  <TableCell>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                  <TableCell sx={{ pr: 2 }}>
+                    <Typography variant="subtitle2" sx={{ fontWeight: 600, whiteSpace: 'normal', wordBreak: 'break-word' }}>
                       {game.name}
                     </Typography>
                     {game.description && (
-                      <Typography variant="body2" color="text.secondary" noWrap>
+                      <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
                         {game.description}
                       </Typography>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      color={String((game.progression_mode || game?.config?.progression_mode || 'supervised')).toLowerCase() === 'unsupervised' ? 'info' : 'default'}
+                      label={String(game.progression_mode || game?.config?.progression_mode || 'supervised').replace(/_/g, ' ').replace(/^./, (s) => s.toUpperCase())}
+                    />
                   </TableCell>
                   <TableCell>
                     <Chip
@@ -150,21 +197,40 @@ const GroupGameConfigPanel = ({
                       label={(game.status || '').replace(/_/g, ' ') || 'Unknown'}
                     />
                   </TableCell>
-                  <TableCell>
-                    <Chip
-                      size="small"
-                      variant="outlined"
-                      color={String((game.progression_mode || 'supervised')).toLowerCase() === 'unsupervised' ? 'info' : 'default'}
-                      label={String(game.progression_mode || game?.config?.progression_mode || 'supervised').replace(/_/g, ' ').replace(/^./, (s) => s.toUpperCase())}
-                    />
-                  </TableCell>
-                  <TableCell>{game.current_round ?? 0}</TableCell>
-                  <TableCell>{game.max_rounds ?? '—'}</TableCell>
-                  <TableCell>{formatDate(game.updated_at)}</TableCell>
+                  <TableCell sx={{ width: 80 }}>{game.current_round ?? 0}</TableCell>
+                  <TableCell sx={{ width: 80 }}>{game.max_rounds ?? '—'}</TableCell>
+                  <TableCell sx={{ width: { xs: 90, md: 120 } }}>{formatDate(game.updated_at)}</TableCell>
                   <TableCell align="right">
-                    <Button size="small" variant="outlined" onClick={() => handleViewGame(game.id)}>
-                      View
-                    </Button>
+                    <Stack direction="row" spacing={1} justifyContent="flex-end">
+                      <Tooltip title="View">
+                        <span>
+                          <IconButton size="small" onClick={() => handleViewGame(game.id, game.status)}>
+                            <VisibilityIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title="Restart">
+                        <span>
+                          <IconButton size="small" onClick={() => handleRestart(game.id)}>
+                            <RestartAltIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title="Edit">
+                        <span>
+                          <IconButton size="small" onClick={() => handleEdit(game)}>
+                            <EditIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                      <Tooltip title="Delete">
+                        <span>
+                          <IconButton size="small" onClick={() => handleDelete(game.id, game.name)}>
+                            <DeleteIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </Stack>
                   </TableCell>
                 </TableRow>
               ))}

@@ -51,26 +51,34 @@ const GameReport = () => {
   }, [gameId]);
 
   const ordersChartData = useMemo(() => {
-    if (!report?.history) return [];
-    return report.history.map((entry) => ({
-      round: entry.round,
-      demand: entry.demand,
-      retailer: entry.orders?.retailer?.quantity ?? 0,
-      wholesaler: entry.orders?.wholesaler?.quantity ?? 0,
-      distributor: entry.orders?.distributor?.quantity ?? 0,
-      manufacturer: entry.orders?.manufacturer?.quantity ?? 0,
-    }));
+    if (!report) return [];
+    const roundSet = new Set();
+    (report.demand_series || []).forEach((p) => roundSet.add(p.round));
+    Object.values(report.order_series || {}).forEach((series) => series.forEach((p) => roundSet.add(p.round)));
+    const rounds = Array.from(roundSet).sort((a, b) => a - b);
+
+    const demandMap = new Map((report.demand_series || []).map((p) => [p.round, p.demand]));
+    const roleSeries = report.order_series || {};
+
+    return rounds.map((round) => {
+      const dataPoint = { round, demand: demandMap.get(round) ?? 0 };
+      roles.forEach((role) => {
+        const series = roleSeries[role] || [];
+        const match = series.find((p) => p.round === round);
+        dataPoint[role] = match ? match.quantity : 0;
+      });
+      return dataPoint;
+    });
   }, [report]);
 
   const inventoryChartData = useMemo(() => {
+    if (!report?.inventory_series) return [];
+    return [...report.inventory_series].sort((a, b) => a.round - b.round);
+  }, [report]);
+
+  const roundsTable = useMemo(() => {
     if (!report?.history) return [];
-    return report.history.map((entry) => ({
-      round: entry.round,
-      retailer: entry.inventory_positions?.retailer ?? 0,
-      wholesaler: entry.inventory_positions?.wholesaler ?? 0,
-      distributor: entry.inventory_positions?.distributor ?? 0,
-      manufacturer: entry.inventory_positions?.manufacturer ?? 0,
-    }));
+    return [...report.history].sort((a, b) => b.round - a.round);
   }, [report]);
 
   const totals = report?.totals || {};
@@ -185,6 +193,42 @@ const GameReport = () => {
                     </LineChart>
                   </ResponsiveContainer>
                 </Box>
+              </Paper>
+            </Grid>
+
+            <Grid item xs={12}>
+              <Paper sx={{ p: 3 }}>
+                <Typography variant="h6" gutterBottom>
+                  Round Details
+                </Typography>
+                <Table size="small">
+                  <TableHead>
+                    <TableRow>
+                      <TableCell>Round</TableCell>
+                      <TableCell>Demand</TableCell>
+                      {roles.map((role) => (
+                        <TableCell key={role} align="right" sx={{ textTransform: 'capitalize' }}>
+                          {role}
+                        </TableCell>
+                      ))}
+                      <TableCell align="right">Total Cost</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {roundsTable.map((entry) => (
+                      <TableRow key={entry.round}>
+                        <TableCell>{entry.round}</TableCell>
+                        <TableCell>{entry.demand}</TableCell>
+                        {roles.map((role) => (
+                          <TableCell key={role} align="right">
+                            {entry.orders?.[role]?.quantity ?? 0}
+                          </TableCell>
+                        ))}
+                        <TableCell align="right">${(entry.total_cost ?? 0).toFixed(2)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </Paper>
             </Grid>
           </Grid>

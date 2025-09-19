@@ -135,6 +135,10 @@ export const mixedGameApi = {
     const { data } = await http.put(`/mixed-games/${gameId}`, payload);
     return data;
   },
+  async deleteGame(gameId) {
+    const { data } = await http.delete(`/mixed-games/${gameId}`);
+    return data;
+  },
 
   async startGame(gameId) {
     const { data } = await http.post(`/mixed-games/${gameId}/start`);
