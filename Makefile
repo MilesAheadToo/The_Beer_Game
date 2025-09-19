@@ -61,7 +61,7 @@ endif
 
 DOCKER_COMPOSE_CMD = $(strip $(COMPOSE_ENV) $(DOCKER_COMPOSE))
 
-.PHONY: up gpu-up up-dev down ps logs seed reset-admin help init-env proxy-up proxy-down proxy-restart proxy-recreate proxy-logs proxy-url seed-default-group
+.PHONY: up gpu-up up-dev down ps logs seed reset-admin help init-env proxy-up proxy-down proxy-restart proxy-recreate proxy-logs proxy-url seed-default-group build-create-users
 
 # Default CPU target
 up:
@@ -176,6 +176,14 @@ proxy-logs:
 seed:
 	@echo "\n[+] Seeding default users..."; \
 	$(DOCKER_COMPOSE_CMD) run --rm create-users
+
+build-create-users:
+	@echo "\n[+] Rebuilding lightweight seeding image..."; \
+	pull_flag=""; \
+	if [ -n "$(PULL)" ]; then pull_flag="--pull"; fi; \
+	$(DOCKER_COMPOSE_CMD) build $$pull_flag create-users; \
+	echo "\n[✓] create-users image refreshed."; \
+	echo "    Hint: leave requirements*.txt untouched to maximise Docker build caching."
 
 seed-default-group:
 	@echo "\n[+] Creating default group, users, and AI-powered game..."; \
