@@ -807,12 +807,29 @@ def _simulation_parameters(config: Dict[str, Any]) -> Dict[str, Any]:
     return config.get("simulation_parameters", {})
 
 
-def _all_players_submitted(db: Session, game: DbGame, pending: Dict[str, Any]) -> bool:
+def _all_players_submitted(db: Session, game: DbGame, round_record: Round) -> bool:
     player_roles = {
         str(player.role.value if hasattr(player.role, "value") else player.role).lower()
         for player in db.query(Player).filter(Player.game_id == game.id).all()
     }
-    submitted_roles = {role for role, entry in pending.items() if entry and entry.get("quantity") is not None}
+    if not player_roles:
+        return False
+
+    actions = (
+        db.query(PlayerAction, Player)
+        .join(Player, Player.id == PlayerAction.player_id)
+        .filter(
+            PlayerAction.game_id == game.id,
+            PlayerAction.round_id == round_record.id,
+            PlayerAction.action_type == "order",
+        )
+        .all()
+    )
+    submitted_roles = {
+        str(player.role.value if hasattr(player.role, "value") else player.role).lower()
+        for _, player in actions
+        if _.quantity is not None
+    }
     return player_roles.issubset(submitted_roles)
 
 
@@ -949,28 +966,36 @@ def _finalize_round_if_ready(
     force: bool = False,
 ) -> bool:
     pending = _pending_orders(config)
-    if not pending:
-        return False
-
     if not force and _get_progression_mode(game) != PROGRESSION_UNSUPERVISED:
         return False
 
-    if not force and not _all_players_submitted(db, game, pending):
+    if not force and not _all_players_submitted(db, game, round_record):
         return False
 
     timestamp = datetime.utcnow()
     round_number = round_record.round_number
     demand = _compute_customer_demand(game, round_number)
+    actions = (
+        db.query(PlayerAction, Player)
+        .join(Player, Player.id == PlayerAction.player_id)
+        .filter(
+            PlayerAction.game_id == game.id,
+            PlayerAction.round_id == round_record.id,
+            PlayerAction.action_type == "order",
+        )
+        .all()
+    )
 
-    orders_by_role = {
-        role: {
-            "quantity": int(entry.get("quantity", 0)),
-            "comment": entry.get("comment"),
-            "player_id": entry.get("player_id"),
-            "submitted_at": entry.get("submitted_at"),
+    orders_by_role = {}
+    for action, player in actions:
+        role_key = str(player.role.value if hasattr(player.role, "value") else player.role).lower()
+        pending_entry = pending.get(role_key, {}) if pending else {}
+        orders_by_role[role_key] = {
+            "player_id": player.id,
+            "quantity": int(action.quantity or 0),
+            "comment": pending_entry.get("comment"),
+            "submitted_at": pending_entry.get("submitted_at") or action.created_at.isoformat() + "Z",
         }
-        for role, entry in pending.items()
-    }
 
     # Update round metadata
     round_record.status = "completed"
@@ -1142,11 +1167,23 @@ async def create_mixed_game(payload: GameCreate, user: Dict[str, Any] = Depends(
         db.add(game)
         db.flush()
 
+        role_enum_map = {
+            "retailer": "RETAILER",
+            "wholesaler": "WHOLESALER",
+            "distributor": "DISTRIBUTOR",
+            "manufacturer": "MANUFACTURER",
+            "factory": "MANUFACTURER",
+        }
+
         for assignment in payload.player_assignments:
             is_agent = assignment.player_type == PlayerType.AGENT
-            role_value = assignment.role.value if hasattr(assignment.role, "value") else str(assignment.role)
+            role_value_raw = assignment.role.value if hasattr(assignment.role, "value") else str(assignment.role)
+            role_key = role_value_raw.lower()
+            role_enum_name = role_enum_map.get(role_key)
+            if not role_enum_name:
+                raise HTTPException(status_code=400, detail=f"Unsupported role: {role_value_raw}")
             if not is_agent and assignment.user_id is None:
-                raise HTTPException(status_code=400, detail=f"User ID required for human role {role_value}")
+                raise HTTPException(status_code=400, detail=f"User ID required for human role {role_value_raw}")
 
             strategy_value = None
             if assignment.strategy is not None:
@@ -1155,8 +1192,8 @@ async def create_mixed_game(payload: GameCreate, user: Dict[str, Any] = Depends(
             player = Player(
                 game_id=game.id,
                 user_id=None if is_agent else assignment.user_id,
-                name=f"{role_value.title()} ({'AI' if is_agent else 'Human'})",
-                role=PlayerRole(role_value),
+                name=f"{role_enum_name.title().replace('_', ' ')} ({'AI' if is_agent else 'Human'})",
+                role=PlayerRole[role_enum_name],
                 is_ai=is_agent,
                 ai_strategy=strategy_value,
                 can_see_demand=assignment.can_see_demand,
@@ -1243,9 +1280,9 @@ async def submit_order(
             )
             db.add(action)
 
-        pending = _pending_orders(config)
         role_key = str(player.role.value if hasattr(player.role, "value") else player.role).lower()
-        pending[role_key] = {
+        pending_snapshot = _pending_orders(config)
+        pending_snapshot[role_key] = {
             "player_id": player.id,
             "quantity": submission.quantity,
             "comment": submission.comment,
@@ -1262,7 +1299,19 @@ async def submit_order(
         return {
             "status": "recorded",
             "auto_advanced": auto_advanced,
-            "pending_orders": pending,
+            "pending_orders": {
+                str(p.role.value if hasattr(p.role, "value") else p.role).lower(): {
+                    "player_id": p.id,
+                    "quantity": act.quantity,
+                }
+                for act, p in db.query(PlayerAction, Player)
+                .join(Player, Player.id == PlayerAction.player_id)
+                .filter(
+                    PlayerAction.game_id == game.id,
+                    PlayerAction.round_id == round_record.id,
+                    PlayerAction.action_type == "order",
+                )
+            },
             "progression_mode": _get_progression_mode(game),
         }
     finally:
@@ -1494,8 +1543,7 @@ async def next_round(game_id: int, user: Dict[str, Any] = Depends(get_current_us
 
         config = _coerce_game_config(game)
         round_record = _ensure_round(db, game, game.current_round or 1)
-        pending = _pending_orders(config)
-        if not _all_players_submitted(db, game, pending):
+        if not _all_players_submitted(db, game, round_record):
             raise HTTPException(status_code=400, detail="All players must submit orders before advancing")
 
         if not _finalize_round_if_ready(db, game, config, round_record, force=True):
