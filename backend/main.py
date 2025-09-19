@@ -1,5 +1,7 @@
 # /backend/app/main.py
+from collections import defaultdict
 from datetime import datetime, timedelta
+import json
 import os
 from typing import Optional, Dict, Any, List
 
@@ -24,7 +26,12 @@ from sqlalchemy.orm import Session
 from app.services.group_service import GroupService
 from app.services.bootstrap import build_default_group_payload, ensure_default_group_and_game
 from app.schemas.group import GroupCreate, GroupUpdate, Group as GroupSchema
+from app.schemas.game import GameCreate
+from app.schemas.player import PlayerType
 from app.db.session import sync_engine
+from app.models.game import Game as DbGame, GameStatus as DbGameStatus, Round, PlayerAction
+from app.models.player import Player, PlayerRole, PlayerStrategy
+from app.models.user import UserTypeEnum
 
 # ------------------------------------------------------------------------------
 # Config
@@ -68,13 +75,13 @@ _FAKE_USERS = {
 
 # Allow default group admin to sign in using the same lightweight auth shim.
 _FAKE_USERS["groupadmin@daybreak.ai"] = {
-    "id": 2,
+    "id": 9,
     "email": "groupadmin@daybreak.ai",
     "name": "Group Administrator",
     "role": "groupadmin",
     "passwords": {"Daybreak@2025", "DayBreak@2025"},
     "aliases": {"groupadmin", "defaultadmin"},
-    "group_id": 1,
+    "group_id": 4,
     "is_superuser": False,
 }
 
@@ -91,6 +98,12 @@ class MeResponse(BaseModel):
     email: str
     name: str
     role: str
+
+
+class OrderSubmission(BaseModel):
+    player_id: int
+    quantity: int
+    comment: Optional[str] = None
 
 # ------------------------------------------------------------------------------
 # JWT utils
@@ -734,12 +747,333 @@ STATUS_REMAPPING = {
     DbGameStatus.FINISHED: "COMPLETED",
 }
 
+PROGRESSION_SUPERVISED = "supervised"
+PROGRESSION_UNSUPERVISED = "unsupervised"
+
+ROLES_IN_ORDER = ["retailer", "wholesaler", "distributor", "manufacturer"]
+
+
+def _coerce_game_config(game: DbGame) -> Dict[str, Any]:
+    raw = game.config or {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def _save_game_config(db: Session, game: DbGame, config: Dict[str, Any]) -> None:
+    game.config = config
+    db.add(game)
+
+
+def _get_progression_mode(game: DbGame) -> str:
+    config = _coerce_game_config(game)
+    mode = config.get("progression_mode", PROGRESSION_SUPERVISED)
+    if mode not in {PROGRESSION_SUPERVISED, PROGRESSION_UNSUPERVISED}:
+        return PROGRESSION_SUPERVISED
+    return mode
+
+
+def _ensure_round(db: Session, game: DbGame, round_number: Optional[int] = None) -> Round:
+    number = round_number or (game.current_round or 1)
+    existing = (
+        db.query(Round)
+        .filter(Round.game_id == game.id, Round.round_number == number)
+        .first()
+    )
+    if existing:
+        return existing
+    round_record = Round(
+        game_id=game.id,
+        round_number=number,
+        status="in_progress",
+        started_at=datetime.utcnow(),
+        config=json.dumps({}),
+    )
+    db.add(round_record)
+    db.flush()
+    return round_record
+
+
+def _pending_orders(config: Dict[str, Any]) -> Dict[str, Any]:
+    return config.setdefault("pending_orders", {})
+
+
+def _simulation_parameters(config: Dict[str, Any]) -> Dict[str, Any]:
+    return config.get("simulation_parameters", {})
+
+
+def _all_players_submitted(db: Session, game: DbGame, pending: Dict[str, Any]) -> bool:
+    player_roles = {
+        str(player.role.value if hasattr(player.role, "value") else player.role).lower()
+        for player in db.query(Player).filter(Player.game_id == game.id).all()
+    }
+    submitted_roles = {role for role, entry in pending.items() if entry and entry.get("quantity") is not None}
+    return player_roles.issubset(submitted_roles)
+
+
+def _compute_customer_demand(game: DbGame, round_number: int) -> int:
+    config = _coerce_game_config(game)
+    params = _simulation_parameters(config)
+    initial = int(params.get("initial_demand", 4))
+    change_week = int(params.get("demand_change_week", params.get("change_week", 20)))
+    new_demand = int(params.get("new_demand", params.get("final_demand", initial)))
+
+    pattern = config.get("demand_pattern", {})
+    pattern_type = str(pattern.get("type", "classic")).lower()
+    pattern_params = pattern.get("params", {})
+
+    if pattern_type == "constant":
+        return int(pattern_params.get("value", initial))
+    if pattern_type == "classic":
+        initial = int(pattern_params.get("initial_demand", initial))
+        change_week = int(pattern_params.get("change_week", change_week))
+        new_demand = int(pattern_params.get("final_demand", new_demand))
+        return initial if round_number < change_week else new_demand
+
+    if pattern_type == "seasonal":
+        period = max(1, int(pattern_params.get("period", 4)))
+        amplitude = float(pattern_params.get("amplitude", 2))
+        base = float(pattern_params.get("base", initial))
+        import math
+
+        return max(0, int(base + amplitude * math.sin(2 * math.pi * round_number / period)))
+
+    return initial if round_number < change_week else new_demand
+
+
+def _ensure_simulation_state(config: Dict[str, Any]) -> Dict[str, Any]:
+    params = _simulation_parameters(config)
+    initial_inventory = int(params.get("initial_inventory", 12))
+    shipping_lead_time = max(1, int(params.get("shipping_lead_time", params.get("ship2", 2))))
+    state = config.setdefault(
+        "simulation_state",
+        {
+            "inventory": {role: initial_inventory for role in ROLES_IN_ORDER},
+            "backlog": {role: 0 for role in ROLES_IN_ORDER},
+            "incoming": {role: [0] * shipping_lead_time for role in ROLES_IN_ORDER},
+        },
+    )
+    # Ensure all roles exist (in case config mutated externally)
+    for role in ROLES_IN_ORDER:
+        state.setdefault("inventory", {}).setdefault(role, initial_inventory)
+        state.setdefault("backlog", {}).setdefault(role, 0)
+        incoming = state.setdefault("incoming", {}).setdefault(role, [0] * shipping_lead_time)
+        if len(incoming) != shipping_lead_time:
+            if len(incoming) < shipping_lead_time:
+                incoming.extend([0] * (shipping_lead_time - len(incoming)))
+            else:
+                state["incoming"][role] = incoming[-shipping_lead_time:]
+    return state
+
+
+def _record_round_history(
+    game: DbGame,
+    config: Dict[str, Any],
+    round_number: int,
+    demand: int,
+    orders_by_role: Dict[str, Dict[str, Any]],
+    timestamp: datetime,
+) -> None:
+    params = _simulation_parameters(config)
+    holding_cost_rate = float(params.get("holding_cost_per_unit", params.get("holding_cost", 0.5)))
+    backlog_cost_rate = float(params.get("backorder_cost_per_unit", params.get("backorder_cost", 5.0)))
+    state = _ensure_simulation_state(config)
+    history = config.setdefault("history", [])
+
+    # Copy for calculations
+    inventory = state["inventory"].copy()
+    backlog = state["backlog"].copy()
+    incoming = state["incoming"]
+
+    role_demand_map = {
+        "retailer": demand,
+        "wholesaler": orders_by_role.get("retailer", {}).get("quantity", 0),
+        "distributor": orders_by_role.get("wholesaler", {}).get("quantity", 0),
+        "manufacturer": orders_by_role.get("distributor", {}).get("quantity", 0),
+    }
+
+    round_costs: Dict[str, Dict[str, float]] = {}
+
+    for role in ROLES_IN_ORDER:
+        queue = incoming.setdefault(role, [0])
+        arriving = queue.pop(0) if queue else 0
+        available = inventory.get(role, 0) + arriving
+        role_demand = max(0, int(role_demand_map.get(role, 0)))
+        shipped = min(available, role_demand)
+        new_inventory = max(0, available - role_demand)
+        new_backlog = max(0, role_demand - available)
+        inventory[role] = new_inventory
+        backlog[role] = new_backlog
+
+        placed_order = max(0, int(orders_by_role.get(role, {}).get("quantity", 0)))
+        queue.append(placed_order)
+
+        holding_cost = new_inventory * holding_cost_rate
+        backlog_cost = new_backlog * backlog_cost_rate
+        round_costs[role] = {
+            "holding_cost": round(holding_cost, 2),
+            "backlog_cost": round(backlog_cost, 2),
+            "total_cost": round(holding_cost + backlog_cost, 2),
+        }
+
+    # Persist updated state
+    state["inventory"] = inventory
+    state["backlog"] = backlog
+    state["incoming"] = incoming
+
+    history.append(
+        {
+            "round": round_number,
+            "timestamp": timestamp.isoformat() + "Z",
+            "demand": demand,
+            "orders": {role: orders_by_role.get(role, {}) for role in ROLES_IN_ORDER},
+            "inventory_positions": inventory.copy(),
+            "backlogs": backlog.copy(),
+            "costs": round_costs,
+            "total_cost": round(sum(c["total_cost"] for c in round_costs.values()), 2),
+        }
+    )
+
+
+def _finalize_round_if_ready(
+    db: Session,
+    game: DbGame,
+    config: Dict[str, Any],
+    round_record: Round,
+    *,
+    force: bool = False,
+) -> bool:
+    pending = _pending_orders(config)
+    if not pending:
+        return False
+
+    if not force and _get_progression_mode(game) != PROGRESSION_UNSUPERVISED:
+        return False
+
+    if not force and not _all_players_submitted(db, game, pending):
+        return False
+
+    timestamp = datetime.utcnow()
+    round_number = round_record.round_number
+    demand = _compute_customer_demand(game, round_number)
+
+    orders_by_role = {
+        role: {
+            "quantity": int(entry.get("quantity", 0)),
+            "comment": entry.get("comment"),
+            "player_id": entry.get("player_id"),
+            "submitted_at": entry.get("submitted_at"),
+        }
+        for role, entry in pending.items()
+    }
+
+    # Update round metadata
+    round_record.status = "completed"
+    round_record.completed_at = timestamp
+    round_record.config = json.dumps(
+        {
+            "orders": orders_by_role,
+            "demand": demand,
+        }
+    )
+
+    _record_round_history(game, config, round_number, demand, orders_by_role, timestamp)
+    config["pending_orders"] = {}
+
+    if game.max_rounds and round_number >= game.max_rounds:
+        game.status = DbGameStatus.FINISHED
+        game.current_round = round_number
+    else:
+        game.current_round = round_number + 1
+        next_round = _ensure_round(db, game, game.current_round)
+        next_round.status = "in_progress"
+        next_round.started_at = datetime.utcnow()
+        game.status = (
+            DbGameStatus.ROUND_IN_PROGRESS
+            if _get_progression_mode(game) == PROGRESSION_UNSUPERVISED
+            else DbGameStatus.STARTED
+        )
+
+    _touch_game(game)
+    _save_game_config(db, game, config)
+    db.add(round_record)
+    db.add(game)
+    db.flush()
+    return True
+
+
+def _compute_game_report(game: DbGame) -> Dict[str, Any]:
+    config = _coerce_game_config(game)
+    history = config.get("history", [])
+    totals: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+    order_series: Dict[str, List[Dict[str, Any]]] = {}
+    inventory_series: List[Dict[str, Any]] = []
+    demand_series: List[Dict[str, Any]] = []
+
+    for entry in history:
+        round_number = entry.get("round")
+        demand_series.append({"round": round_number, "demand": entry.get("demand", 0)})
+
+        inv_snapshot = {"round": round_number}
+        for role in ROLES_IN_ORDER:
+            order_info = entry.get("orders", {}).get(role, {})
+            qty = order_info.get("quantity", 0)
+            order_series.setdefault(role, []).append({"round": round_number, "quantity": qty})
+
+            cost_info = entry.get("costs", {}).get(role, {})
+            totals_role = totals[role]
+            totals_role["holding_cost"] += float(cost_info.get("holding_cost", 0))
+            totals_role["backlog_cost"] += float(cost_info.get("backlog_cost", 0))
+            totals_role["total_cost"] += float(cost_info.get("total_cost", 0))
+            totals_role["orders"] += float(qty)
+
+            inv_value = entry.get("inventory_positions", {}).get(role, 0)
+            backlog_value = entry.get("backlogs", {}).get(role, 0)
+            inv_snapshot[role] = inv_value
+            totals_role["final_inventory"] = inv_value
+            totals_role["final_backlog"] = backlog_value
+
+        inventory_series.append(inv_snapshot)
+
+    total_cost = sum(role_totals["total_cost"] for role_totals in totals.values())
+    formatted_totals = {
+        role: {
+            "holding_cost": round(values.get("holding_cost", 0), 2),
+            "backlog_cost": round(values.get("backlog_cost", 0), 2),
+            "total_cost": round(values.get("total_cost", 0), 2),
+            "orders": round(values.get("orders", 0), 2),
+            "final_inventory": values.get("final_inventory", 0),
+            "final_backlog": values.get("final_backlog", 0),
+        }
+        for role, values in totals.items()
+    }
+
+    return {
+        "game_id": game.id,
+        "name": game.name,
+        "progression_mode": _get_progression_mode(game),
+        "total_cost": round(total_cost, 2),
+        "totals": formatted_totals,
+        "history": history,
+        "order_series": order_series,
+        "inventory_series": inventory_series,
+        "demand_series": demand_series,
+        "rounds_completed": len(history),
+    }
+
 
 def _serialize_game(game: DbGame) -> Dict[str, Any]:
     if isinstance(game.status, DbGameStatus):
         status = STATUS_REMAPPING.get(game.status, game.status.value)
     else:
         status = str(game.status or "")
+    config = _coerce_game_config(game)
+    demand_pattern = game.demand_pattern or config.get("demand_pattern") or {}
     return {
         "id": game.id,
         "name": game.name,
@@ -751,8 +1085,9 @@ def _serialize_game(game: DbGame) -> Dict[str, Any]:
         "updated_at": _iso(getattr(game, "updated_at", None)),
         "group_id": game.group_id,
         "created_by": game.created_by,
-        "config": game.config or {},
-        "demand_pattern": game.demand_pattern or {},
+        "config": config,
+        "demand_pattern": demand_pattern,
+        "progression_mode": _get_progression_mode(game),
     }
 
 
@@ -770,6 +1105,74 @@ def _get_game_for_user(db: Session, user: Any, game_id: int) -> DbGame:
 
 def _touch_game(game: DbGame) -> None:
     game.updated_at = datetime.utcnow()
+
+
+@api.post("/mixed-games/", status_code=201)
+async def create_mixed_game(payload: GameCreate, user: Dict[str, Any] = Depends(get_current_user)):
+    db = SyncSessionLocal()
+    try:
+        group_id = _extract_group_id(user)
+        if group_id is None and not _is_system_admin_user(user):
+            raise HTTPException(status_code=403, detail="Group membership required to create games")
+
+        config: Dict[str, Any] = {
+            "demand_pattern": payload.demand_pattern.dict() if payload.demand_pattern else {},
+            "pricing_config": payload.pricing_config.dict() if payload.pricing_config else {},
+            "node_policies": {key: policy.dict() for key, policy in (payload.node_policies or {}).items()},
+            "system_config": payload.system_config or {},
+            "global_policy": payload.global_policy or {},
+            "progression_mode": payload.progression_mode,
+            "pending_orders": {},
+            "history": [],
+        }
+
+        game = DbGame(
+            name=payload.name,
+            description=payload.description,
+            status=DbGameStatus.CREATED,
+            current_round=0,
+            max_rounds=payload.max_rounds or 0,
+            created_at=datetime.utcnow(),
+            group_id=group_id,
+            created_by=user.get("id"),
+            is_public=payload.is_public,
+            demand_pattern=config.get("demand_pattern", {}),
+            config=config,
+        )
+        db.add(game)
+        db.flush()
+
+        for assignment in payload.player_assignments:
+            is_agent = assignment.player_type == PlayerType.AGENT
+            role_value = assignment.role.value if hasattr(assignment.role, "value") else str(assignment.role)
+            if not is_agent and assignment.user_id is None:
+                raise HTTPException(status_code=400, detail=f"User ID required for human role {role_value}")
+
+            strategy_value = None
+            if assignment.strategy is not None:
+                strategy_value = assignment.strategy.value if hasattr(assignment.strategy, "value") else str(assignment.strategy)
+
+            player = Player(
+                game_id=game.id,
+                user_id=None if is_agent else assignment.user_id,
+                name=f"{role_value.title()} ({'AI' if is_agent else 'Human'})",
+                role=PlayerRole(role_value),
+                is_ai=is_agent,
+                ai_strategy=strategy_value,
+                can_see_demand=assignment.can_see_demand,
+                llm_model=assignment.llm_model if is_agent else None,
+                strategy=PlayerStrategy.MANUAL,
+            )
+            db.add(player)
+
+        _ensure_simulation_state(config)
+        _save_game_config(db, game, config)
+        db.add(game)
+        db.commit()
+        db.refresh(game)
+        return _serialize_game(game)
+    finally:
+        db.close()
 
 
 @api.get("/mixed-games/")
@@ -792,6 +1195,245 @@ async def list_mixed_games(user: Dict[str, Any] = Depends(get_current_user)):
         db.close()
 
 
+@api.post("/games/{game_id}/players/{player_id}/orders")
+async def submit_order(
+    game_id: int,
+    player_id: int,
+    submission: OrderSubmission,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    db = SyncSessionLocal()
+    try:
+        if submission.quantity < 0:
+            raise HTTPException(status_code=400, detail="Quantity must be non-negative")
+
+        game = _get_game_for_user(db, user, game_id)
+        player = db.query(Player).filter(Player.id == player_id, Player.game_id == game.id).first()
+        if not player:
+            raise HTTPException(status_code=404, detail="Player not found for this game")
+
+        config = _coerce_game_config(game)
+        round_record = _ensure_round(db, game)
+
+        # Record player action for auditing
+        action = (
+            db.query(PlayerAction)
+            .filter(
+                PlayerAction.game_id == game.id,
+                PlayerAction.player_id == player.id,
+                PlayerAction.round_id == round_record.id,
+                PlayerAction.action_type == "order",
+            )
+            .first()
+        )
+
+        timestamp = datetime.utcnow()
+
+        if action:
+            action.quantity = submission.quantity
+            action.created_at = timestamp
+        else:
+            action = PlayerAction(
+                game_id=game.id,
+                round_id=round_record.id,
+                player_id=player.id,
+                action_type="order",
+                quantity=submission.quantity,
+                created_at=timestamp,
+            )
+            db.add(action)
+
+        pending = _pending_orders(config)
+        role_key = str(player.role.value if hasattr(player.role, "value") else player.role).lower()
+        pending[role_key] = {
+            "player_id": player.id,
+            "quantity": submission.quantity,
+            "comment": submission.comment,
+            "submitted_at": timestamp.isoformat() + "Z",
+        }
+
+        _save_game_config(db, game, config)
+        db.add(game)
+        db.flush()
+
+        auto_advanced = _finalize_round_if_ready(db, game, config, round_record, force=False)
+        db.commit()
+
+        return {
+            "status": "recorded",
+            "auto_advanced": auto_advanced,
+            "pending_orders": pending,
+            "progression_mode": _get_progression_mode(game),
+        }
+    finally:
+        db.close()
+
+
+@api.get("/mixed-games/{game_id}/rounds")
+async def list_rounds(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
+    db = SyncSessionLocal()
+    try:
+        game = _get_game_for_user(db, user, game_id)
+        config = _coerce_game_config(game)
+        history = config.get("history", [])
+        players = db.query(Player).filter(Player.game_id == game.id).all()
+        players_by_role = {
+            str(p.role.value if hasattr(p.role, "value") else p.role).lower(): p
+            for p in players
+        }
+
+        rounds_payload = []
+        for entry in history:
+            round_number = entry.get("round")
+            player_rounds = []
+            for role, player in players_by_role.items():
+                order_info = entry.get("orders", {}).get(role, {})
+                player_rounds.append(
+                    {
+                        "player_id": player.id,
+                        "role": role.upper(),
+                        "order_placed": order_info.get("quantity", 0),
+                        "inventory_after": entry.get("inventory_positions", {}).get(role, 0),
+                        "backorders_after": entry.get("backlogs", {}).get(role, 0),
+                        "comment": order_info.get("comment"),
+                    }
+                )
+
+            rounds_payload.append(
+                {
+                    "round_number": round_number,
+                    "demand": entry.get("demand", 0),
+                    "player_rounds": player_rounds,
+                }
+            )
+        return rounds_payload
+    finally:
+        db.close()
+
+
+@api.get("/games/{game_id}/rounds")
+async def list_rounds_alias(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
+    return await list_rounds(game_id, user)
+
+
+@api.get("/mixed-games/{game_id}/rounds/current/status")
+async def current_round_status(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
+    db = SyncSessionLocal()
+    try:
+        game = _get_game_for_user(db, user, game_id)
+        config = _coerce_game_config(game)
+        pending = _pending_orders(config)
+        players = db.query(Player).filter(Player.game_id == game.id).all()
+        all_roles = {
+            str(p.role.value if hasattr(p.role, "value") else p.role).lower(): p.id
+            for p in players
+        }
+        submitted = {role for role, data in pending.items() if data.get("quantity") is not None}
+        outstanding = [role for role in all_roles.keys() if role not in submitted]
+        return {
+            "game_id": game.id,
+            "current_round": game.current_round or 1,
+            "progression_mode": _get_progression_mode(game),
+            "submitted_roles": list(submitted),
+            "outstanding_roles": outstanding,
+        }
+    finally:
+        db.close()
+
+
+@api.get("/games/{game_id}/rounds/current/status")
+async def current_round_status_alias(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
+    return await current_round_status(game_id, user)
+
+
+@api.get("/mixed-games/{game_id}/report")
+async def get_game_report(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
+    db = SyncSessionLocal()
+    try:
+        game = _get_game_for_user(db, user, game_id)
+        return _compute_game_report(game)
+    finally:
+        db.close()
+
+
+@api.get("/mixed-games/{game_id}/state")
+async def get_game_state(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
+    db = SyncSessionLocal()
+    try:
+        game = _get_game_for_user(db, user, game_id)
+        config = _coerce_game_config(game)
+        players = db.query(Player).filter(Player.game_id == game.id).all()
+        players_payload = [
+            {
+                "id": player.id,
+                "role": player.role.value if hasattr(player.role, "value") else player.role,
+                "user_id": player.user_id,
+                "is_ai": bool(player.is_ai),
+                "ai_strategy": player.ai_strategy,
+                "can_see_demand": bool(player.can_see_demand),
+            }
+            for player in players
+        ]
+        round_record = _ensure_round(db, game, game.current_round or 1)
+        pending = _pending_orders(config)
+        return {
+            "game": _serialize_game(game),
+            "progression_mode": _get_progression_mode(game),
+            "round": round_record.round_number,
+            "pending_orders": pending,
+            "history": config.get("history", []),
+            "players": players_payload,
+        }
+    finally:
+        db.close()
+
+
+@api.get("/games/{game_id}")
+async def get_game(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
+    db = SyncSessionLocal()
+    try:
+        game = _get_game_for_user(db, user, game_id)
+        payload = _serialize_game(game)
+        players = db.query(Player).filter(Player.game_id == game.id).all()
+        payload["players"] = [
+            {
+                "id": player.id,
+                "name": player.name,
+                "role": player.role.value if hasattr(player.role, "value") else player.role,
+                "user_id": player.user_id,
+                "is_ai": bool(player.is_ai),
+                "ai_strategy": player.ai_strategy,
+                "can_see_demand": bool(player.can_see_demand),
+            }
+            for player in players
+        ]
+        return payload
+    finally:
+        db.close()
+
+
+@api.get("/games/{game_id}/players")
+async def list_players(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
+    db = SyncSessionLocal()
+    try:
+        game = _get_game_for_user(db, user, game_id)
+        players = db.query(Player).filter(Player.game_id == game.id).all()
+        return [
+            {
+                "id": player.id,
+                "name": player.name,
+                "role": player.role.value if hasattr(player.role, "value") else player.role,
+                "user_id": player.user_id,
+                "is_ai": bool(player.is_ai),
+                "ai_strategy": player.ai_strategy,
+                "can_see_demand": bool(player.can_see_demand),
+            }
+            for player in players
+        ]
+    finally:
+        db.close()
+
+
 @api.post("/mixed-games/{game_id}/start")
 async def start_game(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
     db = SyncSessionLocal()
@@ -799,10 +1441,26 @@ async def start_game(game_id: int, user: Dict[str, Any] = Depends(get_current_us
         game = _get_game_for_user(db, user, game_id)
         if game.status == DbGameStatus.FINISHED:
             raise HTTPException(status_code=400, detail="Game is already finished")
+        config = _coerce_game_config(game)
+        pending = _pending_orders(config)
+        pending.clear()
+        config.setdefault("history", [])
+        _ensure_simulation_state(config)
+
         if game.current_round is None or game.current_round <= 0:
             game.current_round = 1
-        game.status = DbGameStatus.STARTED
+        round_record = _ensure_round(db, game, game.current_round)
+        round_record.status = "in_progress"
+        round_record.started_at = datetime.utcnow()
+
+        game.status = (
+            DbGameStatus.ROUND_IN_PROGRESS
+            if _get_progression_mode(game) == PROGRESSION_UNSUPERVISED
+            else DbGameStatus.STARTED
+        )
         _touch_game(game)
+        _save_game_config(db, game, config)
+        db.add(round_record)
         db.add(game)
         db.commit()
         db.refresh(game)
@@ -831,13 +1489,18 @@ async def next_round(game_id: int, user: Dict[str, Any] = Depends(get_current_us
     db = SyncSessionLocal()
     try:
         game = _get_game_for_user(db, user, game_id)
-        current = game.current_round or 0
-        limit = game.max_rounds or current
-        if current < limit:
-            game.current_round = current + 1
-        game.status = DbGameStatus.ROUND_IN_PROGRESS
-        _touch_game(game)
-        db.add(game)
+        if _get_progression_mode(game) == PROGRESSION_UNSUPERVISED:
+            raise HTTPException(status_code=400, detail="Unsupervised games advance automatically")
+
+        config = _coerce_game_config(game)
+        round_record = _ensure_round(db, game, game.current_round or 1)
+        pending = _pending_orders(config)
+        if not _all_players_submitted(db, game, pending):
+            raise HTTPException(status_code=400, detail="All players must submit orders before advancing")
+
+        if not _finalize_round_if_ready(db, game, config, round_record, force=True):
+            raise HTTPException(status_code=400, detail="Unable to advance round")
+
         db.commit()
         db.refresh(game)
         return _serialize_game(game)
@@ -850,10 +1513,18 @@ async def finish_game(game_id: int, user: Dict[str, Any] = Depends(get_current_u
     db = SyncSessionLocal()
     try:
         game = _get_game_for_user(db, user, game_id)
+        config = _coerce_game_config(game)
+        round_record = _ensure_round(db, game, game.current_round or 1)
+        pending = _pending_orders(config)
+        if pending and not _finalize_round_if_ready(db, game, config, round_record, force=True):
+            _save_game_config(db, game, config)
+
         game.status = DbGameStatus.FINISHED
         if game.max_rounds:
             game.current_round = max(game.current_round or 0, game.max_rounds)
         _touch_game(game)
+        _save_game_config(db, game, config)
+        db.add(round_record)
         db.add(game)
         db.commit()
         db.refresh(game)

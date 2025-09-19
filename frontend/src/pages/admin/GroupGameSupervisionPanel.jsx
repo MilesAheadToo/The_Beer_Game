@@ -110,19 +110,17 @@ const GroupGameSupervisionPanel = ({
   const handleFinish = (gameId) =>
     runAction(gameId, 'finish', mixedGameApi.finishGame, 'Game marked as finished');
 
-  const handleView = (gameId) => {
-    navigate(`/games/${gameId}`);
-  };
-
   const renderActions = (game) => {
     const status = String(game.status || '').toLowerCase();
+    const mode = String(game.progression_mode || game?.config?.progression_mode || 'supervised').toLowerCase();
     const busy = Boolean(actionState[game.id]);
+    const viewTarget = status === 'completed' ? `/games/${game.id}/report` : `/games/${game.id}`;
 
     if (status === 'completed') {
       return (
         <Tooltip title="View game">
           <span>
-            <IconButton color="primary" onClick={() => handleView(game.id)}>
+            <IconButton color="primary" onClick={() => navigate(viewTarget)}>
               <ViewIcon fontSize="small" />
             </IconButton>
           </span>
@@ -135,7 +133,7 @@ const GroupGameSupervisionPanel = ({
         <Stack direction="row" spacing={1}>
           <Tooltip title="View game">
             <span>
-              <IconButton color="primary" onClick={() => handleView(game.id)}>
+              <IconButton color="primary" onClick={() => navigate(viewTarget)}>
                 <ViewIcon fontSize="small" />
               </IconButton>
             </span>
@@ -155,24 +153,36 @@ const GroupGameSupervisionPanel = ({
     }
 
     if (status === 'in_progress') {
+      const autoChip = (
+        <Chip
+          label="Auto"
+          size="small"
+          color="info"
+          variant="outlined"
+        />
+      );
       return (
         <Stack direction="row" spacing={1} alignItems="center">
           <Tooltip title="View game">
             <span>
-              <IconButton color="primary" onClick={() => handleView(game.id)}>
+              <IconButton color="primary" onClick={() => navigate(viewTarget)}>
                 <ViewIcon fontSize="small" />
               </IconButton>
             </span>
           </Tooltip>
-          <Button
-            size="small"
-            variant="outlined"
-            startIcon={<NextRoundIcon fontSize="small" />}
-            onClick={() => handleNextRound(game.id)}
-            disabled={busy}
-          >
-            {busy && actionState[game.id] === 'next_round' ? 'Advancing…' : 'Next Round'}
-          </Button>
+          {mode === 'unsupervised' ? (
+            autoChip
+          ) : (
+            <Button
+              size="small"
+              variant="outlined"
+              startIcon={<NextRoundIcon fontSize="small" />}
+              onClick={() => handleNextRound(game.id)}
+              disabled={busy}
+            >
+              {busy && actionState[game.id] === 'next_round' ? 'Advancing…' : 'Next Round'}
+            </Button>
+          )}
           <Button
             size="small"
             variant="contained"
@@ -198,13 +208,13 @@ const GroupGameSupervisionPanel = ({
     }
 
     return (
-      <Tooltip title="View game">
-        <span>
-          <IconButton color="primary" onClick={() => handleView(game.id)}>
-            <ViewIcon fontSize="small" />
-          </IconButton>
-        </span>
-      </Tooltip>
+          <Tooltip title="View game">
+            <span>
+              <IconButton color="primary" onClick={() => navigate(viewTarget)}>
+                <ViewIcon fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
     );
   };
 

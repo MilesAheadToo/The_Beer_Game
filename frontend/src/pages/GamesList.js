@@ -443,6 +443,7 @@ const GamesList = () => {
             <TableRow>
               <TableCell>Name</TableCell>
               <TableCell>Status</TableCell>
+              <TableCell>Mode</TableCell>
               <TableCell>Current Round</TableCell>
               <TableCell>Max Rounds</TableCell>
               <TableCell>Demand Pattern</TableCell>
@@ -454,7 +455,7 @@ const GamesList = () => {
           <TableBody>
             {games.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} align="center">
+                <TableCell colSpan={9} align="center">
                   No games found. Create a new game to get started.
                 </TableCell>
               </TableRow>
@@ -464,6 +465,8 @@ const GamesList = () => {
                 const demandSummary = game.demand_pattern?.type === 'classic'
                   ? ` (Initial: ${params.initial_demand ?? '-'}, Change Week: ${params.change_week ?? '-'}, Final: ${params.final_demand ?? '-'})`
                   : '';
+                const modeLabel = String(game.progression_mode || game?.config?.progression_mode || 'supervised');
+                const statusLower = String(game.status || '').toLowerCase();
                 return (
                   <TableRow key={game.id}>
                   <TableCell>
@@ -476,6 +479,14 @@ const GamesList = () => {
                       label={game.status}
                       color={getStatusColor(game.status)}
                       size="small"
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      label={modeLabel.replace(/_/g, ' ').replace(/^./, (s) => s.toUpperCase())}
+                      size="small"
+                      variant="outlined"
+                      color={modeLabel.toLowerCase() === 'unsupervised' ? 'info' : 'default'}
                     />
                   </TableCell>
                   <TableCell>{game.current_round}</TableCell>
@@ -497,11 +508,29 @@ const GamesList = () => {
                     <Box display="flex" gap={1}>
                       <Button
                         size="small"
+                        variant="outlined"
+                        startIcon={<SportsEsports />}
+                        onClick={() => navigate(`/games/${game.id}`)}
+                      >
+                        Board
+                      </Button>
+                      {statusLower === 'completed' && (
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="info"
+                          onClick={() => navigate(`/games/${game.id}/report`)}
+                        >
+                          Report
+                        </Button>
+                      )}
+                      <Button
+                        size="small"
                         variant="contained"
                         color="primary"
                         startIcon={<PlayArrow />}
                         onClick={() => handleStartGame(game.id)}
-                        disabled={String(game.status).toLowerCase() !== 'created'}
+                        disabled={statusLower !== 'created'}
                       >
                         Start
                       </Button>

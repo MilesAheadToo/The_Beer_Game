@@ -123,6 +123,7 @@ const GroupGameConfigPanel = ({
               <TableRow>
                 <TableCell>Name</TableCell>
                 <TableCell>Status</TableCell>
+                <TableCell>Mode</TableCell>
                 <TableCell>Current Round</TableCell>
                 <TableCell>Max Rounds</TableCell>
                 <TableCell>Last Updated</TableCell>
@@ -147,6 +148,14 @@ const GroupGameConfigPanel = ({
                       size="small"
                       color={statusColor(game.status)}
                       label={(game.status || '').replace(/_/g, ' ') || 'Unknown'}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Chip
+                      size="small"
+                      variant="outlined"
+                      color={String((game.progression_mode || 'supervised')).toLowerCase() === 'unsupervised' ? 'info' : 'default'}
+                      label={String(game.progression_mode || game?.config?.progression_mode || 'supervised').replace(/_/g, ' ').replace(/^./, (s) => s.toUpperCase())}
                     />
                   </TableCell>
                   <TableCell>{game.current_round ?? 0}</TableCell>

@@ -86,6 +86,10 @@ class GameBase(BaseModel):
     max_rounds: int = Field(default=52, ge=1, le=1000)
     description: Optional[str] = Field(None, max_length=500)
     is_public: bool = Field(default=True, description="Whether the game is visible to all users")
+    progression_mode: Literal['supervised', 'unsupervised'] = Field(
+        default='supervised',
+        description="Controls whether the Group Admin advances rounds manually (supervised) or the game auto-progresses once all orders are in (unsupervised)",
+    )
     pricing_config: PricingConfig = Field(
         default_factory=PricingConfig,
         description="Pricing configuration for different roles in the supply chain"

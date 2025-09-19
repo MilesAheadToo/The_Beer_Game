@@ -7,6 +7,7 @@ import GamesList from "./pages/GamesList";
 import CreateMixedGame from "./pages/CreateMixedGame";
 import CreateGameFromConfig from "./components/game/CreateGameFromConfig";
 import GameBoard from "./pages/GameBoard";
+import GameReport from "./pages/GameReport.jsx";
 import Login from "./pages/Login.jsx";
 import { WebSocketProvider } from "./contexts/WebSocketContext";
 import { useAuth } from "./contexts/AuthContext";
@@ -136,6 +137,17 @@ const AppContent = () => {
                     <GameBoard />
                   </>
                 )
+              }
+            />
+
+            <Route
+              path="/games/:gameId/report"
+              element={
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <GameReport />
+                </>
               }
             />
 

@@ -34,7 +34,9 @@ import {
   Alert,
   AlertIcon,
   AlertTitle,
-  AlertDescription
+  AlertDescription,
+  RadioGroup,
+  Radio
 } from '@chakra-ui/react';
 import PageLayout from '../components/PageLayout';
 import { getAllConfigs } from '../services/supplyChainConfigService';
@@ -264,6 +266,7 @@ const CreateMixedGame = () => {
   const [maxRounds, setMaxRounds] = useState(20);
   const [description, setDescription] = useState(searchParams.get('description') || '');
   const [isPublic, setIsPublic] = useState(true);
+  const [progressionMode, setProgressionMode] = useState('supervised');
   const [demandPattern, setDemandPattern] = useState(demandPatterns[0].value);
   const [initialDemand, setInitialDemand] = useState(4);
   const [demandChangeWeek, setDemandChangeWeek] = useState(6);
@@ -559,6 +562,7 @@ const CreateMixedGame = () => {
         max_rounds: maxRounds,
         description,
         is_public: isPublic,
+        progression_mode: progressionMode,
         demand_pattern: {
           type: demandPattern,
           params: demandPattern === 'classic'
@@ -778,6 +782,29 @@ const CreateMixedGame = () => {
                           </FormHelperText>
                         </FormControl>
                       </Grid>
+
+                      <FormControl>
+                        <FormLabel>Game Orchestration</FormLabel>
+                        <RadioGroup value={progressionMode} onChange={setProgressionMode}>
+                          <VStack align="start" spacing={2}>
+                            <Radio value="supervised">Supervised – Group Admin advances rounds manually</Radio>
+                            <Radio value="unsupervised">Unsupervised – advance automatically when every player submits</Radio>
+                          </VStack>
+                        </RadioGroup>
+                        <FormHelperText>Select how rounds should progress.</FormHelperText>
+                      </FormControl>
+
+                      {progressionMode === 'unsupervised' && (
+                        <Alert status="info" variant="left-accent" borderRadius="md">
+                          <AlertIcon />
+                          <Box>
+                            <AlertTitle fontSize="sm">Unsupervised mode</AlertTitle>
+                            <AlertDescription fontSize="sm">
+                              Rounds advance automatically once all players submit their orders. Use this for self-paced games.
+                            </AlertDescription>
+                          </Box>
+                        </Alert>
+                      )}
 
                       <FormControl>
                         <FormLabel>Description (Optional)</FormLabel>
