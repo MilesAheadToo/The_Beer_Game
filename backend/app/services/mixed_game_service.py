@@ -4,7 +4,8 @@ from enum import Enum
 import random
 import json
 
-from sqlalchemy import inspect, or_
+from types import SimpleNamespace
+from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.models.game import Game, GameStatus as GameStatusDB
@@ -145,7 +146,7 @@ class MixedGameService:
                 return value
         return datetime.utcnow()
 
-    def _serialize_game(self, game: Game) -> GameInDBBase:
+    def _serialize_game(self, game: Any) -> GameInDBBase:
         config = self._coerce_dict(getattr(game, "config", {}) or {})
         demand_pattern_source = getattr(game, "demand_pattern", None) or config.get("demand_pattern") or DEFAULT_DEMAND_PATTERN
         try:
@@ -701,32 +702,81 @@ class MixedGameService:
         current_user: User,
         status: Optional[GameStatus] = None,
     ) -> List[GameInDBBase]:
-        """Return games visible to the requesting user, with safe defaults."""
+        """Return games visible to the requesting user, handling legacy schemas."""
 
-        query = self.db.query(Game)
+        columns = set(self._get_game_columns())
+        base_projection = [
+            ("id", "id"),
+            ("name", "name"),
+            ("status", "status"),
+            ("current_round", "current_round"),
+            ("max_rounds", "max_rounds"),
+            ("created_at", "created_at"),
+            ("updated_at", "updated_at"),
+            ("started_at", "started_at"),
+            ("completed_at", "completed_at"),
+            ("finished_at", "finished_at"),
+            ("demand_pattern", "demand_pattern"),
+            ("config", "config"),
+            ("created_by", "created_by"),
+            ("group_id", "group_id"),
+        ]
+
+        select_parts: List[str] = []
+        for column_name, alias in base_projection:
+            if column_name in columns:
+                select_parts.append(f"g.{column_name} AS {alias}")
+            else:
+                select_parts.append(f"NULL AS {alias}")
+
+        select_clause = ", ".join(select_parts)
+        query = f"SELECT {select_clause} FROM games g"
+
+        filters: List[str] = []
+        params: Dict[str, Any] = {}
 
         if status:
-            status_values = self._schema_status_to_db_values(status)
+            status_values = [
+                value
+                for value in self._schema_status_to_db_values(status)
+                if value is not None
+            ]
             if status_values:
-                query = query.filter(Game.status.in_(status_values))
+                placeholders = []
+                for idx, value in enumerate(status_values):
+                    key = f"status_{idx}"
+                    placeholders.append(f":{key}")
+                    params[key] = value
+                filters.append(f"g.status IN ({', '.join(placeholders)})")
 
         user_type = self._resolve_user_type(current_user)
         if not current_user.is_superuser and user_type != UserTypeEnum.SYSTEM_ADMIN:
-            column_names = set(self._get_game_columns())
             group_id = getattr(current_user, "group_id", None)
+            if user_type == UserTypeEnum.GROUP_ADMIN and group_id and "group_id" in columns:
+                filters.append("g.group_id = :group_id")
+                params["group_id"] = group_id
+            elif "created_by" in columns:
+                filters.append("g.created_by = :created_by")
+                params["created_by"] = current_user.id
 
-            if user_type == UserTypeEnum.GROUP_ADMIN and group_id and "group_id" in column_names:
-                query = query.filter(or_(Game.group_id == group_id, Game.created_by == current_user.id))
-            elif "created_by" in column_names:
-                query = query.filter(Game.created_by == current_user.id)
+        if filters:
+            query += " WHERE " + " AND ".join(filters)
 
-        ordered_games = query.order_by(getattr(Game, "created_at", None) or Game.id).all()
+        order_column = "created_at" if "created_at" in columns else "id"
+        query += f" ORDER BY g.{order_column} DESC"
 
-        serialized_games: List[GameInDBBase] = []
-        for game in ordered_games:
-            serialized_games.append(self._serialize_game(game))
+        from sqlalchemy import text
 
-        return serialized_games
+        result = self.db.execute(text(query), params)
+
+        games: List[GameInDBBase] = []
+        for row in result:
+            record = dict(row._mapping)
+            if record.get("completed_at") is None and record.get("finished_at") is not None:
+                record["completed_at"] = record.get("finished_at")
+            games.append(self._serialize_game(SimpleNamespace(**record)))
+
+        return games
     
     def get_game_state(self, game_id: int) -> GameState:
         """Get the current state of a game."""

@@ -11,7 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
+from sqlalchemy.future import select
+
 from app.models.user import User, UserTypeEnum
+from app.models.group import Group
 from app.repositories.users import get_user_by_email
 
 # Password hashing
@@ -182,6 +185,20 @@ async def get_current_user(
                 user.user_type = UserTypeEnum.PLAYER
         elif getattr(user, "user_type", None) is None:
             user.user_type = UserTypeEnum.SYSTEM_ADMIN if user.is_superuser else UserTypeEnum.PLAYER
+
+        if (
+            getattr(user, "group_id", None) in (None, 0)
+            and user.user_type == UserTypeEnum.GROUP_ADMIN
+        ):
+            admin_group = getattr(user, "admin_of_group", None)
+            if not admin_group:
+                admin_group_result = await db.execute(
+                    select(Group).filter(Group.admin_id == user.id)
+                )
+                admin_group = admin_group_result.scalars().first()
+            if admin_group:
+                user.group_id = admin_group.id
+
         return user
         
     except JWTError:
