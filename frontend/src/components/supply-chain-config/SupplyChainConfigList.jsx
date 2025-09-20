@@ -162,7 +162,7 @@ const SupplyChainConfigList = ({
   const fetchConfigs = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await api.get('/supply-chain-config');
+      const response = await api.get('/supply-chain-config/');
       const data = response.data || [];
       const targetGroupId =
         restrictToGroupId !== null && restrictToGroupId !== undefined
@@ -211,7 +211,7 @@ const SupplyChainConfigList = ({
     if (!configToDelete) return;
 
     try {
-      await api.delete(`/supply-chain-config/${configToDelete.id}`);
+      await api.delete(`/supply-chain-config/${configToDelete.id}/`);
       enqueueSnackbar('Configuration deleted successfully', { variant: 'success' });
       await fetchConfigs();
     } catch (err) {
@@ -245,7 +245,7 @@ const SupplyChainConfigList = ({
 
     try {
       setActivatingConfig(configId);
-      await api.put(`/supply-chain-config/${configId}`, { is_active: true });
+      await api.put(`/supply-chain-config/${configId}/`, { is_active: true });
       enqueueSnackbar('Configuration activated successfully', { variant: 'success' });
       await fetchConfigs();
     } catch (err) {

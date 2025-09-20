@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -30,7 +30,7 @@ import {
   Stack,
 } from '@mui/material';
 import { PlayArrow, Edit, Delete, Add, Settings, FileDownloadOutlined, SportsEsports, PersonOutline } from '@mui/icons-material';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { isGroupAdmin as isGroupAdminUser } from '../utils/authUtils';
 import gameApi from '../services/gameApi';
@@ -76,6 +76,7 @@ const GamesList = () => {
   const [modelStatus, setModelStatus] = useState({ is_trained: false });
   const [loadingModelStatus, setLoadingModelStatus] = useState(true);
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const isGroupAdmin = isGroupAdminUser(user);
   const scConfigBasePath = isGroupAdmin ? '/admin/group/supply-chain-configs' : '/supply-chain-config';
@@ -225,8 +226,17 @@ const GamesList = () => {
     setOpenDialog(true);
   };
 
+  const clearEditQuery = useCallback(() => {
+    if (searchParams.has('edit')) {
+      const next = new URLSearchParams(searchParams);
+      next.delete('edit');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
+
   const handleCloseDialog = () => {
     setOpenDialog(false);
+    clearEditQuery();
   };
 
   // Handle form input changes
@@ -303,6 +313,29 @@ const GamesList = () => {
       showSnackbar('Failed to start game', 'error');
     }
   };
+
+  useEffect(() => {
+    const editId = searchParams.get('edit');
+    if (!editId || loading) {
+      return;
+    }
+    if (!games.length) {
+      return;
+    }
+
+    const gameToEdit = games.find((game) => String(game.id) === editId);
+    if (gameToEdit) {
+      handleOpenDialog(gameToEdit);
+      const next = new URLSearchParams(searchParams);
+      next.delete('edit');
+      setSearchParams(next, { replace: true });
+    } else {
+      showSnackbar('Game not found for editing', 'error');
+      const next = new URLSearchParams(searchParams);
+      next.delete('edit');
+      setSearchParams(next, { replace: true });
+    }
+  }, [searchParams, games, loading, showSnackbar, setSearchParams]);
 
 
   // Format date

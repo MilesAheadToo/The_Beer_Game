@@ -107,7 +107,7 @@ const GroupGameConfigPanel = ({
   };
   const handleEdit = (game) => {
     onRefresh?.();
-    navigate(`/games/${game.id}`);
+    navigate(`/games?edit=${game.id}`);
   };
 
   return (

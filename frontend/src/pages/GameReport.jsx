@@ -13,6 +13,15 @@ import {
   TableHead,
   TableRow,
   Chip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  List,
+  ListItem,
+  ListItemText,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material';
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from 'recharts';
 import PageLayout from '../components/PageLayout';
@@ -32,6 +41,9 @@ const GameReport = () => {
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [roundSortAsc, setRoundSortAsc] = useState(false);
+  const [commentDialog, setCommentDialog] = useState({ open: false, entry: null });
+  const [roundViewMode, setRoundViewMode] = useState('compact');
 
   useEffect(() => {
     const fetchReport = async () => {
@@ -72,14 +84,35 @@ const GameReport = () => {
   }, [report]);
 
   const inventoryChartData = useMemo(() => {
-    if (!report?.inventory_series) return [];
-    return [...report.inventory_series].sort((a, b) => a.round - b.round);
+    if (!report?.history) return [];
+    return [...report.history]
+      .sort((a, b) => a.round - b.round)
+      .map((entry) => {
+        const inventory = entry.inventory_positions || {};
+        const backlog = entry.backlogs || {};
+        const dataPoint = { round: entry.round };
+        roles.forEach((role) => {
+          const inventoryValue = Number(inventory?.[role] ?? 0);
+          const backlogValue = Number(backlog?.[role] ?? 0);
+          dataPoint[role] = inventoryValue - backlogValue;
+        });
+        return dataPoint;
+      });
   }, [report]);
 
   const roundsTable = useMemo(() => {
     if (!report?.history) return [];
-    return [...report.history].sort((a, b) => b.round - a.round);
-  }, [report]);
+    const sorted = [...report.history].sort((a, b) => a.round - b.round);
+    return roundSortAsc ? sorted : sorted.reverse();
+  }, [report, roundSortAsc]);
+
+  const openComments = (entry) => {
+    setCommentDialog({ open: true, entry });
+  };
+
+  const closeComments = () => {
+    setCommentDialog({ open: false, entry: null });
+  };
 
   const totals = report?.totals || {};
 
@@ -198,20 +231,39 @@ const GameReport = () => {
 
             <Grid item xs={12}>
               <Paper sx={{ p: 3 }}>
-                <Typography variant="h6" gutterBottom>
-                  Round Details
-                </Typography>
+                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                  <Typography variant="h6">
+                    Round Details
+                  </Typography>
+                  <ToggleButtonGroup
+                    value={roundViewMode}
+                    exclusive
+                    size="small"
+                    onChange={(_, value) => value && setRoundViewMode(value)}
+                  >
+                    <ToggleButton value="compact">Compact</ToggleButton>
+                    <ToggleButton value="detailed">Detailed</ToggleButton>
+                  </ToggleButtonGroup>
+                </Box>
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      <TableCell>Round</TableCell>
+                      <TableCell
+                        onClick={() => setRoundSortAsc((prev) => !prev)}
+                        sx={{ cursor: 'pointer', fontWeight: 600 }}
+                      >
+                        Round {roundSortAsc ? '▲' : '▼'}
+                      </TableCell>
                       <TableCell>Demand</TableCell>
                       {roles.map((role) => (
                         <TableCell key={role} align="right" sx={{ textTransform: 'capitalize' }}>
                           {role}
                         </TableCell>
                       ))}
-                      <TableCell align="right">Total Cost</TableCell>
+                        <TableCell align="right">Total Cost</TableCell>
+                        <TableCell align={roundViewMode === 'compact' ? 'center' : 'left'}>
+                          Comments
+                        </TableCell>
                     </TableRow>
                   </TableHead>
                   <TableBody>
@@ -225,6 +277,36 @@ const GameReport = () => {
                           </TableCell>
                         ))}
                         <TableCell align="right">${(entry.total_cost ?? 0).toFixed(2)}</TableCell>
+                        <TableCell align={roundViewMode === 'compact' ? 'center' : 'left'}>
+                          {roundViewMode === 'compact' ? (
+                            <Button size="small" variant="outlined" onClick={() => openComments(entry)}>
+                              View
+                            </Button>
+                          ) : (
+                            <Box>
+                              {(() => {
+                                const nodes = roles
+                                  .map((role) => {
+                                    const comment = entry.orders?.[role]?.comment;
+                                    if (!comment) return null;
+                                    return (
+                                      <Typography key={role} variant="body2" sx={{ mb: 0.5 }}>
+                                        <strong>{role.charAt(0).toUpperCase() + role.slice(1)}:</strong> {comment}
+                                      </Typography>
+                                    );
+                                  })
+                                  .filter(Boolean);
+                                return nodes.length ? (
+                                  nodes
+                                ) : (
+                                  <Typography variant="body2" color="text.secondary">
+                                    No comments recorded
+                                  </Typography>
+                                );
+                              })()}
+                            </Box>
+                          )}
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -233,6 +315,28 @@ const GameReport = () => {
             </Grid>
           </Grid>
         )}
+        <Dialog open={commentDialog.open} onClose={closeComments} maxWidth="sm" fullWidth>
+          <DialogTitle>Round {commentDialog.entry?.round} Comments</DialogTitle>
+          <DialogContent dividers>
+            {roles.map((role) => {
+              const comment = commentDialog.entry?.orders?.[role]?.comment;
+              const submittedAt = commentDialog.entry?.orders?.[role]?.submitted_at;
+              return (
+                <List dense disablePadding key={role}>
+                  <ListItem disableGutters>
+                    <ListItemText
+                      primary={role.charAt(0).toUpperCase() + role.slice(1)}
+                      secondary={comment ? `${comment}${submittedAt ? ` (submitted ${new Date(submittedAt).toLocaleString()})` : ''}` : 'No comment'}
+                    />
+                  </ListItem>
+                </List>
+              );
+            })}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={closeComments}>Close</Button>
+          </DialogActions>
+        </Dialog>
       </Box>
     </PageLayout>
   );

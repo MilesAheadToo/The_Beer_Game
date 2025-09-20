@@ -1154,19 +1154,29 @@ def _record_round_history(
     for role in ROLES_IN_ORDER:
         queue = incoming.setdefault(role, [0])
         arriving = queue.pop(0) if queue else 0
-        available = inventory.get(role, 0) + arriving
-        role_demand = max(0, int(role_demand_map.get(role, 0)))
-        shipped = min(available, role_demand)
-        new_inventory = max(0, available - role_demand)
-        new_backlog = max(0, role_demand - available)
+        starting_inventory = inventory.get(role, 0)
+        starting_backlog = backlog.get(role, 0)
+        net_start = starting_inventory - starting_backlog
+
+        total_demand = max(0, int(role_demand_map.get(role, 0))) + starting_backlog
+        available = max(0, starting_inventory) + arriving
+
+        shipped = min(available, total_demand)
+        ending_stock = available - shipped
+        ending_backlog = total_demand - shipped
+
+        new_inventory = max(0, ending_stock)
+        new_backlog = max(0, ending_backlog)
         inventory[role] = new_inventory
         backlog[role] = new_backlog
 
         placed_order = max(0, int(orders_by_role.get(role, {}).get("quantity", 0)))
         queue.append(placed_order)
 
-        holding_cost = new_inventory * holding_cost_rate
-        backlog_cost = new_backlog * backlog_cost_rate
+        holding_qty = max(net_start, 0)
+        backlog_qty = max(-net_start, 0)
+        holding_cost = holding_qty * holding_cost_rate
+        backlog_cost = backlog_qty * backlog_cost_rate
         round_costs[role] = {
             "holding_cost": round(holding_cost, 2),
             "backlog_cost": round(backlog_cost, 2),
@@ -1267,9 +1277,75 @@ def _finalize_round_if_ready(
     return True
 
 
-def _compute_game_report(game: DbGame) -> Dict[str, Any]:
+def _replay_history_from_rounds(db: Session, game: DbGame) -> List[Dict[str, Any]]:
+    rounds = (
+        db.query(Round)
+        .filter(Round.game_id == game.id)
+        .order_by(Round.round_number.asc())
+        .all()
+    )
+    if not rounds:
+        return []
+
+    base_config = _coerce_game_config(game)
+    serialized_copy = json.loads(json.dumps(base_config or {}))
+    serialized_copy.pop("history", None)
+    serialized_copy["history"] = []
+    _ensure_simulation_state(serialized_copy)
+
+    for round_record in rounds:
+        raw_config = round_record.config or {}
+        if isinstance(raw_config, str):
+            try:
+                raw_config = json.loads(raw_config)
+            except json.JSONDecodeError:
+                raw_config = {}
+
+        orders_payload = raw_config.get("orders") or {}
+        orders_by_role: Dict[str, Dict[str, Any]] = {}
+        for role in ROLES_IN_ORDER:
+            role_payload = (
+                orders_payload.get(role)
+                or orders_payload.get(role.capitalize())
+                or orders_payload.get(role.upper())
+                or {}
+            )
+            quantity = role_payload.get("quantity", 0)
+            try:
+                quantity = int(float(quantity))
+            except (TypeError, ValueError):
+                quantity = 0
+
+            timestamp = (
+                role_payload.get("submitted_at")
+                or (round_record.completed_at or round_record.started_at or datetime.utcnow()).isoformat() + "Z"
+            )
+
+            orders_by_role[role] = {
+                "player_id": role_payload.get("player_id"),
+                "quantity": quantity,
+                "comment": role_payload.get("comment"),
+                "submitted_at": timestamp,
+            }
+
+        demand = raw_config.get("demand")
+        try:
+            demand = int(float(demand))
+        except (TypeError, ValueError):
+            demand = _compute_customer_demand(game, round_record.round_number)
+
+        event_timestamp = round_record.completed_at or round_record.started_at or datetime.utcnow()
+        _record_round_history(game, serialized_copy, round_record.round_number, demand, orders_by_role, event_timestamp)
+
+    return serialized_copy.get("history", [])
+
+
+def _compute_game_report(db: Session, game: DbGame) -> Dict[str, Any]:
     config = _coerce_game_config(game)
-    history = config.get("history", [])
+    history = list(config.get("history", []))
+    if not history:
+        history = _replay_history_from_rounds(db, game)
+
     totals: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
     order_series: Dict[str, List[Dict[str, Any]]] = {}
     inventory_series: List[Dict[str, Any]] = []
@@ -1312,6 +1388,11 @@ def _compute_game_report(game: DbGame) -> Dict[str, Any]:
         }
         for role, values in totals.items()
     }
+
+    # Ensure we always expose all roles, even if no rounds were recorded
+    if not history:
+        for role in ROLES_IN_ORDER:
+            totals.setdefault(role, defaultdict(float))
 
     return {
         "game_id": game.id,
@@ -1635,7 +1716,7 @@ async def get_game_report(game_id: int, user: Dict[str, Any] = Depends(get_curre
     db = SyncSessionLocal()
     try:
         game = _get_game_for_user(db, user, game_id)
-        return _compute_game_report(game)
+        return _compute_game_report(db, game)
     finally:
         db.close()
 
