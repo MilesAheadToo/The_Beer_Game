@@ -35,6 +35,7 @@ from app.models.game import Game as DbGame, GameStatus as DbGameStatus, Round, P
 from app.models.player import Player, PlayerRole, PlayerStrategy
 from app.models.supply_chain_config import SupplyChainConfig
 from app.models.user import User, UserTypeEnum
+from app.core.security import verify_password
 
 # ------------------------------------------------------------------------------
 # Config
@@ -77,6 +78,7 @@ _FAKE_USERS = {
         "aliases": {"systemadmin", "superadmin"},
         "group_id": None,
         "is_superuser": True,
+        "user_type": "system_admin",
     }
 }
 
@@ -88,8 +90,9 @@ _FAKE_USERS["groupadmin@daybreak.ai"] = {
     "role": "groupadmin",
     "passwords": {"Daybreak@2025", "DayBreak@2025"},
     "aliases": {"groupadmin", "defaultadmin"},
-    "group_id": 2,
+    "group_id": 1,
     "is_superuser": False,
+    "user_type": "group_admin",
 }
 
 # ------------------------------------------------------------------------------
@@ -105,6 +108,9 @@ class MeResponse(BaseModel):
     email: str
     name: str
     role: str
+    group_id: Optional[int] = None
+    user_type: Optional[str] = None
+    is_superuser: bool = False
 
 
 class OrderSubmission(BaseModel):
@@ -136,18 +142,51 @@ def decode_token(token: str) -> Dict[str, Any]:
 # Auth helpers
 # ------------------------------------------------------------------------------
 def authenticate_user(username: str, password: str) -> Optional[Dict[str, Any]]:
-    """Accept email or simple alias (e.g., 'admin')."""
-    # Try direct email key first
-    user = _FAKE_USERS.get(username)
+    """Authenticate against the database first, falling back to the in-memory dev users."""
+
+    lookup = (username or "").strip()
+    if not lookup:
+        return None
+
+    # Map common aliases (e.g. "systemadmin") onto their canonical emails
+    alias_match = None
+    if "@" not in lookup:
+        token = lookup.lower()
+        for candidate in _FAKE_USERS.values():
+            aliases = {a.lower() for a in candidate.get("aliases", set())}
+            if token in aliases:
+                alias_match = candidate["email"]
+                break
+    canonical = alias_match or lookup
+
+    # Primary path: validate against persisted users so we pick up real group assignments
+    session: Optional[Session] = None
+    try:
+        session = SessionLocal()
+        db_user = session.query(User).filter(
+            or_(User.email == canonical, User.username == canonical)
+        ).first()
+        if db_user and getattr(db_user, "hashed_password", None):
+            try:
+                if verify_password(password, db_user.hashed_password):
+                    return _build_user_payload_from_model(db_user)
+            except Exception:
+                # If password verification fails unexpectedly, fall back to dev users
+                pass
+    finally:
+        if session is not None:
+            session.close()
+
+    # Development fallback: use in-memory credentials
+    user = _FAKE_USERS.get(canonical) or _FAKE_USERS.get(lookup)
     if not user:
-        # Try lookup by alias
-        for u in _FAKE_USERS.values():
-            if username.lower() in {a.lower() for a in u.get("aliases", set())}:
-                user = u
+        token = lookup.lower()
+        for candidate in _FAKE_USERS.values():
+            if token in {a.lower() for a in candidate.get("aliases", set())}:
+                user = candidate
                 break
     if not user:
         return None
-    # Accept any of the allowed dev passwords for convenience
     if password not in user.get("passwords", set()):
         return None
     return user
@@ -183,16 +222,33 @@ async def get_current_user(
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-    # In a real app, fetch user from DB using `sub`
-    # Here we map sub back to our fake user by id
-    user = None
-    for u in _FAKE_USERS.values():
-        if str(u["id"]) == str(sub) or u["email"] == sub:
-            user = u
-            break
+    user: Optional[Dict[str, Any]] = None
+    session: Optional[Session] = None
+    try:
+        session = SessionLocal()
+        db_user: Optional[User] = None
+        if str(sub).isdigit():
+            db_user = session.get(User, int(sub))
+        if db_user is None:
+            email_hint = payload.get("email")
+            if email_hint:
+                db_user = session.query(User).filter(User.email == email_hint).first()
+        if db_user is None and sub:
+            db_user = session.query(User).filter(User.email == str(sub)).first()
+        if db_user is not None:
+            user = _build_user_payload_from_model(db_user)
+    finally:
+        if session is not None:
+            session.close()
 
-    if not user:
-        # Token refers to unknown user
+    if user is None:
+        # Fallback to the in-memory dev users if we couldn't resolve via the database
+        for u in _FAKE_USERS.values():
+            if str(u["id"]) == str(sub) or u["email"].lower() == str(sub).lower():
+                user = u
+                break
+
+    if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
     return user
@@ -277,7 +333,16 @@ async def logout(response: Response):
 
 @api.get("/auth/me", response_model=MeResponse, tags=["auth"])
 async def me(user: Dict[str, Any] = Depends(get_current_user)):
-    return MeResponse(id=user["id"], email=user["email"], name=user["name"], role=user["role"])
+    display_name = user.get("name") or user.get("full_name") or user.get("username") or user["email"]
+    return MeResponse(
+        id=user["id"],
+        email=user["email"],
+        name=display_name,
+        role=user.get("role", "player"),
+        group_id=user.get("group_id"),
+        user_type=user.get("user_type"),
+        is_superuser=bool(user.get("is_superuser", False)),
+    )
 
 @api.post("/auth/refresh", response_model=TokenResponse, tags=["auth"])
 async def refresh(
@@ -506,6 +571,32 @@ def _serialize_user_record(user: User) -> Dict[str, Any]:
         "updated_at": _iso(getattr(user, "updated_at", None)),
         "last_login": _iso(getattr(user, "last_login", None)),
     }
+
+
+def _normalize_role_from_user(user_type: Optional[str], is_superuser: bool) -> str:
+    token = (user_type or "").strip().lower()
+    if is_superuser or token in {"system_admin", "systemadmin", "superadmin"}:
+        return "systemadmin"
+    if token in {"group_admin", "groupadmin"}:
+        return "groupadmin"
+    return "player"
+
+
+def _build_user_payload_from_model(user: User) -> Dict[str, Any]:
+    data = _serialize_user_record(user)
+    name = data.get("full_name") or data.get("username") or data.get("email")
+    user_type = (data.get("user_type") or "")
+    role = _normalize_role_from_user(user_type, bool(data.get("is_superuser")))
+    payload = {
+        "id": data["id"],
+        "email": data["email"],
+        "name": name,
+        "role": role,
+        "group_id": data.get("group_id"),
+        "is_superuser": bool(data.get("is_superuser")),
+        "user_type": user_type,
+    }
+    return payload
 
 
 def _supply_chain_checkpoint_path(config_id: int) -> Path:
