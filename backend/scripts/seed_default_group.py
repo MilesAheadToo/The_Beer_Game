@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 # Ensure the backend package is importable when running via `python backend/scripts/...`
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
@@ -38,10 +40,13 @@ from app.models import (
     Node,
     NodeType,
     Player,
+    PlayerAction,
     PlayerRole,
     PlayerStrategy,
     PlayerType,
+    Round,
     SupplyChainConfig,
+    SupervisorAction,
     User,
 )
 from app.models.user import UserTypeEnum
@@ -56,6 +61,42 @@ DEFAULT_ADMIN_FULL_NAME = "Group Administrator"
 DEFAULT_PASSWORD = "Daybreak@2025"
 DEFAULT_GAME_NAME = "The Beer Game"
 DEFAULT_AGENT_TYPE = "naive"
+
+DAYBREAK_AGENT_SPECS = [
+    {
+        "name": "Daybreak DTCE Showcase",
+        "agent_type": "daybreak_dtce",
+        "description": "Decentralised Daybreak temporal GNN agents running per role.",
+        "override_pct": None,
+    },
+    {
+        "name": "Daybreak DTCE Central Showcase",
+        "agent_type": "daybreak_dtce_central",
+        "description": "Daybreak agents coordinated with a central override (10% adjustment).",
+        "override_pct": 0.1,
+    },
+    {
+        "name": "Daybreak DTCE Global Showcase",
+        "agent_type": "daybreak_dtce_global",
+        "description": "Single Daybreak global controller orchestrating the full supply chain.",
+        "override_pct": None,
+    },
+]
+
+ROLE_SPECS = [
+    ("Retailer", PlayerRole.RETAILER),
+    ("Wholesaler", PlayerRole.WHOLESALER),
+    ("Distributor", PlayerRole.DISTRIBUTOR),
+    ("Manufacturer", PlayerRole.MANUFACTURER),
+]
+
+
+@dataclass
+class SeedOptions:
+    reset_games: bool = False
+    force_dataset: bool = False
+    force_training: bool = False
+    create_daybreak_games: bool = True
 
 FALLBACK_DB_FILENAME = "seed_default_group.sqlite"
 FALLBACK_DB_PATH = BACKEND_ROOT / FALLBACK_DB_FILENAME
@@ -329,16 +370,10 @@ def _ensure_default_players(session: Session, game: Game) -> None:
         return
 
     print("[info] Creating default players for the game...")
-    role_specs = [
-        ("retailer", PlayerRole.RETAILER),
-        ("wholesaler", PlayerRole.WHOLESALER),
-        ("distributor", PlayerRole.DISTRIBUTOR),
-        ("manufacturer", PlayerRole.MANUFACTURER),
-    ]
-    for display_name, role in role_specs:
+    for display_name, role in ROLE_SPECS:
         player = Player(
             game_id=game.id,
-            name=f"{display_name.title()} (AI)",
+            name=f"{display_name} (AI)",
             role=role,
             type=PlayerType.AI,
             strategy=PlayerStrategy.MANUAL,
@@ -468,67 +503,298 @@ def ensure_role_users(session: Session, group: Group) -> None:
             print(f"[info] {role} user already exists: {email}")
 
 
-def _run_post_seed_tasks(config_id: int) -> None:
-    """Run data generation and GPU training scripts for the supplied configuration ID."""
+def _resolve_training_device(preferred: str = "cuda") -> str:
+    """Return an available training device, falling back to CPU when needed."""
+
+    try:
+        import torch  # type: ignore
+    except Exception:
+        print("[warn] PyTorch not available; defaulting training to CPU.")
+        return "cpu"
+
+    if preferred == "cuda" and torch.cuda.is_available():
+        return "cuda"
+    if preferred == "cuda":
+        print("[warn] CUDA unavailable; training will run on CPU.")
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
+def _run_post_seed_tasks(
+    config_id: int,
+    *,
+    force_dataset: bool = False,
+    force_training: bool = False,
+) -> Dict[str, Optional[Dict[str, Any]]]:
+    """Run data generation and training workflows for the supplied configuration ID."""
 
     if not TRAINING_SCRIPTS_DIR.exists():
         print("[warn] Training scripts directory not found; skipping automatic training.")
-        return
+        return {"dataset": None, "model": None, "device": None}
 
-    dataset_info: Optional[Dict[str, str]] = None
-    commands = [
-        (
-            "Generate SimPy dataset",
-            [
-                sys.executable,
-                str(TRAINING_SCRIPTS_DIR / "generate_simpy_dataset.py"),
-                "--config-id",
-                str(config_id),
-            ],
-        ),
-        (
-            "Train GPU model",
-            [
-                sys.executable,
-                str(TRAINING_SCRIPTS_DIR / "train_gpu_default.py"),
-                "--config-id",
-                str(config_id),
-                "--device",
-                "cuda",
-            ],
-        ),
+    artifacts: Dict[str, Optional[Dict[str, Any]]] = {
+        "dataset": None,
+        "model": None,
+        "device": None,
+    }
+
+    dataset_cmd = [
+        sys.executable,
+        str(TRAINING_SCRIPTS_DIR / "generate_simpy_dataset.py"),
+        "--config-id",
+        str(config_id),
     ]
+    if force_dataset:
+        dataset_cmd.append("--force")
 
-    for label, cmd in commands:
-        if "train_gpu_default.py" in cmd[1] and dataset_info and dataset_info.get("path"):
-            cmd.extend(["--dataset", dataset_info["path"]])
+    print(f"[info] Generate SimPy dataset (config_id={config_id})...")
+    dataset_completed = subprocess.run(
+        dataset_cmd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
-        print(f"[info] {label} (config_id={config_id})...")
-        completed = subprocess.run(cmd, check=True, capture_output=True, text=True)
+    dataset_stdout = dataset_completed.stdout.strip()
+    dataset_payload: Optional[Dict[str, Any]] = None
+    if dataset_stdout:
+        try:
+            dataset_payload = json.loads(dataset_stdout.splitlines()[-1])
+        except json.JSONDecodeError:
+            print(dataset_stdout)
+    if dataset_completed.stderr:
+        print(dataset_completed.stderr.strip(), file=sys.stderr)
 
-        stdout = completed.stdout.strip()
-        payload: Optional[Dict[str, str]] = None
-        if stdout:
-            try:
-                payload = json.loads(stdout.splitlines()[-1])
-            except json.JSONDecodeError:
-                print(stdout)
-        if completed.stderr:
-            print(completed.stderr.strip(), file=sys.stderr)
+    if dataset_payload:
+        status = dataset_payload.get("status", "unknown")
+        print(f"[success] Generate SimPy dataset: {status}")
+        if dataset_payload.get("path"):
+            print(f"          Dataset: {dataset_payload['path']}")
+        artifacts["dataset"] = dataset_payload
 
-        if payload:
-            status = payload.get("status", "unknown")
-            print(f"[success] {label}: {status}")
-            if label.startswith("Generate"):
-                dataset_info = payload
-                if payload.get("path"):
-                    print(f"          Dataset: {payload['path']}")
-            elif label.startswith("Train") and payload.get("model_path"):
-                print(f"          Model: {payload['model_path']}")
+    device = _resolve_training_device()
+    artifacts["device"] = {"preferred": "cuda", "resolved": device}
+
+    training_cmd = [
+        sys.executable,
+        str(TRAINING_SCRIPTS_DIR / "train_gpu_default.py"),
+        "--config-id",
+        str(config_id),
+        "--device",
+        device,
+    ]
+    dataset_path = (dataset_payload or {}).get("path")
+    if dataset_path:
+        training_cmd.extend(["--dataset", dataset_path])
+    if force_training:
+        training_cmd.append("--force")
+
+    print(f"[info] Train temporal GNN ({device}) (config_id={config_id})...")
+    training_completed = subprocess.run(
+        training_cmd,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    training_stdout = training_completed.stdout.strip()
+    training_payload: Optional[Dict[str, Any]] = None
+    if training_stdout:
+        try:
+            training_payload = json.loads(training_stdout.splitlines()[-1])
+        except json.JSONDecodeError:
+            print(training_stdout)
+    if training_completed.stderr:
+        print(training_completed.stderr.strip(), file=sys.stderr)
+
+    if training_payload:
+        status = training_payload.get("status", "unknown")
+        print(f"[success] Train temporal GNN: {status}")
+        if training_payload.get("model_path"):
+            print(f"          Model: {training_payload['model_path']}")
+        artifacts["model"] = training_payload
+
+    return artifacts
 
 
-def seed_default_data(session: Session) -> None:
+def _purge_existing_games(session: Session) -> None:
+    """Remove all game records and related AI configurations."""
+
+    print("[info] Removing existing games, players, and agent configurations...")
+    session.query(PlayerAction).delete(synchronize_session=False)
+    session.query(Round).delete(synchronize_session=False)
+    session.query(SupervisorAction).delete(synchronize_session=False)
+    session.query(AgentConfig).delete(synchronize_session=False)
+    session.query(Player).delete(synchronize_session=False)
+    session.query(Game).delete(synchronize_session=False)
+    session.flush()
+
+
+def _configure_game_agents(
+    session: Session,
+    game: Game,
+    agent_type: str,
+    *,
+    override_pct: Optional[float] = None,
+) -> None:
+    """Ensure players and agent configs exist for a game using the specified agent type."""
+
+    existing_players = {
+        player.role: player
+        for player in session.query(Player).filter(Player.game_id == game.id)
+    }
+
+    assignments: Dict[str, Dict[str, Optional[int]]] = {}
+
+    for display_name, role in ROLE_SPECS:
+        player = existing_players.get(role)
+        if player is None:
+            player = Player(
+                game_id=game.id,
+                name=f"{display_name} ({agent_type})",
+                role=role,
+            )
+
+        player.type = PlayerType.AI
+        player.is_ai = True
+        player.ai_strategy = agent_type
+        player.strategy = PlayerStrategy.MANUAL
+        player.user_id = None
+        player.can_see_demand = role == PlayerRole.RETAILER
+        session.add(player)
+        session.flush()
+
+        agent_config = (
+            session.query(AgentConfig)
+            .filter(AgentConfig.game_id == game.id, AgentConfig.role == role.value)
+            .first()
+        )
+        if agent_config is None:
+            agent_config = AgentConfig(
+                game_id=game.id,
+                role=role.value,
+                agent_type=agent_type,
+                config={},
+            )
+        else:
+            agent_config.agent_type = agent_type
+            agent_config.config = agent_config.config or {}
+
+        session.add(agent_config)
+        session.flush()
+
+        assignments[role.value] = {
+            "is_ai": True,
+            "agent_config_id": agent_config.id,
+            "user_id": None,
+            "strategy": agent_type,
+        }
+
+    if override_pct is not None:
+        overrides = {role.value: override_pct for _, role in ROLE_SPECS}
+        game_config = game.config or {}
+        game_config.setdefault("daybreak_overrides", {}).update(overrides)
+        game.config = game_config
+
+    game.role_assignments = assignments
+    session.add(game)
+
+
+def ensure_daybreak_games(
+    session: Session,
+    group: Group,
+    config: SupplyChainConfig,
+    artifacts: Dict[str, Optional[Dict[str, Any]]],
+    *,
+    recreate: bool,
+) -> None:
+    """Create or update showcase games for the Daybreak agent variants."""
+
+    config_service = SupplyChainConfigService(session)
+    dataset_info = artifacts.get("dataset") or {}
+    model_info = artifacts.get("model") or {}
+
+    for spec in DAYBREAK_AGENT_SPECS:
+        game = (
+            session.query(Game)
+            .filter(Game.group_id == group.id, Game.name == spec["name"])
+            .first()
+        )
+
+        if game and recreate:
+            print(f"[info] Recreating showcase game '{spec['name']}' (id={game.id}).")
+            session.delete(game)
+            session.flush()
+            game = None
+
+        if game is None:
+            print(f"[info] Creating showcase game '{spec['name']}'...")
+            base_config = config_service.create_game_from_config(
+                config.id,
+                {
+                    "name": spec["name"],
+                    "max_rounds": 50,
+                    "is_public": True,
+                    "description": spec["description"],
+                },
+            )
+            base_config.setdefault("daybreak", {})
+            base_config["daybreak"].update(
+                {
+                    "strategy": spec["agent_type"],
+                    "dataset": dataset_info.get("path"),
+                    "model_path": model_info.get("model_path"),
+                }
+            )
+            if spec["override_pct"] is not None:
+                overrides = {role.value: spec["override_pct"] for _, role in ROLE_SPECS}
+                base_config.setdefault("daybreak_overrides", {}).update(overrides)
+
+            game = Game(
+                name=spec["name"],
+                created_by=config.created_by or group.admin_id,
+                group_id=group.id,
+                status=GameStatus.CREATED,
+                max_rounds=base_config.get("max_rounds", 50),
+                config=base_config,
+                demand_pattern=base_config.get("demand_pattern", {}),
+                description=spec["description"],
+            )
+            session.add(game)
+            session.flush()
+        else:
+            print(
+                f"[info] Updating showcase game '{spec['name']}' (id={game.id}) with latest training artifacts."
+            )
+            game_config = game.config or {}
+            game_config.setdefault("daybreak", {})
+            game_config["daybreak"].update(
+                {
+                    "strategy": spec["agent_type"],
+                    "dataset": dataset_info.get("path"),
+                    "model_path": model_info.get("model_path"),
+                }
+            )
+            if spec["override_pct"] is not None:
+                overrides = {role.value: spec["override_pct"] for _, role in ROLE_SPECS}
+                game_config.setdefault("daybreak_overrides", {}).update(overrides)
+            game.config = game_config
+            session.add(game)
+
+        _configure_game_agents(
+            session,
+            game,
+            spec["agent_type"],
+            override_pct=spec["override_pct"],
+        )
+
+
+
+def seed_default_data(session: Session, options: SeedOptions) -> None:
     """Run the seeding workflow using the provided session."""
+
+    if options.reset_games:
+        _purge_existing_games(session)
+
     group, _ = ensure_group(session)
     ensure_role_users(session, group)
     game = ensure_default_game(session, group)
@@ -540,16 +806,35 @@ def seed_default_data(session: Session) -> None:
         .order_by(SupplyChainConfig.id.asc())
         .first()
     )
+
+    artifacts: Dict[str, Optional[Dict[str, Any]]] = {
+        "dataset": None,
+        "model": None,
+        "device": None,
+    }
     if config:
-        _run_post_seed_tasks(config.id)
+        artifacts = _run_post_seed_tasks(
+            config.id,
+            force_dataset=options.force_dataset,
+            force_training=options.force_training,
+        )
+
+        if options.create_daybreak_games:
+            ensure_daybreak_games(
+                session,
+                group,
+                config,
+                artifacts,
+                recreate=options.reset_games,
+            )
 
 
-def run_seed_with_session(session_factory: Callable[[], Session]) -> None:
+def run_seed_with_session(session_factory: Callable[[], Session], options: SeedOptions) -> None:
     """Execute the seeding process using the supplied session factory."""
     session: Session | None = None
     try:
         session = session_factory()
-        seed_default_data(session)
+        seed_default_data(session, options)
         session.commit()
     except Exception:
         if session is not None:
@@ -560,8 +845,41 @@ def run_seed_with_session(session_factory: Callable[[], Session]) -> None:
             session.close()
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Bootstrap Daybreak default data and agent games")
+    parser.add_argument(
+        "--reset-games",
+        action="store_true",
+        help="Delete all existing games before recreating defaults and showcases.",
+    )
+    parser.add_argument(
+        "--skip-daybreak-games",
+        action="store_true",
+        help="Skip creation/update of Daybreak showcase games.",
+    )
+    parser.add_argument(
+        "--force-training",
+        action="store_true",
+        help="Retrain the temporal GNN even if a checkpoint already exists.",
+    )
+    parser.add_argument(
+        "--force-dataset",
+        action="store_true",
+        help="Regenerate the SimPy dataset even if cached output exists.",
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
     from app.db.session import SQLALCHEMY_DATABASE_URI
+
+    args = parse_args()
+    options = SeedOptions(
+        reset_games=args.reset_games,
+        force_dataset=args.force_dataset or args.reset_games,
+        force_training=args.force_training or args.reset_games,
+        create_daybreak_games=not args.skip_daybreak_games,
+    )
     print(f"[DEBUG] Database URL from settings: {settings.SQLALCHEMY_DATABASE_URI}")
     print(f"[DEBUG] Database URL from session: {SQLALCHEMY_DATABASE_URI}")
     
@@ -570,7 +888,7 @@ def main() -> None:
     print(f"[info] Attempting to seed default data using: {configured_label or 'default settings'}")
 
     try:
-        run_seed_with_session(SessionLocal)
+        run_seed_with_session(SessionLocal, options)
         print("[done] Default group, users, and game are ready.")
         if configured_label:
             print(f"[info] Data stored in: {configured_label}")

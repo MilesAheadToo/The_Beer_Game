@@ -61,14 +61,19 @@ endif
 
 DOCKER_COMPOSE_CMD = $(strip $(COMPOSE_ENV) $(DOCKER_COMPOSE))
 
-.PHONY: up gpu-up up-dev down ps logs seed reset-admin help init-env proxy-up proxy-down proxy-restart proxy-recreate proxy-logs proxy-url seed-default-group build-create-users
+.PHONY: up gpu-up up-dev down ps logs seed reset-admin help init-env proxy-up proxy-down proxy-restart proxy-recreate proxy-logs proxy-url seed-default-group build-create-users db-bootstrap db-reset
 
 # Default CPU target
 up:
-	@echo "\n[+] Building and starting full system in CPU mode (proxy, frontend, backend, db)..."; \
+	@echo "\n[+] Building and starting full system (proxy, frontend, backend, db)..."; \
 	$(DOCKER_COMPOSE_CMD) -f docker-compose.yml build --no-cache $(DOCKER_BUILD_ARGS_CPU) backend && \
-	$(DOCKER_COMPOSE_CMD) -f docker-compose.yml up -d proxy frontend backend db create-users; \
-	echo "\n[✓] Local development server started (CPU mode)."; \
+	$(DOCKER_COMPOSE_CMD) -f docker-compose.yml up -d proxy frontend backend db create-users && \
+	if [ "$(FORCE_GPU)" = "1" ]; then \
+		$(MAKE) --no-print-directory db-bootstrap; \
+	fi; \
+	mode_label="CPU"; \
+	if [ "$(FORCE_GPU)" = "1" ]; then mode_label="GPU"; fi; \
+	echo "\n[✓] Local development server started (${mode_label} mode)."; \
 	echo "   URL:     http://$(HOST):8088"; \
 	echo "   SystemAdmin: systemadmin@daybreak.ai / Daybreak@2025"
 
@@ -185,9 +190,16 @@ build-create-users:
 	echo "\n[✓] create-users image refreshed."; \
 	echo "    Hint: leave requirements*.txt untouched to maximise Docker build caching."
 
+db-bootstrap:
+	@echo "\n[+] Bootstrapping Daybreak defaults (config, users, training, showcase games)..."; \
+	$(DOCKER_COMPOSE_CMD) exec backend python scripts/seed_default_group.py
+
+db-reset:
+	@echo "\n[+] Resetting games and rebuilding Daybreak training artifacts..."; \
+	$(DOCKER_COMPOSE_CMD) exec backend python scripts/seed_default_group.py --reset-games
+
 seed-default-group:
-	@echo "\n[+] Creating default group, users, and AI-powered game..."; \
-	cd backend && source venv/bin/activate && python scripts/seed_default_group.py
+	@$(MAKE) --no-print-directory db-bootstrap
 
 reset-admin:
 	@echo "\n[+] Resetting superadmin password to Daybreak@2025..."; \
@@ -229,6 +241,8 @@ help:
 	echo "  make logs          - tail logs"; \
 	echo "  make rebuild-frontend - rebuild and restart only frontend"; \
 	echo "  make rebuild-backend  - rebuild and restart only backend"; \
+	echo "  make db-bootstrap  - create default config, users, training data, and Daybreak games"; \
+	echo "  make db-reset      - delete games then rerun Daybreak bootstrap"; \
 	echo "  make proxy-up      - start or restart only the proxy container"; \
 	echo "  make proxy-recreate - force-rebuild the proxy container without touching deps"; \
 	echo "  make proxy-logs    - tail proxy logs"; \
