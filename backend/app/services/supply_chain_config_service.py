@@ -81,41 +81,91 @@ class SupplyChainConfigService:
                 standard_cost = 2.0
             
             node_policies[node.name.lower()] = {
-                "info_delay": 2,  # Default value
-                "ship_delay": 1,   # Default value
+                "info_delay": 1,  # Order lead time (weeks)
+                "ship_delay": 1,   # Shipping lead time (weeks)
                 "init_inventory": init_inventory,
                 "price": price,
                 "standard_cost": standard_cost,
-                "variable_cost": 0.1,  # Default value
-                "min_order_qty": 1      # Default value
+                "variable_cost": 0.1,
+                "min_order_qty": 1,
             }
         
         # Create demand pattern from market demands
         # For now, use a simple constant demand based on the first market demand found
         demand_pattern = {
-            "type": "constant",
-            "params": {"value": 4}  # Default value
+            "type": "classic",
+            "params": {
+                "initial_demand": 4,
+                "change_week": 15,
+                "final_demand": 12,
+            },
         }
-        
+
         if market_demands:
-            # Use the first market demand's configuration
             md = market_demands[0]
+            params = md.demand_pattern.get('params', {}) if isinstance(md.demand_pattern, dict) else {}
             demand_pattern = {
-                "type": md.demand_pattern.get('type', 'constant'),
-                "params": md.demand_pattern.get('params', {'value': 4})
+                "type": md.demand_pattern.get('type', 'classic') if isinstance(md.demand_pattern, dict) else 'classic',
+                "params": {
+                    "initial_demand": params.get('initial_demand', 4),
+                    "change_week": params.get('change_week', 15),
+                    "final_demand": params.get('final_demand', params.get('new_demand', 12)),
+                },
             }
-        
+
         # Create the game configuration
         game_config = {
             "name": game_data.get('name', f"Game - {config.name}"),
             "description": game_data.get('description', config.description or ""),
-            "max_rounds": game_data.get('max_rounds', 52),
+            "max_rounds": game_data.get('max_rounds', 40),
             "is_public": game_data.get('is_public', True),
             "node_policies": node_policies,
             "demand_pattern": demand_pattern,
-            "supply_chain_config_id": config_id  # Store reference to the config
+            "supply_chain_config_id": config_id,
+            "simulation_parameters": {
+                "weeks": 40,
+                "order_lead_time": 1,
+                "shipping_lead_time": 1,
+                "production_lead_time": 2,
+                "initial_inventory": init_inventory,
+                "holding_cost_per_unit": 0.5,
+                "backorder_cost_per_unit": 5.0,
+                "initial_demand": demand_pattern['params'].get('initial_demand', 4),
+                "demand_change_week": demand_pattern['params'].get('change_week', 15),
+                "new_demand": demand_pattern['params'].get('final_demand', 12),
+                "historical_weeks": 30,
+                "volatility_window": 14,
+                "enable_information_sharing": True,
+                "enable_demand_volatility_signals": True,
+                "enable_pipeline_signals": True,
+                "enable_downstream_visibility": True,
+            },
+            "info_sharing": {
+                "enabled": True,
+                "historical_weeks": 30,
+            },
+            "demand_volatility": {
+                "enabled": True,
+                "window": 14,
+            },
+            "pipeline_signals": {
+                "enabled": True,
+            },
+            "downstream_visibility": {
+                "enabled": True,
+            },
+            "global_policy": {
+                "production_lead_time": 2,
+            },
+            "progression_mode": game_data.get('progression_mode', 'unsupervised' if game_data.get('name', '').lower().startswith('daybreak') else 'supervised'),
+            "enable_information_sharing": True,
+            "enable_demand_volatility_signals": True,
+            "enable_pipeline_signals": True,
+            "enable_downstream_visibility": True,
+            "historical_weeks_to_share": 30,
+            "volatility_analysis_window": 14,
         }
-        
+
         return game_config
     
     def create_config_from_game(self, game_id: int, config_name: str) -> SupplyChainConfig:

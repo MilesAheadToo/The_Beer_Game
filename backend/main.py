@@ -1,6 +1,7 @@
 # /backend/app/main.py
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 import json
 import os
 from typing import Optional, Dict, Any, List
@@ -21,6 +22,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.services.group_service import GroupService
@@ -31,7 +33,8 @@ from app.schemas.player import PlayerType
 from app.db.session import sync_engine
 from app.models.game import Game as DbGame, GameStatus as DbGameStatus, Round, PlayerAction
 from app.models.player import Player, PlayerRole, PlayerStrategy
-from app.models.user import UserTypeEnum
+from app.models.supply_chain_config import SupplyChainConfig
+from app.models.user import User, UserTypeEnum
 
 # ------------------------------------------------------------------------------
 # Config
@@ -54,6 +57,10 @@ REFRESH_COOKIE_NAME = os.getenv("REFRESH_COOKIE_NAME", "refresh_token")
 # In dev on http, cookies cannot be "secure=True". Use samesite="lax".
 COOKIE_COMMON_KWARGS = dict(httponly=True, samesite="lax", secure=False, path="/")
 
+# Filesystem roots used for derived training metadata
+BACKEND_ROOT = Path(__file__).resolve().parent
+CHECKPOINT_ROOT = BACKEND_ROOT / "checkpoints" / "supply_chain_configs"
+
 # ------------------------------------------------------------------------------
 # Minimal in-memory user store (replace with your DB/user service)
 # ------------------------------------------------------------------------------
@@ -75,13 +82,13 @@ _FAKE_USERS = {
 
 # Allow default group admin to sign in using the same lightweight auth shim.
 _FAKE_USERS["groupadmin@daybreak.ai"] = {
-    "id": 9,
+    "id": 7,
     "email": "groupadmin@daybreak.ai",
     "name": "Group Administrator",
     "role": "groupadmin",
     "passwords": {"Daybreak@2025", "DayBreak@2025"},
     "aliases": {"groupadmin", "defaultadmin"},
-    "group_id": 4,
+    "group_id": 2,
     "is_superuser": False,
 }
 
@@ -318,6 +325,78 @@ async def refresh(
 async def refresh_alias(response: Response, refresh_cookie: Optional[str] = Cookie(default=None, alias=REFRESH_COOKIE_NAME)):
     return await refresh(response=response, refresh_cookie=refresh_cookie)
 
+# ------------------------------------------------------------------------------
+# Lightweight user & supply chain helpers for the dev backend
+# ------------------------------------------------------------------------------
+
+@api.get("/users")
+async def list_users(
+    limit: int = 250,
+    offset: int = 0,
+    user_type: Optional[str] = None,
+    group_id: Optional[int] = None,
+    search: Optional[str] = None,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    db = SyncSessionLocal()
+    try:
+        query = db.query(User).order_by(User.created_at.desc())
+
+        if not _is_system_admin_user(current_user):
+            group_filter = _extract_group_id(current_user)
+            if not group_filter:
+                return []
+            query = query.filter(User.group_id == group_filter)
+        elif group_id is not None:
+            query = query.filter(User.group_id == group_id)
+
+        if user_type:
+            normalized = user_type.strip().upper()
+            try:
+                enum_value = UserTypeEnum[normalized]
+                query = query.filter(User.user_type == enum_value.value)
+            except KeyError:
+                query = query.filter(User.user_type == user_type)
+
+        if search:
+            token = f"%{search.strip()}%"
+            query = query.filter(
+                or_(
+                    User.email.ilike(token),
+                    User.username.ilike(token),
+                    User.full_name.ilike(token),
+                )
+            )
+
+        if offset:
+            query = query.offset(offset)
+        if limit:
+            query = query.limit(limit)
+
+        rows = query.all()
+        return [_serialize_user_record(row) for row in rows]
+    finally:
+        db.close()
+
+
+@api.get("/supply-chain-config/")
+async def list_supply_chain_configs(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    db = SyncSessionLocal()
+    try:
+        query = db.query(SupplyChainConfig).order_by(SupplyChainConfig.created_at.desc())
+        if not _is_system_admin_user(current_user):
+            group_filter = _extract_group_id(current_user)
+            if not group_filter:
+                return []
+            query = query.filter(SupplyChainConfig.group_id == group_filter)
+
+        configs = query.all()
+        return [_serialize_supply_chain_config(cfg) for cfg in configs]
+    finally:
+        db.close()
+
 # CSRF token endpoint to satisfy frontend interceptor
 @api.get("/auth/csrf-token", tags=["auth"])
 async def csrf_token(response: Response):
@@ -406,6 +485,71 @@ def require_system_admin(user: Dict[str, Any]):
 
 def _default_group_payload() -> GroupCreate:
     return build_default_group_payload()
+
+
+def _serialize_user_record(user: User) -> Dict[str, Any]:
+    if hasattr(user.user_type, "value"):
+        user_type = user.user_type.value
+    else:
+        user_type = str(user.user_type) if user.user_type is not None else None
+
+    return {
+        "id": user.id,
+        "email": user.email,
+        "username": user.username,
+        "full_name": getattr(user, "full_name", None),
+        "group_id": user.group_id,
+        "user_type": user_type,
+        "is_active": bool(getattr(user, "is_active", True)),
+        "is_superuser": bool(getattr(user, "is_superuser", False)),
+        "created_at": _iso(getattr(user, "created_at", None)),
+        "updated_at": _iso(getattr(user, "updated_at", None)),
+        "last_login": _iso(getattr(user, "last_login", None)),
+    }
+
+
+def _supply_chain_checkpoint_path(config_id: int) -> Path:
+    return CHECKPOINT_ROOT / f"config_{config_id}" / "temporal_gnn.pt"
+
+
+def _serialize_supply_chain_config(cfg: SupplyChainConfig) -> Dict[str, Any]:
+    model_path = cfg.trained_model_path or None
+    derived_path: Optional[str] = None
+    if model_path and Path(model_path).exists():
+        derived_path = model_path
+    else:
+        candidate = _supply_chain_checkpoint_path(cfg.id)
+        if candidate.exists():
+            derived_path = str(candidate)
+
+    training_status = (cfg.training_status or "").strip()
+    normalized_status = training_status.lower()
+    needs_training = bool(cfg.needs_training)
+    trained_at_iso = _iso(getattr(cfg, "trained_at", None))
+
+    if derived_path and normalized_status in {"", "pending", "in_progress", "needs_training"}:
+        training_status = "trained"
+    if derived_path and needs_training:
+        needs_training = False
+    if derived_path and not trained_at_iso:
+        try:
+            trained_at_iso = datetime.utcfromtimestamp(Path(derived_path).stat().st_mtime).isoformat() + "Z"
+        except OSError:
+            trained_at_iso = None
+
+    return {
+        "id": cfg.id,
+        "name": cfg.name,
+        "description": cfg.description,
+        "is_active": bool(cfg.is_active),
+        "group_id": cfg.group_id,
+        "created_at": _iso(getattr(cfg, "created_at", None)),
+        "updated_at": _iso(getattr(cfg, "updated_at", None)),
+        "needs_training": needs_training,
+        "training_status": training_status or ("trained" if derived_path else "pending"),
+        "trained_at": trained_at_iso,
+        "trained_model_path": derived_path,
+    }
 
 
 class SystemConfigRow(Base):

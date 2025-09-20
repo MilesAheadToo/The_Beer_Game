@@ -192,11 +192,11 @@ build-create-users:
 
 db-bootstrap:
 	@echo "\n[+] Bootstrapping Daybreak defaults (config, users, training, showcase games)..."; \
-	$(DOCKER_COMPOSE_CMD) exec backend python scripts/seed_default_group.py
+	$(DOCKER_COMPOSE_CMD) exec backend python3 scripts/seed_default_group.py
 
 db-reset:
 	@echo "\n[+] Resetting games and rebuilding Daybreak training artifacts..."; \
-	$(DOCKER_COMPOSE_CMD) exec backend python scripts/seed_default_group.py --reset-games
+	$(DOCKER_COMPOSE_CMD) exec backend python3 scripts/seed_default_group.py --reset-games
 
 seed-default-group:
 	@$(MAKE) --no-print-directory db-bootstrap

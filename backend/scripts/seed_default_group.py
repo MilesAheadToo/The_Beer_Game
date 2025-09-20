@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime
 import json
 import subprocess
 import sys
@@ -81,6 +82,14 @@ DAYBREAK_AGENT_SPECS = [
         "description": "Single Daybreak global controller orchestrating the full supply chain.",
         "override_pct": None,
     },
+    {
+        "name": "Daybreak LLM Cooperative Showcase",
+        "agent_type": "llm_adaptive",
+        "description": "LLM-driven agents with full information sharing across the supply chain.",
+        "override_pct": None,
+        "llm_model": "gpt-5-mini",
+        "can_see_demand_all": True,
+    },
 ]
 
 ROLE_SPECS = [
@@ -89,6 +98,13 @@ ROLE_SPECS = [
     ("Distributor", PlayerRole.DISTRIBUTOR),
     ("Manufacturer", PlayerRole.MANUFACTURER),
 ]
+
+ROLE_EMAIL_TEMPLATES = {
+    PlayerRole.RETAILER: "retailer+g{group_id}@daybreak.ai",
+    PlayerRole.WHOLESALER: "wholesaler+g{group_id}@daybreak.ai",
+    PlayerRole.DISTRIBUTOR: "distributor+g{group_id}@daybreak.ai",
+    PlayerRole.MANUFACTURER: "factory+g{group_id}@daybreak.ai",
+}
 
 
 @dataclass
@@ -245,6 +261,7 @@ def ensure_supply_chain_config(session: Session, group: Group) -> SupplyChainCon
         print(
             f"[info] Supply chain configuration already exists (id={config.id})."
         )
+        _apply_default_supply_chain_settings(session, config)
         return config
 
     print("[info] Creating default supply chain configuration...")
@@ -324,8 +341,53 @@ def ensure_supply_chain_config(session: Session, group: Group) -> SupplyChainCon
     print(
         f"[success] Created supply chain configuration (id={config.id}) for group {group.id}."
     )
+    _apply_default_supply_chain_settings(session, config)
     return config
 
+
+def _apply_default_supply_chain_settings(session: Session, config: SupplyChainConfig) -> None:
+    """Normalize supply chain configuration settings to project defaults."""
+
+    config.is_active = True
+    config.description = config.description or "Default supply chain configuration"
+    session.add(config)
+
+    nodes = session.query(Node).filter(Node.config_id == config.id).all()
+
+    default_inventory_range = {"min": 10, "max": 20}
+    initial_inventory_range = {"min": 5, "max": 5}
+    holding_cost_range = {"min": 0.5, "max": 0.5}
+    backlog_cost_range = {"min": 5.0, "max": 5.0}
+    selling_price_range = {"min": 25.0, "max": 25.0}
+
+    for node in nodes:
+        for node_config in node.item_configs:
+            node_config.inventory_target_range = dict(default_inventory_range)
+            node_config.initial_inventory_range = dict(initial_inventory_range)
+            node_config.holding_cost_range = dict(holding_cost_range)
+            node_config.backlog_cost_range = dict(backlog_cost_range)
+            node_config.selling_price_range = dict(selling_price_range)
+            session.add(node_config)
+
+    lanes = session.query(Lane).filter(Lane.config_id == config.id).all()
+    for lane in lanes:
+        lane.capacity = lane.capacity or 9999
+        lane.lead_time_days = {"min": 1, "max": 1}
+        session.add(lane)
+
+    market_demands = session.query(MarketDemand).filter(MarketDemand.config_id == config.id).all()
+    for md in market_demands:
+        md.demand_pattern = {
+            "type": "classic",
+            "params": {
+                "initial_demand": 4,
+                "change_week": 15,
+                "final_demand": 12,
+            },
+        }
+        session.add(md)
+
+    session.flush()
 
 def ensure_default_game(session: Session, group: Group) -> Game:
     """Ensure the default game exists for the supplied group."""
@@ -338,6 +400,15 @@ def ensure_default_game(session: Session, group: Group) -> Game:
         print(
             f"[info] Game '{DEFAULT_GAME_NAME}' already exists (id={game.id})."
         )
+        existing_config = game.config or {}
+        if isinstance(existing_config, str):
+            try:
+                existing_config = json.loads(existing_config)
+            except json.JSONDecodeError:
+                existing_config = {}
+        existing_config["progression_mode"] = "supervised"
+        game.config = json.loads(json.dumps(existing_config))
+        session.add(game)
         return game
 
     print("[info] Creating default game from supply chain configuration...")
@@ -345,8 +416,9 @@ def ensure_default_game(session: Session, group: Group) -> Game:
 
     config_service = SupplyChainConfigService(session)
     game_config = config_service.create_game_from_config(
-        sc_config.id, {"name": DEFAULT_GAME_NAME, "max_rounds": 50}
+        sc_config.id, {"name": DEFAULT_GAME_NAME, "max_rounds": 40}
     )
+    game_config["progression_mode"] = "supervised"
 
     game = Game(
         name=game_config.get("name", DEFAULT_GAME_NAME),
@@ -361,6 +433,91 @@ def ensure_default_game(session: Session, group: Group) -> Game:
     session.flush()
     print(f"[success] Created game '{game.name}' (id={game.id}).")
     return game
+
+
+def configure_human_players_for_game(
+    session: Session,
+    group: Group,
+    game: Game,
+) -> None:
+    """Ensure the default game uses human players mapped to role-specific accounts."""
+
+    players_by_role: Dict[PlayerRole, Player] = {
+        player.role: player
+        for player in session.query(Player).filter(Player.game_id == game.id).all()
+    }
+
+    role_assignments: Dict[str, Dict[str, int | bool | None]] = {}
+
+    for display_name, role in ROLE_SPECS:
+        email_template = ROLE_EMAIL_TEMPLATES.get(role)
+        if not email_template:
+            continue
+
+        email = email_template.format(group_id=group.id)
+        user = session.query(User).filter(User.email == email).first()
+        if not user:
+            print(f"[warn] Skipping role '{role.value}' — user {email} not found.")
+            continue
+
+        player = players_by_role.get(role)
+        if player is None:
+            player = Player(
+                game_id=game.id,
+                role=role,
+                name=display_name,
+                type=PlayerType.HUMAN,
+                strategy=PlayerStrategy.MANUAL,
+                is_ai=False,
+                ai_strategy=None,
+                can_see_demand=(role == PlayerRole.RETAILER),
+                user_id=user.id,
+            )
+            session.add(player)
+            session.flush()
+            players_by_role[role] = player
+        else:
+            player.name = display_name
+            player.type = PlayerType.HUMAN
+            player.strategy = PlayerStrategy.MANUAL
+            player.is_ai = False
+            player.ai_strategy = None
+            player.can_see_demand = role == PlayerRole.RETAILER
+            player.user_id = user.id
+            player.llm_model = None
+        session.add(player)
+
+        role_assignments[role.value] = {
+            "is_ai": False,
+            "agent_config_id": None,
+            "user_id": user.id,
+        }
+
+    if "wholesaler" in role_assignments and "supplier" not in role_assignments:
+        role_assignments["supplier"] = dict(role_assignments["wholesaler"])
+
+    # Remove any lingering agent configs from previous runs
+    session.query(AgentConfig).filter(AgentConfig.game_id == game.id).delete(
+        synchronize_session=False
+    )
+
+    try:
+        config_payload = game.config or {}
+        if isinstance(config_payload, str):
+            config_payload = json.loads(config_payload)
+    except json.JSONDecodeError:
+        config_payload = {}
+
+    config_payload["progression_mode"] = "supervised"
+    game.config = json.loads(json.dumps(config_payload))
+    game.role_assignments = role_assignments
+    session.add(game)
+    session.flush()
+
+    print(
+        "[success] Configured human players for default game roles: "
+        + ", ".join(sorted(role_assignments.keys()))
+    )
 
 
 def _ensure_default_players(session: Session, game: Game) -> None:
@@ -635,6 +792,8 @@ def _configure_game_agents(
     agent_type: str,
     *,
     override_pct: Optional[float] = None,
+    llm_model: Optional[str] = None,
+    can_see_demand_all: bool = False,
 ) -> None:
     """Ensure players and agent configs exist for a game using the specified agent type."""
 
@@ -659,7 +818,9 @@ def _configure_game_agents(
         player.ai_strategy = agent_type
         player.strategy = PlayerStrategy.MANUAL
         player.user_id = None
-        player.can_see_demand = role == PlayerRole.RETAILER
+        player.can_see_demand = True if can_see_demand_all else (role == PlayerRole.RETAILER)
+        if llm_model:
+            player.llm_model = llm_model
         session.add(player)
         session.flush()
 
@@ -673,11 +834,13 @@ def _configure_game_agents(
                 game_id=game.id,
                 role=role.value,
                 agent_type=agent_type,
-                config={},
+                config={"llm_model": llm_model} if llm_model else {},
             )
         else:
             agent_config.agent_type = agent_type
             agent_config.config = agent_config.config or {}
+            if llm_model:
+                agent_config.config["llm_model"] = llm_model
 
         session.add(agent_config)
         session.flush()
@@ -693,7 +856,7 @@ def _configure_game_agents(
         overrides = {role.value: override_pct for _, role in ROLE_SPECS}
         game_config = game.config or {}
         game_config.setdefault("daybreak_overrides", {}).update(overrides)
-        game.config = game_config
+        game.config = json.loads(json.dumps(game_config))
 
     game.role_assignments = assignments
     session.add(game)
@@ -732,11 +895,12 @@ def ensure_daybreak_games(
                 config.id,
                 {
                     "name": spec["name"],
-                    "max_rounds": 50,
+                    "max_rounds": 40,
                     "is_public": True,
                     "description": spec["description"],
                 },
             )
+            base_config["progression_mode"] = "unsupervised"
             base_config.setdefault("daybreak", {})
             base_config["daybreak"].update(
                 {
@@ -745,6 +909,9 @@ def ensure_daybreak_games(
                     "model_path": model_info.get("model_path"),
                 }
             )
+            if spec.get("llm_model"):
+                base_config["daybreak"]["llm_model"] = spec["llm_model"]
+                base_config.setdefault("info_sharing", {}).update({"visibility": "full"})
             if spec["override_pct"] is not None:
                 overrides = {role.value: spec["override_pct"] for _, role in ROLE_SPECS}
                 base_config.setdefault("daybreak_overrides", {}).update(overrides)
@@ -754,7 +921,7 @@ def ensure_daybreak_games(
                 created_by=config.created_by or group.admin_id,
                 group_id=group.id,
                 status=GameStatus.CREATED,
-                max_rounds=base_config.get("max_rounds", 50),
+                max_rounds=base_config.get("max_rounds", 40),
                 config=base_config,
                 demand_pattern=base_config.get("demand_pattern", {}),
                 description=spec["description"],
@@ -766,6 +933,11 @@ def ensure_daybreak_games(
                 f"[info] Updating showcase game '{spec['name']}' (id={game.id}) with latest training artifacts."
             )
             game_config = game.config or {}
+            if isinstance(game_config, str):
+                try:
+                    game_config = json.loads(game_config)
+                except json.JSONDecodeError:
+                    game_config = {}
             game_config.setdefault("daybreak", {})
             game_config["daybreak"].update(
                 {
@@ -774,17 +946,24 @@ def ensure_daybreak_games(
                     "model_path": model_info.get("model_path"),
                 }
             )
+            if spec.get("llm_model"):
+                game_config["daybreak"]["llm_model"] = spec["llm_model"]
+                game_config.setdefault("info_sharing", {}).update({"visibility": "full"})
             if spec["override_pct"] is not None:
                 overrides = {role.value: spec["override_pct"] for _, role in ROLE_SPECS}
                 game_config.setdefault("daybreak_overrides", {}).update(overrides)
-            game.config = game_config
+            game_config["progression_mode"] = "unsupervised"
+            game_config["max_rounds"] = 40
+            game.config = json.loads(json.dumps(game_config))
             session.add(game)
 
         _configure_game_agents(
             session,
             game,
             spec["agent_type"],
-            override_pct=spec["override_pct"],
+            override_pct=spec.get("override_pct"),
+            llm_model=spec.get("llm_model"),
+            can_see_demand_all=spec.get("can_see_demand_all", False),
         )
 
 
@@ -798,7 +977,11 @@ def seed_default_data(session: Session, options: SeedOptions) -> None:
     group, _ = ensure_group(session)
     ensure_role_users(session, group)
     game = ensure_default_game(session, group)
-    ensure_naive_agents(session, game)
+    configure_human_players_for_game(session, group, game)
+
+    # Persist the base bootstrap objects so downstream helper scripts see them
+    session.flush()
+    session.commit()
 
     config = (
         session.query(SupplyChainConfig)
@@ -818,6 +1001,14 @@ def seed_default_data(session: Session, options: SeedOptions) -> None:
             force_dataset=options.force_dataset,
             force_training=options.force_training,
         )
+
+        model_artifact = artifacts.get("model") or {}
+        if config:
+            config.needs_training = False
+            config.training_status = model_artifact.get("status", "trained")
+            config.trained_model_path = model_artifact.get("model_path")
+            config.trained_at = datetime.utcnow()
+            session.add(config)
 
         if options.create_daybreak_games:
             ensure_daybreak_games(
@@ -871,8 +1062,6 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
-    from app.db.session import SQLALCHEMY_DATABASE_URI
-
     args = parse_args()
     options = SeedOptions(
         reset_games=args.reset_games,
@@ -881,8 +1070,7 @@ def main() -> None:
         create_daybreak_games=not args.skip_daybreak_games,
     )
     print(f"[DEBUG] Database URL from settings: {settings.SQLALCHEMY_DATABASE_URI}")
-    print(f"[DEBUG] Database URL from session: {SQLALCHEMY_DATABASE_URI}")
-    
+
     configured_uri = settings.SQLALCHEMY_DATABASE_URI
     configured_label = mask_db_uri(configured_uri)
     print(f"[info] Attempting to seed default data using: {configured_label or 'default settings'}")
