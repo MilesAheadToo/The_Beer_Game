@@ -1120,6 +1120,14 @@ def _ensure_simulation_state(config: Dict[str, Any]) -> Dict[str, Any]:
                 incoming.extend([0] * (shipping_lead_time - len(incoming)))
             else:
                 state["incoming"][role] = incoming[-shipping_lead_time:]
+    if "initial_state" not in config:
+        config["initial_state"] = {
+            role: {
+                "inventory": int(state["inventory"].get(role, initial_inventory)),
+                "backlog": int(state["backlog"].get(role, 0)),
+            }
+            for role in ROLES_IN_ORDER
+        }
     return state
 
 
@@ -1150,6 +1158,7 @@ def _record_round_history(
     }
 
     round_costs: Dict[str, Dict[str, float]] = {}
+    node_states: Dict[str, Dict[str, Any]] = {}
 
     for role in ROLES_IN_ORDER:
         queue = incoming.setdefault(role, [0])
@@ -1158,7 +1167,8 @@ def _record_round_history(
         starting_backlog = backlog.get(role, 0)
         net_start = starting_inventory - starting_backlog
 
-        total_demand = max(0, int(role_demand_map.get(role, 0))) + starting_backlog
+        base_demand = max(0, int(role_demand_map.get(role, 0)))
+        total_demand = base_demand + starting_backlog
         available = max(0, starting_inventory) + arriving
 
         shipped = min(available, total_demand)
@@ -1182,6 +1192,14 @@ def _record_round_history(
             "backlog_cost": round(backlog_cost, 2),
             "total_cost": round(holding_cost + backlog_cost, 2),
         }
+        node_states[role] = {
+            "starting_inventory": net_start,
+            "demand": base_demand,
+            "supply": arriving,
+            "ending_inventory": new_inventory - new_backlog,
+            "backlog_cost": round(backlog_cost, 2),
+            "holding_cost": round(holding_cost, 2),
+        }
 
     # Persist updated state
     state["inventory"] = inventory
@@ -1198,6 +1216,7 @@ def _record_round_history(
             "backlogs": backlog.copy(),
             "costs": round_costs,
             "total_cost": round(sum(c["total_cost"] for c in round_costs.values()), 2),
+            "node_states": node_states,
         }
     )
 
@@ -1245,15 +1264,17 @@ def _finalize_round_if_ready(
     # Update round metadata
     round_record.status = "completed"
     round_record.completed_at = timestamp
+    _record_round_history(game, config, round_number, demand, orders_by_role, timestamp)
+    config["pending_orders"] = {}
+
+    latest_entry = (config.get("history") or [])[-1] if config.get("history") else {}
     round_record.config = json.dumps(
         {
             "orders": orders_by_role,
             "demand": demand,
+            "node_states": latest_entry.get("node_states", {}),
         }
     )
-
-    _record_round_history(game, config, round_number, demand, orders_by_role, timestamp)
-    config["pending_orders"] = {}
 
     if game.max_rounds and round_number >= game.max_rounds:
         game.status = DbGameStatus.FINISHED

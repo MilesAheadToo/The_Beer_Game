@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import Dict, Any
 
@@ -16,6 +17,10 @@ from main import (
     _save_game_config,
     _compute_customer_demand,
 )
+try:
+    from scripts.export_round_history import export_game as export_round_history
+except ImportError:  # pragma: no cover - fallback when executed from package root
+    from export_round_history import export_game as export_round_history
 from app.models.game import Game, GameStatus as DbGameStatus, PlayerAction
 from app.models.player import Player
 from app.services.agents import AgentManager, AgentType, AgentStrategy as AgentStrategyEnum
@@ -184,6 +189,8 @@ def auto_play_daybreak_games() -> None:
                     print(f"  Warning: round {round_record.round_number} did not finalize; forcing advance")
                     game.current_round = (game.current_round or 0) + 1
                     session.commit()
+
+            export_round_history(game.id, os.environ.get("ROUND_EXPORT_DIR", "/app/exports"))
 
         session.commit()
     finally:
