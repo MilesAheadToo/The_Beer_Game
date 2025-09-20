@@ -74,13 +74,15 @@ def export_game(game_id: int, output_dir: str) -> str:
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, f"game_{game_id}_rounds.csv")
 
-    prev_state = {
-        role: {
-            "inventory": _net_inventory(initial_state.get(role, {})),
-            "backlog": int(initial_state.get(role, {}).get("backlog", 0)),
-        }
+    prev_inventory = {role: _net_inventory(initial_state.get(role, {})) for role in ROLES}
+    pipelines = {
+        role: [0] * max(1, int(config.get("simulation_parameters", {}).get("shipping_lead_time", 1)))
         for role in ROLES
     }
+
+    params = config.get("simulation_parameters", {})
+    holding_rate = float(params.get("holding_cost_per_unit", params.get("holding_cost", 0.5)))
+    backlog_rate = float(params.get("backorder_cost_per_unit", params.get("backorder_cost", 5.0)))
 
     with open(output_path, "w", newline="") as fh:
         writer = csv.writer(fh)
@@ -100,24 +102,29 @@ def export_game(game_id: int, output_dir: str) -> str:
                 0,
                 0,
             ])
-            prev_state[role]["inventory"] = starting_inventory
+            prev_inventory[role] = starting_inventory
 
         for entry in history:
-            node_states = entry.get("node_states", {})
+            orders = entry.get("orders", {})
+            demand_map = {
+                "retailer": int(entry.get("demand", 0)),
+                "wholesaler": int(orders.get("retailer", {}).get("quantity", 0)),
+                "distributor": int(orders.get("wholesaler", {}).get("quantity", 0)),
+                "manufacturer": int(orders.get("distributor", {}).get("quantity", 0)),
+            }
+
+            round_number = entry.get("round")
             for role in ROLES:
-                state = node_states.get(role, {})
-                starting_inventory = int(state.get("starting_inventory", prev_state[role]["inventory"]))
-                demand_value = int(state.get("demand", 0))
-                supply_value = int(state.get("supply", 0))
-                ending_inventory = int(
-                    state.get("ending_inventory", starting_inventory + supply_value - demand_value)
-                )
-                backlog_cost = float(state.get("backlog_cost", 0.0))
-                holding_cost = float(state.get("holding_cost", 0.0))
+                starting_inventory = prev_inventory[role]
+                supply_value = pipelines[role].pop(0) if pipelines[role] else 0
+                demand_value = demand_map.get(role, 0)
+                ending_inventory = starting_inventory + supply_value - demand_value
+                holding_cost = max(starting_inventory, 0) * holding_rate
+                backlog_cost = max(-starting_inventory, 0) * backlog_rate
 
                 writer.writerow(
                     [
-                        entry.get("round"),
+                        round_number,
                         role,
                         starting_inventory,
                         demand_value,
@@ -128,8 +135,9 @@ def export_game(game_id: int, output_dir: str) -> str:
                     ]
                 )
 
-                prev_state[role]["inventory"] = ending_inventory
-                prev_state[role]["backlog"] = 0
+                order_qty = int(orders.get(role, {}).get("quantity", 0))
+                pipelines[role].append(order_qty)
+                prev_inventory[role] = ending_inventory
 
     return output_path
 
