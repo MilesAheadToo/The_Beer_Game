@@ -10,6 +10,7 @@ from app.models.supply_chain import (
 from app.db.session import SessionLocal, get_db
 from app.schemas.game import GameCreate, PlayerCreate, GameState, PlayerState, DemandPattern
 from app.services.agents import AgentManager, AgentType, AgentStrategy
+from app.services.llm_payload import build_llm_decision_payload
 from app.core.demand_patterns import (
     normalize_demand_pattern,
     DEFAULT_DEMAND_PATTERN,
@@ -184,13 +185,26 @@ class AgentGameService:
                 if role_key:
                     previous_orders_by_role[role_key] = int(quantity)
 
+        llm_payload = None
+        if agent.strategy == AgentStrategy.LLM:
+            llm_payload = build_llm_decision_payload(
+                self.db,
+                game,
+                round_number=game.current_round,
+                action_role=player.role.value if hasattr(player.role, "value") else str(player.role).lower(),
+            )
+
+        upstream_context = {
+            'previous_orders': previous_orders,
+            'previous_orders_by_role': previous_orders_by_role,
+        }
+        if llm_payload is not None:
+            upstream_context['llm_payload'] = llm_payload
+
         order_quantity = agent.make_decision(
             current_round=game.current_round,
             current_demand=current_demand if player.role == PlayerRole.RETAILER else None,
-            upstream_data={
-                'previous_orders': previous_orders,
-                'previous_orders_by_role': previous_orders_by_role,
-            },
+            upstream_data=upstream_context,
             local_state=local_state,
         )
         

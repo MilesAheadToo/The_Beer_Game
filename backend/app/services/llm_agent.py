@@ -62,20 +62,18 @@ class LLMAgent:
         self.system_prompt = f"""
         {role_context.get(self.role.lower(), "")}
         {strategy_context.get(self.strategy, "")}
-        
-        Game Rules:
-        1. Each round, you'll receive information about current inventory, backorders, and incoming shipments.
-        2. You need to decide how many units to order from your immediate upstream partner.
-        3. Your goal is to minimize total costs, which include:
-           - Holding costs: $0.5 per unit per round
-           - Backorder costs: $2 per unit per round
-        4. There is a 2-round delay between placing an order and receiving it.
-        5. You'll receive information about recent demand patterns.
-        
-        Respond with a JSON object containing:
+
+        You will be given a JSON payload describing the current Beer Game state. The payload includes:
+        - week: current round number.
+        - config: supply-chain parameters (lead times, holding/backorder costs, demand pattern, visibility toggles).
+        - roles: per-role snapshots (inventory, backlog, pipeline, incoming order, recent history).
+        - action_request: which role you are making a decision for.
+
+        Use the numbers in the JSON (especially config.costs, config.lead_times, and roles[role]) to decide how many
+        units to order from your upstream partner. Respond ONLY with a JSON object containing:
         {
-            "order_quantity": number,  // Number of units to order (must be >= 0)
-            "reasoning": string       // Your reasoning for this decision
+            "order_quantity": <non-negative integer>,
+            "reasoning": "<brief explanation of the key factors>"
         }
         """
         
@@ -85,7 +83,32 @@ class LLMAgent:
     def add_message(self, role: str, content: str):
         """Add a message to the conversation history."""
         self.conversation_history.append({"role": role, "content": content})
-    
+
+    def _query_llm(self, user_content: str) -> Optional[Dict[str, Any]]:
+        """Send a message to the LLM and parse the JSON response."""
+
+        # Keep only the system prompt to avoid runaway conversations
+        self.conversation_history = self.conversation_history[:1]
+        self.add_message("user", user_content)
+
+        response = openai.ChatCompletion.create(
+            model=self.model,
+            messages=self.conversation_history,
+            temperature=0.7 if self.strategy == LLMStrategy.ADAPTIVE else 0.3,
+            max_tokens=200,
+            response_format={"type": "json_object"}
+        )
+
+        response_content = response.choices[0].message.content
+        self.add_message("assistant", response_content)
+
+        try:
+            return json.loads(response_content)
+        except (json.JSONDecodeError, ValueError) as exc:
+            print(f"Error parsing LLM response: {exc}")
+            print(f"Response was: {response_content}")
+            return None
+
     def make_decision(
         self,
         current_round: int,
@@ -98,6 +121,21 @@ class LLMAgent:
         upstream_data: Optional[Dict[str, Any]] = None
     ) -> int:
         """Make a decision on how many units to order."""
+        payload = None
+        if isinstance(upstream_data, dict):
+            payload = upstream_data.get("llm_payload")
+            upstream_data = {k: v for k, v in upstream_data.items() if k != "llm_payload"}
+
+        if payload:
+            response_json = self._query_llm(json.dumps(payload, separators=(",", ":")))
+            if response_json:
+                order_quantity = max(0, int(response_json.get("order_quantity", 0)))
+                reasoning = response_json.get("reasoning", "No reasoning provided")
+                print(f"LLM Agent ({self.role}, {self.strategy.value}) order: {order_quantity}")
+                print(f"Reasoning: {reasoning}")
+                return order_quantity
+            return self._fallback_strategy(current_inventory, backorders, current_demand)
+
         # Prepare the prompt with current game state
         prompt = f"""Current Game State (Round {current_round}):
         - Current Inventory: {current_inventory} units
@@ -118,38 +156,16 @@ class LLMAgent:
         prompt += "\n\nHow many units would you like to order this round?"
         
         try:
-            # Add user message to conversation
-            self.add_message("user", prompt)
-            
-            # Call OpenAI API
-            response = openai.ChatCompletion.create(
-                model=self.model,
-                messages=self.conversation_history,
-                temperature=0.7 if self.strategy == LLMStrategy.ADAPTIVE else 0.3,
-                max_tokens=200,
-                response_format={"type": "json_object"}
-            )
-            
-            # Extract and parse the response
-            response_content = response.choices[0].message.content
-            self.add_message("assistant", response_content)
-            
-            # Parse the JSON response
-            try:
-                response_json = json.loads(response_content)
+            response_json = self._query_llm(prompt)
+            if response_json:
                 order_quantity = max(0, int(response_json.get("order_quantity", 0)))
                 reasoning = response_json.get("reasoning", "No reasoning provided")
-                
+
                 print(f"LLM Agent ({self.role}, {self.strategy.value}) order: {order_quantity}")
                 print(f"Reasoning: {reasoning}")
-                
+
                 return order_quantity
-                
-            except (json.JSONDecodeError, ValueError) as e:
-                print(f"Error parsing LLM response: {e}")
-                print(f"Response was: {response_content}")
-                return 0
-                
+            return 0
         except Exception as e:
             print(f"Error calling OpenAI API: {e}")
             # Fallback to a simple strategy if API call fails

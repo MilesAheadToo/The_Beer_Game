@@ -22,6 +22,7 @@ from app.schemas.game import (
 )
 from app.schemas.player import PlayerAssignment, PlayerType, PlayerStrategy
 from app.services.agents import AgentManager, AgentType, AgentStrategy as AgentStrategyEnum
+from app.services.llm_payload import build_llm_decision_payload
 from app.api.endpoints.config import _read_cfg as read_system_cfg
 from app.core.demand_patterns import (
     normalize_demand_pattern,
@@ -612,12 +613,25 @@ class MixedGameService:
             }
 
             # Make decision based on agent's strategy
+            llm_payload = None
+            if strategy_enum == AgentStrategyEnum.LLM:
+                llm_payload = build_llm_decision_payload(
+                    self.db,
+                    game,
+                    round_number=game_round.round_number,
+                    action_role=player.role.value if hasattr(player.role, "value") else str(player.role).lower(),
+                )
+
+            upstream_context = {
+                'previous_orders': [pr.order_placed for pr in previous_round.player_rounds] if previous_round else [],
+            }
+            if llm_payload is not None:
+                upstream_context['llm_payload'] = llm_payload
+
             order_quantity = agent.make_decision(
                 current_round=game_round.round_number,
                 current_demand=game_round.customer_demand if player.can_see_demand else None,
-                upstream_data={
-                    'previous_orders': [pr.order_placed for pr in previous_round.player_rounds] if previous_round else []
-                },
+                upstream_data=upstream_context,
                 local_state=local_state,
             )
 
