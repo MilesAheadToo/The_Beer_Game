@@ -33,7 +33,7 @@ def build_default_group_payload() -> GroupCreate:
             email=DEFAULT_ADMIN_EMAIL,
             password=DEFAULT_ADMIN_PASSWORD,
             full_name=DEFAULT_ADMIN_FULL_NAME,
-            user_type="GroupAdmin",
+            user_type="GROUP_ADMIN",
         ),
     )
 

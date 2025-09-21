@@ -146,6 +146,25 @@ gpu-up gpu-up-dev:
 cpu-up cpu-up-dev:
 	$(MAKE) $(subst cpu-,,$@) FORCE_GPU=0
 
+gpu-db-up:
+	@echo "\n[+] Starting database container (GPU stack)...";
+	$(DOCKER_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.gpu.yml up -d db
+
+gpu-migrate:
+	@echo "\n[+] Running Alembic migrations (GPU stack)...";
+	$(DOCKER_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend alembic upgrade head
+
+gpu-seed:
+	@echo "\n[+] Seeding database, generating training data, and training GNN (GPU stack)...";
+	$(DOCKER_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.gpu.yml run --rm backend \
+		python3 scripts/seed_default_group.py --reset-games --force-dataset --force-training
+
+gpu-bootstrap:
+	@$(MAKE) down
+	@$(MAKE) gpu-db-up
+	@$(MAKE) gpu-migrate
+	@$(MAKE) gpu-seed
+
 down:
 	@echo "\n[+] Stopping and removing containers and volumes..."; \
 	$(DOCKER_COMPOSE_CMD) down -v

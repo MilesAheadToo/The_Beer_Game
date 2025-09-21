@@ -26,12 +26,12 @@ def _normalize_token(value):
 def upgrade() -> None:
     bind = op.get_bind()
 
-    user_type_enum = sa.Enum('SystemAdmin', 'GroupAdmin', 'Player', name='user_type_enum')
+    user_type_enum = sa.Enum('SYSTEM_ADMIN', 'GROUP_ADMIN', 'PLAYER', name='user_type_enum')
     user_type_enum.create(bind, checkfirst=True)
 
     op.add_column(
         'users',
-        sa.Column('user_type', user_type_enum, nullable=False, server_default='Player'),
+        sa.Column('user_type', user_type_enum, nullable=False, server_default='PLAYER'),
     )
 
     users_table = sa.table(
@@ -46,7 +46,7 @@ def upgrade() -> None:
 
     for row in result:
         if row.is_superuser:
-            new_type = 'SystemAdmin'
+            new_type = 'SYSTEM_ADMIN'
         else:
             roles_value = row.roles or []
             if isinstance(roles_value, str):
@@ -57,14 +57,14 @@ def upgrade() -> None:
 
             tokens = {_normalize_token(role) for role in roles_value if role is not None}
             if {'systemadmin', 'superadmin'} & tokens:
-                new_type = 'SystemAdmin'
+                new_type = 'SYSTEM_ADMIN'
             elif {'groupadmin', 'admin'} & tokens:
-                new_type = 'GroupAdmin'
+                new_type = 'GROUP_ADMIN'
             else:
-                new_type = 'Player'
+                new_type = 'PLAYER'
 
         values = {'user_type': new_type}
-        if new_type == 'SystemAdmin' and not row.is_superuser:
+        if new_type == 'SYSTEM_ADMIN' and not row.is_superuser:
             values['is_superuser'] = True
 
         bind.execute(
@@ -91,10 +91,10 @@ def downgrade() -> None:
     result = bind.execute(sa.select(users_table.c.id, users_table.c.user_type))
 
     for row in result:
-        user_type = row.user_type or 'Player'
-        if user_type == 'SystemAdmin':
+        user_type = row.user_type or 'PLAYER'
+        if user_type == 'SYSTEM_ADMIN':
             roles = ['system_admin']
-        elif user_type == 'GroupAdmin':
+        elif user_type == 'GROUP_ADMIN':
             roles = ['group_admin', 'admin']
         else:
             roles = ['player']
@@ -107,5 +107,5 @@ def downgrade() -> None:
 
     op.drop_column('users', 'user_type')
 
-    user_type_enum = sa.Enum('SystemAdmin', 'GroupAdmin', 'Player', name='user_type_enum')
+    user_type_enum = sa.Enum('SYSTEM_ADMIN', 'GROUP_ADMIN', 'PLAYER', name='user_type_enum')
     user_type_enum.drop(bind, checkfirst=True)

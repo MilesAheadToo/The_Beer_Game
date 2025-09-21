@@ -9,16 +9,16 @@ import datetime
 from app.db.session import get_db
 
 class GameStatus(str, PyEnum):
-    CREATED = "created"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    PAUSED = "paused"
+    CREATED = "CREATED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    PAUSED = "PAUSED"
 
 class PlayerRole(str, PyEnum):
-    RETAILER = "retailer"
-    WHOLESALER = "wholesaler"
-    DISTRIBUTOR = "distributor"
-    MANUFACTURER = "manufacturer"
+    RETAILER = "RETAILER"
+    WHOLESALER = "WHOLESALER"
+    DISTRIBUTOR = "DISTRIBUTOR"
+    MANUFACTURER = "MANUFACTURER"
 
 class Game(Base):
     __tablename__ = "games"

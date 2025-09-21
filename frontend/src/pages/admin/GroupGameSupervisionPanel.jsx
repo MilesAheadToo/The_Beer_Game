@@ -247,7 +247,13 @@ const GroupGameSupervisionPanel = ({
 
     if (status === 'created' || status === 'paused') {
       return (
-        <Stack direction="row" spacing={1}>
+        <Stack
+          direction="row"
+          spacing={1}
+          useFlexGap
+          alignItems="center"
+          sx={{ flexWrap: 'wrap', justifyContent: { xs: 'flex-start', md: 'flex-end' } }}
+        >
           <Tooltip title="View game">
             <span>
               <IconButton color="primary" onClick={() => navigate(viewTarget)}>
@@ -271,15 +277,16 @@ const GroupGameSupervisionPanel = ({
 
     if (status === 'in_progress') {
       const autoChip = (
-        <Chip
-          label="Auto"
-          size="small"
-          color="info"
-          variant="outlined"
-        />
+        <Chip label="Auto" size="small" color="info" variant="outlined" />
       );
       return (
-        <Stack direction="row" spacing={1} alignItems="center">
+        <Stack
+          direction="row"
+          spacing={1}
+          useFlexGap
+          alignItems="center"
+          sx={{ flexWrap: 'wrap', justifyContent: { xs: 'flex-start', md: 'flex-end' } }}
+        >
           <Tooltip title="View game">
             <span>
               <IconButton color="primary" onClick={() => navigate(viewTarget)}>
@@ -374,7 +381,7 @@ const GroupGameSupervisionPanel = ({
             </Typography>
           </Box>
         ) : (
-          <TableContainer>
+          <TableContainer sx={{ overflowX: 'visible' }}>
             <Table size="small">
               <TableHead>
                 <TableRow>

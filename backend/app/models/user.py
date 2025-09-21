@@ -28,9 +28,9 @@ user_games = Table(
 
 class UserTypeEnum(str, Enum):
     """Application-level user type classification."""
-    SYSTEM_ADMIN = "SystemAdmin"
-    GROUP_ADMIN = "GroupAdmin"
-    PLAYER = "Player"
+    SYSTEM_ADMIN = "SYSTEM_ADMIN"
+    GROUP_ADMIN = "GROUP_ADMIN"
+    PLAYER = "PLAYER"
 
 
 class UserBase(BaseModel):

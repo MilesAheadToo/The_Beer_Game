@@ -12,29 +12,29 @@ if TYPE_CHECKING:
     from .user import User
 
 class PlayerRole(str, Enum):
-    RETAILER = "retailer"
-    WHOLESALER = "wholesaler"
-    DISTRIBUTOR = "distributor"
-    MANUFACTURER = "manufacturer"
+    RETAILER = "RETAILER"
+    WHOLESALER = "WHOLESALER"
+    DISTRIBUTOR = "DISTRIBUTOR"
+    MANUFACTURER = "MANUFACTURER"
 
 class PlayerType(str, Enum):
-    HUMAN = "human"
-    AI = "ai"
+    HUMAN = "HUMAN"
+    AI = "AI"
 
 class PlayerStrategy(str, Enum):
     # Basic strategies
-    MANUAL = "manual"
-    RANDOM = "random"
-    FIXED = "fixed"
-    
+    MANUAL = "MANUAL"
+    RANDOM = "RANDOM"
+    FIXED = "FIXED"
+
     # Advanced strategies
-    DEMAND_AVERAGE = "demand_average"
-    TREND_FOLLOWER = "trend_follower"
-    
+    DEMAND_AVERAGE = "DEMAND_AVERAGE"
+    TREND_FOLLOWER = "TREND_FOLLOWER"
+
     # LLM-based strategies
-    LLM_BASIC = "llm_basic"
-    LLM_ADVANCED = "llm_advanced"
-    LLM_REINFORCEMENT = "llm_reinforcement"
+    LLM_BASIC = "LLM_BASIC"
+    LLM_ADVANCED = "LLM_ADVANCED"
+    LLM_REINFORCEMENT = "LLM_REINFORCEMENT"
 
 class Player(Base):
     __tablename__ = "players"  # Explicitly set table name to match foreign key references

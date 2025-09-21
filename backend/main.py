@@ -2,9 +2,13 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
+import asyncio
 import json
+import logging
 import os
-from typing import Optional, Dict, Any, List
+import threading
+import time
+from typing import Optional, Dict, Any, List, Set
 
 from fastapi import (
     FastAPI,
@@ -36,6 +40,7 @@ from app.models.player import Player, PlayerRole, PlayerStrategy
 from app.models.supply_chain_config import SupplyChainConfig
 from app.models.user import User, UserTypeEnum
 from app.core.security import verify_password
+from app.services.agents import AgentManager, AgentType, AgentStrategy as AgentStrategyEnum
 
 # ------------------------------------------------------------------------------
 # Config
@@ -94,6 +99,9 @@ _FAKE_USERS["groupadmin@daybreak.ai"] = {
     "is_superuser": False,
     "user_type": "group_admin",
 }
+
+# Logger used across helpers/routes
+logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------------------
 # Models
@@ -987,6 +995,36 @@ PROGRESSION_UNSUPERVISED = "unsupervised"
 
 ROLES_IN_ORDER = ["retailer", "wholesaler", "distributor", "manufacturer"]
 
+_AUTO_ADVANCE_TASKS: Dict[int, asyncio.Task] = {}
+_AUTO_TASKS_LOCK = threading.Lock()
+
+
+def _role_key(player: Player) -> str:
+    return str(player.role.value if hasattr(player.role, "value") else player.role).lower()
+
+
+def _agent_type_for_role(role: str) -> AgentType:
+    mapping = {
+        "retailer": AgentType.RETAILER,
+        "wholesaler": AgentType.WHOLESALER,
+        "distributor": AgentType.DISTRIBUTOR,
+        "manufacturer": AgentType.MANUFACTURER,
+        "factory": AgentType.MANUFACTURER,
+    }
+    if role not in mapping:
+        raise ValueError(f"Unsupported role '{role}'")
+    return mapping[role]
+
+
+def _strategy_for_player(player: Player) -> AgentStrategyEnum:
+    raw = (player.ai_strategy or "daybreak_dtce").lower()
+    try:
+        return AgentStrategyEnum(raw)
+    except ValueError:
+        if raw.startswith("llm"):
+            return AgentStrategyEnum.LLM
+        return AgentStrategyEnum.DAYBREAK_DTCE
+
 
 def _coerce_game_config(game: DbGame) -> Dict[str, Any]:
     raw = game.config or {}
@@ -1298,6 +1336,231 @@ def _finalize_round_if_ready(
     return True
 
 
+def _auto_advance_unsupervised_game_sync(
+    game_id: int,
+    *,
+    sleep_seconds: float = 0.35,
+    iteration_limit: int = 2048,
+) -> None:
+    session = SyncSessionLocal()
+    try:
+        game = session.query(DbGame).filter(DbGame.id == game_id).first()
+        if not game:
+            logger.warning("Auto-advance aborted: game %s not found", game_id)
+            return
+
+        if _get_progression_mode(game) != PROGRESSION_UNSUPERVISED:
+            logger.debug("Game %s is not unsupervised; skipping auto advance", game_id)
+            return
+
+        players = session.query(Player).filter(Player.game_id == game.id).all()
+        if not players:
+            logger.warning("Auto-advance aborted: no players for game %s", game_id)
+            return
+
+        if any(not p.is_ai for p in players):
+            logger.info(
+                "Auto-advance skipped for game %s because at least one player is human",
+                game_id,
+            )
+            return
+
+        agent_manager = AgentManager()
+        configured_roles: Set[str] = set()
+        iteration = 0
+
+        while True:
+            iteration += 1
+            if iteration_limit and iteration > iteration_limit:
+                logger.warning(
+                    "Auto-advance stopped for game %s after reaching the iteration limit",
+                    game_id,
+                )
+                break
+
+            session.expire_all()
+            game = session.query(DbGame).filter(DbGame.id == game_id).first()
+            if not game:
+                logger.debug("Game %s disappeared mid-run; stopping auto advance", game_id)
+                break
+
+            if _get_progression_mode(game) != PROGRESSION_UNSUPERVISED:
+                logger.debug(
+                    "Game %s progression mode changed away from unsupervised; stopping",
+                    game_id,
+                )
+                break
+
+            if game.status == DbGameStatus.FINISHED:
+                break
+
+            if game.current_round is None or game.current_round <= 0:
+                game.current_round = 1
+
+            round_record = _ensure_round(session, game, game.current_round)
+            if round_record.status != "in_progress":
+                round_record.status = "in_progress"
+                round_record.started_at = datetime.utcnow()
+
+            config = _coerce_game_config(game)
+            _ensure_simulation_state(config)
+            pending = _pending_orders(config)
+            pending.clear()
+
+            demand = _compute_customer_demand(game, round_record.round_number)
+            history = config.get("history", [])
+            last_orders = history[-1].get("orders", {}) if history else {}
+            sim_state = config.get("simulation_state", {})
+            overrides = config.get("daybreak_overrides") or {}
+            info_sharing = config.get("info_sharing") or {}
+            full_visibility = str(info_sharing.get("visibility", "")).lower() == "full"
+            now_iso = datetime.utcnow().isoformat() + "Z"
+
+            players = session.query(Player).filter(Player.game_id == game.id).all()
+            for player in players:
+                if not player.is_ai:
+                    continue
+
+                role_key = _role_key(player)
+
+                if role_key not in configured_roles:
+                    try:
+                        agent_manager.set_agent_strategy(
+                            _agent_type_for_role(role_key),
+                            _strategy_for_player(player),
+                            llm_model=player.llm_model,
+                            override_pct=overrides.get(role_key),
+                        )
+                        configured_roles.add(role_key)
+                    except ValueError as exc:
+                        logger.warning(
+                            "Skipping agent setup for role %s in game %s: %s",
+                            role_key,
+                            game_id,
+                            exc,
+                        )
+                        continue
+
+                try:
+                    agent = agent_manager.get_agent(_agent_type_for_role(role_key))
+                except ValueError:
+                    logger.debug("No agent mapping for role %s; skipping", role_key)
+                    continue
+
+                local_state = {
+                    "inventory": sim_state.get("inventory", {}).get(role_key, player.inventory),
+                    "backlog": sim_state.get("backlog", {}).get(role_key, player.backlog),
+                    "incoming_shipments": sim_state.get("incoming", {}).get(role_key, []),
+                }
+                previous_qty = last_orders.get(role_key, {}).get("quantity", 0)
+                upstream_data = {"previous_orders": [previous_qty]}
+                visible_demand = (
+                    demand
+                    if (player.can_see_demand or role_key == "retailer" or full_visibility)
+                    else None
+                )
+
+                try:
+                    quantity = int(
+                        max(
+                            0,
+                            agent.make_decision(
+                                current_round=round_record.round_number,
+                                current_demand=visible_demand,
+                                upstream_data=upstream_data,
+                                local_state=local_state,
+                            ),
+                        )
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "Agent decision failed for game %s role %s: %s",
+                        game_id,
+                        role_key,
+                        exc,
+                    )
+                    quantity = max(0, int(previous_qty))
+
+                action = (
+                    session.query(PlayerAction)
+                    .filter(
+                        PlayerAction.game_id == game.id,
+                        PlayerAction.round_id == round_record.id,
+                        PlayerAction.player_id == player.id,
+                        PlayerAction.action_type == "order",
+                    )
+                    .first()
+                )
+                if action:
+                    action.quantity = quantity
+                    action.created_at = datetime.utcnow()
+                else:
+                    session.add(
+                        PlayerAction(
+                            game_id=game.id,
+                            round_id=round_record.id,
+                            player_id=player.id,
+                            action_type="order",
+                            quantity=quantity,
+                            created_at=datetime.utcnow(),
+                        )
+                    )
+
+                comment = agent.get_last_explanation_comment()
+                pending[role_key] = {
+                    "player_id": player.id,
+                    "quantity": quantity,
+                    "comment": comment or f"Daybreak decision: order {quantity} units.",
+                    "submitted_at": now_iso,
+                }
+
+            session.flush()
+            _save_game_config(session, game, config)
+            progressed = _finalize_round_if_ready(session, game, config, round_record, force=True)
+            session.add(game)
+            session.commit()
+
+            if not progressed:
+                logger.debug(
+                    "Auto-advance fallback triggered for game %s round %s",
+                    game_id,
+                    round_record.round_number,
+                )
+                game.current_round = (game.current_round or 0) + 1
+                session.commit()
+
+            if game.status == DbGameStatus.FINISHED:
+                break
+
+            if sleep_seconds:
+                time.sleep(sleep_seconds)
+    except Exception:
+        logger.exception("Auto-advance failed for game %s", game_id)
+    finally:
+        session.close()
+
+
+async def _schedule_unsupervised_autoplay(game_id: int) -> None:
+    with _AUTO_TASKS_LOCK:
+        existing = _AUTO_ADVANCE_TASKS.get(game_id)
+        if existing and not existing.done():
+            return
+
+    async def runner() -> None:
+        current_task = asyncio.current_task()
+        try:
+            await asyncio.to_thread(_auto_advance_unsupervised_game_sync, game_id)
+        finally:
+            with _AUTO_TASKS_LOCK:
+                if _AUTO_ADVANCE_TASKS.get(game_id) is current_task:
+                    _AUTO_ADVANCE_TASKS.pop(game_id, None)
+
+    task = asyncio.create_task(runner())
+    with _AUTO_TASKS_LOCK:
+        _AUTO_ADVANCE_TASKS[game_id] = task
+    logger.info("Scheduled unsupervised auto-advance for game %s", game_id)
+
+
 def _replay_history_from_rounds(db: Session, game: DbGame) -> List[Dict[str, Any]]:
     rounds = (
         db.query(Round)
@@ -1544,7 +1807,10 @@ async def create_mixed_game(payload: GameCreate, user: Dict[str, Any] = Depends(
         db.add(game)
         db.commit()
         db.refresh(game)
-        return _serialize_game(game)
+        payload = _serialize_game(game)
+        if _get_progression_mode(game) == PROGRESSION_UNSUPERVISED:
+            await _schedule_unsupervised_autoplay(game.id)
+        return payload
     finally:
         db.close()
 
@@ -1564,7 +1830,16 @@ async def list_mixed_games(user: Dict[str, Any] = Depends(get_current_user)):
             ensure_default_group_and_game(db)
             db.expire_all()
             games = query.all()
-        return [_serialize_game(game) for game in games]
+
+        payload: List[Dict[str, Any]] = []
+        for game in games:
+            if _get_progression_mode(game) == PROGRESSION_UNSUPERVISED and game.status in {
+                DbGameStatus.STARTED,
+                DbGameStatus.ROUND_IN_PROGRESS,
+            }:
+                await _schedule_unsupervised_autoplay(game.id)
+            payload.append(_serialize_game(game))
+        return payload
     finally:
         db.close()
 
@@ -1633,6 +1908,10 @@ async def submit_order(
         auto_advanced = _finalize_round_if_ready(db, game, config, round_record, force=False)
         db.commit()
 
+        progression_mode = _get_progression_mode(game)
+        if progression_mode == PROGRESSION_UNSUPERVISED:
+            await _schedule_unsupervised_autoplay(game.id)
+
         return {
             "status": "recorded",
             "auto_advanced": auto_advanced,
@@ -1649,7 +1928,7 @@ async def submit_order(
                     PlayerAction.action_type == "order",
                 )
             },
-            "progression_mode": _get_progression_mode(game),
+            "progression_mode": progression_mode,
         }
     finally:
         db.close()
@@ -1850,7 +2129,10 @@ async def start_game(game_id: int, user: Dict[str, Any] = Depends(get_current_us
         db.add(game)
         db.commit()
         db.refresh(game)
-        return _serialize_game(game)
+        payload = _serialize_game(game)
+        if _get_progression_mode(game) == PROGRESSION_UNSUPERVISED:
+            await _schedule_unsupervised_autoplay(game.id)
+        return payload
     finally:
         db.close()
 

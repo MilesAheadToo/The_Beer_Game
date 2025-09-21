@@ -96,7 +96,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_CONFIG_NAME,
         help="Supply chain configuration name to use when an explicit ID is not provided.",
     )
-    parser.add_argument("--num-runs", type=int, default=64, help="Number of simulated runs.")
+    parser.add_argument("--num-runs", type=int, default=2056, help="Number of simulated runs.")
     parser.add_argument("--timesteps", type=int, default=64, help="Number of periods per simulation run.")
     parser.add_argument("--window", type=int, default=12, help="Input window length.")
     parser.add_argument("--horizon", type=int, default=1, help="Prediction horizon for training labels.")

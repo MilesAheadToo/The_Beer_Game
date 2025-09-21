@@ -1,5 +1,6 @@
 import argparse
 import os
+import sys
 from typing import Optional, Tuple
 
 import numpy as np
@@ -68,7 +69,7 @@ def get_data(
         return load_sequences_from_db(cfg, params=params, game_ids=None, window=window, horizon=horizon)
     elif source == "sim":
         return generate_sim_training_windows(
-            num_runs=64, T=64, window=window, horizon=horizon, params=params
+            num_runs=2056, T=64, window=window, horizon=horizon, params=params
         )
     else:
         raise ValueError(f"Unknown source: {source}")
@@ -142,7 +143,27 @@ def main():
     print(f"Loaded {len(X)} training samples")
     print(f"Input shape: {X.shape}, Target shape: {Y.shape}")
 
-    device = torch.device(args.device)
+    requested_device = args.device
+    resolved_device = requested_device
+
+    if requested_device.startswith("cuda") and not torch.cuda.is_available():
+        print(
+            "CUDA requested but not available; falling back to CPU.",
+            file=sys.stderr,
+        )
+        resolved_device = "cpu"
+
+    try:
+        device = torch.device(resolved_device)
+    except (RuntimeError, ValueError) as exc:
+        print(
+            f"Failed to initialize device '{resolved_device}' ({exc}); using CPU instead.",
+            file=sys.stderr,
+        )
+        resolved_device = "cpu"
+        device = torch.device(resolved_device)
+
+    print(f"Using device: {resolved_device}")
     in_dim = X.shape[-1]
 
     model = TinyBackbone(in_dim=in_dim, hidden_dim=64).to(device)

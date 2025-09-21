@@ -31,16 +31,16 @@ class DemandPattern(BaseModel):
     )
 
 class GameStatus(str, Enum):
-    CREATED = "created"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    PAUSED = "paused"
+    CREATED = "CREATED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    PAUSED = "PAUSED"
 
 class PlayerRole(str, Enum):
-    RETAILER = "retailer"
-    WHOLESALER = "wholesaler"
-    DISTRIBUTOR = "distributor"
-    MANUFACTURER = "manufacturer"
+    RETAILER = "RETAILER"
+    WHOLESALER = "WHOLESALER"
+    DISTRIBUTOR = "DISTRIBUTOR"
+    MANUFACTURER = "MANUFACTURER"
 
 class RolePricing(BaseModel):
     selling_price: float = Field(..., gt=0, description="Selling price per unit")

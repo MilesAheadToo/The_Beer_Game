@@ -52,7 +52,7 @@ def _index_exists(table_name: str, index_name: str) -> bool:
 
 def _enum_user_type() -> sa.Enum:
     return sa.Enum(
-        "SystemAdmin", "GroupAdmin", "Player",
+        "SYSTEM_ADMIN", "GROUP_ADMIN", "PLAYER",
         name="user_type_enum",
     )
 
@@ -662,7 +662,7 @@ def backfill_defaults() -> None:
     if _column_exists("users", "user_type"):
         bind.execute(
             text(
-                "UPDATE users SET user_type = CASE WHEN is_superuser = 1 THEN 'SystemAdmin' ELSE 'Player' END "
+                "UPDATE users SET user_type = CASE WHEN is_superuser = 1 THEN 'SYSTEM_ADMIN' ELSE 'PLAYER' END "
                 "WHERE user_type IS NULL OR user_type = ''"
             )
         )

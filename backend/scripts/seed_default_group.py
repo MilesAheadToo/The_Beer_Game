@@ -63,6 +63,25 @@ DEFAULT_PASSWORD = "Daybreak@2025"
 DEFAULT_GAME_NAME = "The Beer Game"
 DEFAULT_AGENT_TYPE = "naive"
 
+
+def _normalize_user_type(value: Any) -> UserTypeEnum:
+    if isinstance(value, UserTypeEnum):
+        return value
+    if isinstance(value, str):
+        try:
+            return UserTypeEnum(value)
+        except ValueError:
+            try:
+                return UserTypeEnum[value]
+            except KeyError:
+                return UserTypeEnum.PLAYER
+    return UserTypeEnum.PLAYER
+
+
+def _role_key(role: PlayerRole) -> str:
+    return role.name.lower()
+
+
 DAYBREAK_AGENT_SPECS = [
     {
         "name": "Daybreak DTCE Showcase",
@@ -167,7 +186,7 @@ def ensure_group(session: Session) -> Tuple[Group, bool]:
         admin = existing_group.admin
         if admin:
             updated = False
-            if admin.user_type != UserTypeEnum.GROUP_ADMIN:
+            if _normalize_user_type(admin.user_type) != UserTypeEnum.GROUP_ADMIN:
                 admin.user_type = UserTypeEnum.GROUP_ADMIN
                 updated = True
             if admin.is_superuser:
@@ -218,7 +237,7 @@ def ensure_group(session: Session) -> Tuple[Group, bool]:
         if admin_user.is_superuser:
             admin_user.is_superuser = False
             updated = True
-        if admin_user.user_type != UserTypeEnum.GROUP_ADMIN:
+        if _normalize_user_type(admin_user.user_type) != UserTypeEnum.GROUP_ADMIN:
             admin_user.user_type = UserTypeEnum.GROUP_ADMIN
             updated = True
         if not admin_user.is_active:
@@ -457,7 +476,7 @@ def configure_human_players_for_game(
         email = email_template.format(group_id=group.id)
         user = session.query(User).filter(User.email == email).first()
         if not user:
-            print(f"[warn] Skipping role '{role.value}' — user {email} not found.")
+            print(f"[warn] Skipping role '{role.name.title()}' — user {email} not found.")
             continue
 
         player = players_by_role.get(role)
@@ -487,7 +506,7 @@ def configure_human_players_for_game(
             player.llm_model = None
         session.add(player)
 
-        role_assignments[role.value] = {
+        role_assignments[_role_key(role)] = {
             "is_ai": False,
             "agent_config_id": None,
             "user_id": user.id,
@@ -582,7 +601,7 @@ def ensure_naive_agents(session: Session, game: Game) -> None:
             session.add(agent_config)
             session.flush()
 
-        role_assignments[player.role.value] = {
+        role_assignments[_role_key(player.role)] = {
             "is_ai": True,
             "agent_config_id": agent_config.id,
             "user_id": None,
@@ -644,7 +663,7 @@ def ensure_role_users(session: Session, group: Group) -> None:
         if user.group_id != group.id:
             user.group_id = group.id
             updated = True
-        if user.user_type != UserTypeEnum.PLAYER:
+        if _normalize_user_type(user.user_type) != UserTypeEnum.PLAYER:
             user.user_type = UserTypeEnum.PLAYER
             updated = True
         if not user.is_active:
@@ -847,7 +866,7 @@ def _configure_game_agents(
         session.add(agent_config)
         session.flush()
 
-        assignments[role.value] = {
+        assignments[_role_key(role)] = {
             "is_ai": True,
             "agent_config_id": agent_config.id,
             "user_id": None,
@@ -855,7 +874,7 @@ def _configure_game_agents(
         }
 
     if override_pct is not None:
-        overrides = {role.value: override_pct for _, role in ROLE_SPECS}
+        overrides = {_role_key(role): override_pct for _, role in ROLE_SPECS}
         game_config = game.config or {}
         game_config.setdefault("daybreak_overrides", {}).update(overrides)
         game.config = json.loads(json.dumps(game_config))
@@ -915,7 +934,7 @@ def ensure_daybreak_games(
                 base_config["daybreak"]["llm_model"] = spec["llm_model"]
                 base_config.setdefault("info_sharing", {}).update({"visibility": "full"})
             if spec["override_pct"] is not None:
-                overrides = {role.value: spec["override_pct"] for _, role in ROLE_SPECS}
+                overrides = {_role_key(role): spec["override_pct"] for _, role in ROLE_SPECS}
                 base_config.setdefault("daybreak_overrides", {}).update(overrides)
 
             game = Game(
@@ -952,7 +971,7 @@ def ensure_daybreak_games(
                 game_config["daybreak"]["llm_model"] = spec["llm_model"]
                 game_config.setdefault("info_sharing", {}).update({"visibility": "full"})
             if spec["override_pct"] is not None:
-                overrides = {role.value: spec["override_pct"] for _, role in ROLE_SPECS}
+                overrides = {_role_key(role): spec["override_pct"] for _, role in ROLE_SPECS}
                 game_config.setdefault("daybreak_overrides", {}).update(overrides)
             game_config["progression_mode"] = "unsupervised"
             game_config["max_rounds"] = 40

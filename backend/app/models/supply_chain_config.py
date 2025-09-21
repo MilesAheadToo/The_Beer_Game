@@ -21,10 +21,10 @@ if TYPE_CHECKING:
     from .group import Group
 
 class NodeType(str, PyEnum):
-    RETAILER = "retailer"
-    WHOLESALER = "wholesaler"
-    DISTRIBUTOR = "distributor"
-    MANUFACTURER = "manufacturer"
+    RETAILER = "RETAILER"
+    WHOLESALER = "WHOLESALER"
+    DISTRIBUTOR = "DISTRIBUTOR"
+    MANUFACTURER = "MANUFACTURER"
 
 class SupplyChainConfig(Base):
     """Core configuration for the supply chain"""

@@ -11,7 +11,7 @@ from sqlalchemy.dialects import mysql
 
 # revision identifiers, used by Alembic.
 revision = '20240910152000'
-down_revision = None
+down_revision = '20240900120000'
 branch_labels = None
 depends_on = None
 
@@ -26,6 +26,8 @@ def upgrade():
         sa.Column('is_active', sa.Boolean(), nullable=False, server_default='0'),
         sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.text('CURRENT_TIMESTAMP')),
         sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=sa.text('CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP')),
+        sa.Column('created_by', sa.Integer(), nullable=True),
+        sa.ForeignKeyConstraint(['created_by'], ['users.id'], ondelete='SET NULL'),
         sa.PrimaryKeyConstraint('id')
     )
     
@@ -48,7 +50,7 @@ def upgrade():
         sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
         sa.Column('config_id', sa.Integer(), nullable=False),
         sa.Column('name', sa.String(length=100), nullable=False),
-        sa.Column('type', sa.Enum('retailer', 'wholesaler', 'distributor', 'manufacturer', name='nodetype'), nullable=False),
+        sa.Column('type', sa.Enum('RETAILER', 'WHOLESALER', 'DISTRIBUTOR', 'MANUFACTURER', name='nodetype'), nullable=False),
         sa.ForeignKeyConstraint(['config_id'], ['supply_chain_configs.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('name', 'config_id', name='_node_name_config_uc')

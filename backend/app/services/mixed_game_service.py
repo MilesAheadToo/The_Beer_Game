@@ -99,7 +99,7 @@ class MixedGameService:
                 getattr(GameStatusDB, "FINISHED", GameStatusDB.CREATED).value,
                 GameStatus.COMPLETED.value,
             ],
-            GameStatus.PAUSED: [GameStatus.PAUSED.value, "paused"],
+            GameStatus.PAUSED: [GameStatus.PAUSED.value, "PAUSED", "paused"],
         }
         return mapping.get(status, [status.value])
 
@@ -112,24 +112,31 @@ class MixedGameService:
         elif isinstance(status_value, Enum):
             raw = status_value.value
         else:
-            raw = str(status_value or "").lower()
+            raw = str(status_value or "")
 
         mapping = {
             GameStatusDB.CREATED.value: GameStatus.CREATED,
+            "CREATED": GameStatus.CREATED,
             "created": GameStatus.CREATED,
             GameStatusDB.STARTED.value: GameStatus.IN_PROGRESS,
             getattr(GameStatusDB, "IN_PROGRESS", GameStatusDB.STARTED).value: GameStatus.IN_PROGRESS,
             getattr(GameStatusDB, "ROUND_IN_PROGRESS", GameStatusDB.STARTED).value: GameStatus.IN_PROGRESS,
             getattr(GameStatusDB, "ROUND_COMPLETED", GameStatusDB.STARTED).value: GameStatus.IN_PROGRESS,
-            GameStatusDB.FINISHED.value if hasattr(GameStatusDB, "FINISHED") else "finished": GameStatus.COMPLETED,
+            "started": GameStatus.IN_PROGRESS,
+            "IN_PROGRESS": GameStatus.IN_PROGRESS,
+            "in_progress": GameStatus.IN_PROGRESS,
+            (GameStatusDB.FINISHED.value if hasattr(GameStatusDB, "FINISHED") else "FINISHED"): GameStatus.COMPLETED,
             "finished": GameStatus.COMPLETED,
             "completed": GameStatus.COMPLETED,
+            "COMPLETED": GameStatus.COMPLETED,
+            "PAUSED": GameStatus.PAUSED,
             "paused": GameStatus.PAUSED,
         }
 
-        normalized = mapping.get(raw)
-        if normalized:
-            return normalized
+        for token in {raw, raw.upper(), raw.lower()}:
+            normalized = mapping.get(token)
+            if normalized:
+                return normalized
 
         if raw in GameStatus.__members__:
             return GameStatus[raw]

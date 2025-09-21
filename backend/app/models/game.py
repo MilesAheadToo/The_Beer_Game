@@ -15,11 +15,11 @@ if TYPE_CHECKING:
     from .agent_config import AgentConfig
 
 class GameStatus(str, Enum):
-    CREATED = "created"
-    STARTED = "started"
-    ROUND_IN_PROGRESS = "round_in_progress"
-    ROUND_COMPLETED = "round_completed"
-    FINISHED = "finished"
+    CREATED = "CREATED"
+    STARTED = "STARTED"
+    ROUND_IN_PROGRESS = "ROUND_IN_PROGRESS"
+    ROUND_COMPLETED = "ROUND_COMPLETED"
+    FINISHED = "FINISHED"
 
 class Game(Base):
     __tablename__ = "games"  # Explicitly set table name to match foreign key references
