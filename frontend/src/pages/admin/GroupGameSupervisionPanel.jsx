@@ -1,10 +1,13 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Box,
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogContent,
+  DialogTitle,
   IconButton,
   Paper,
   Stack,
@@ -23,6 +26,7 @@ import {
   Flag as FinishIcon,
   SkipNext as NextRoundIcon,
   Visibility as ViewIcon,
+  CheckCircleOutline as CompleteIcon,
 } from '@mui/icons-material';
 import { useSnackbar } from 'notistack';
 import { useNavigate } from 'react-router-dom';
@@ -61,6 +65,7 @@ const GroupGameSupervisionPanel = ({
   const navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar();
   const [actionState, setActionState] = useState({});
+  const [autoProgress, setAutoProgress] = useState(null);
 
   const supervisedGames = useMemo(() => {
     if (!Array.isArray(games)) {
@@ -89,26 +94,138 @@ const GroupGameSupervisionPanel = ({
   const runAction = async (gameId, action, apiCall, successMessage) => {
     setGameActionState(gameId, action);
     try {
-      await apiCall(gameId);
+      const result = await apiCall(gameId);
       enqueueSnackbar(successMessage, { variant: 'success' });
       if (onRefresh) {
         await onRefresh();
       }
+      return result;
     } catch (err) {
       const detail = err?.response?.data?.detail || err?.message || 'Action failed';
       enqueueSnackbar(detail, { variant: 'error' });
+      return undefined;
     } finally {
       setGameActionState(gameId, null);
     }
   };
 
-  const handleStart = (gameId) =>
-    runAction(gameId, 'start', mixedGameApi.startGame, 'Game started');
+  const handleStart = async (game) => {
+    if (!game) return;
+    const result = await runAction(game.id, 'start', mixedGameApi.startGame, 'Game started');
+    if (!result) {
+      return;
+    }
+
+    const mode = String(
+      result?.progression_mode ||
+        game.progression_mode ||
+        game?.config?.progression_mode ||
+        'supervised',
+    ).toLowerCase();
+
+    if (mode === 'unsupervised') {
+      setAutoProgress({
+        gameId: game.id,
+        name: game.name,
+        currentRound: result?.current_round ?? game.current_round ?? 0,
+        maxRounds: result?.max_rounds ?? game.max_rounds ?? 0,
+        status: result?.status ?? game.status,
+        lastUpdated: new Date().toISOString(),
+        done: false,
+        error: null,
+      });
+    }
+  };
   const handleStop = (gameId) => runAction(gameId, 'stop', mixedGameApi.stopGame, 'Game stopped');
   const handleNextRound = (gameId) =>
     runAction(gameId, 'next_round', mixedGameApi.nextRound, 'Advanced to next round');
   const handleFinish = (gameId) =>
     runAction(gameId, 'finish', mixedGameApi.finishGame, 'Game marked as finished');
+
+  const monitoringGameId = autoProgress?.gameId;
+  const monitoringDone = autoProgress?.done;
+
+  useEffect(() => {
+    if (!monitoringGameId || monitoringDone) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const poll = async () => {
+      try {
+        const data = await mixedGameApi.getGame(monitoringGameId);
+        if (cancelled) return;
+
+        const statusRaw = String(data?.status || '').toLowerCase();
+        const currentRound = data?.current_round ?? 0;
+        const maxRoundsFromData = data?.max_rounds ?? 0;
+
+        let finished = false;
+        setAutoProgress((prev) => {
+          if (!prev || prev.gameId !== monitoringGameId) {
+            return prev;
+          }
+
+          const nextMaxRounds = maxRoundsFromData || prev.maxRounds || 0;
+          const done =
+            statusRaw === 'completed' ||
+            statusRaw === 'finished' ||
+            (nextMaxRounds > 0 && currentRound >= nextMaxRounds);
+          if (done && !prev.done) {
+            finished = true;
+          }
+
+          return {
+            ...prev,
+            currentRound,
+            maxRounds: nextMaxRounds,
+            status: data?.status ?? prev.status,
+            lastUpdated: new Date().toISOString(),
+            error: null,
+            done,
+          };
+        });
+
+        if (finished && onRefresh) {
+          await onRefresh();
+        }
+      } catch (err) {
+        if (cancelled) return;
+        const detail = err?.response?.data?.detail || err?.message || 'Unable to update progress right now';
+        setAutoProgress((prev) => {
+          if (!prev || prev.gameId !== monitoringGameId) {
+            return prev;
+          }
+          return {
+            ...prev,
+            error: detail,
+            lastUpdated: new Date().toISOString(),
+          };
+        });
+      }
+    };
+
+    const interval = setInterval(poll, 1500);
+    poll();
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [monitoringGameId, monitoringDone, onRefresh]);
+
+  useEffect(() => {
+    if (!autoProgress?.done) {
+      return undefined;
+    }
+
+    const timeout = setTimeout(() => {
+      setAutoProgress(null);
+    }, 1200);
+
+    return () => clearTimeout(timeout);
+  }, [autoProgress?.done]);
 
   const renderActions = (game) => {
     const status = String(game.status || '').toLowerCase();
@@ -143,7 +260,7 @@ const GroupGameSupervisionPanel = ({
             variant="contained"
             color="success"
             startIcon={<StartIcon fontSize="small" />}
-            onClick={() => handleStart(game.id)}
+            onClick={() => handleStart(game)}
             disabled={busy}
           >
             {busy ? 'Starting…' : 'Start'}
@@ -219,80 +336,128 @@ const GroupGameSupervisionPanel = ({
   };
 
   return (
-    <Paper elevation={0} sx={{ p: 3 }}>
-      <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={2} mb={3}>
-        <Box>
-          <Typography variant="h6" sx={{ fontWeight: 700 }}>
-            Game Supervision
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Monitor live sessions and orchestrate progress across your group's games.
-          </Typography>
-        </Box>
-        {onRefresh && (
-          <Button variant="outlined" onClick={onRefresh} disabled={loading}>
-            Refresh
-          </Button>
+    <>
+      <Paper elevation={0} sx={{ p: 3 }}>
+        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={2} mb={3}>
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 700 }}>
+              Game Supervision
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Monitor live sessions and orchestrate progress across your group's games.
+            </Typography>
+          </Box>
+          {onRefresh && (
+            <Button variant="outlined" onClick={onRefresh} disabled={loading}>
+              Refresh
+            </Button>
+          )}
+        </Stack>
+
+        {error && (
+          <Alert severity="error" sx={{ mb: 2 }}>
+            {error}
+          </Alert>
         )}
-      </Stack>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
-
-      {loading ? (
-        <Box display="flex" justifyContent="center" alignItems="center" minHeight={240}>
-          <CircularProgress />
-        </Box>
-      ) : supervisedGames.length === 0 ? (
-        <Box textAlign="center" py={6}>
-          <Typography variant="body1" color="text.secondary" gutterBottom>
-            There are no games to supervise right now.
-          </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Create a new mixed game or wait for a session to begin.
-          </Typography>
-        </Box>
-      ) : (
-        <TableContainer>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Name</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Round</TableCell>
-                <TableCell>Last Updated</TableCell>
-                <TableCell align="right">Controls</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {supervisedGames.map((game) => (
-                <TableRow hover key={game.id}>
-                  <TableCell>
-                    <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-                      {game.name}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {game.description || 'No description provided'}
-                    </Typography>
-                  </TableCell>
-                  <TableCell>
-                    <Chip size="small" color={statusColor(game.status)} label={statusLabel(game.status)} />
-                  </TableCell>
-                  <TableCell>
-                    {game.current_round ?? 0} / {game.max_rounds ?? '—'}
-                  </TableCell>
-                  <TableCell>{formatDate(game.updated_at)}</TableCell>
-                  <TableCell align="right">{renderActions(game)}</TableCell>
+        {loading ? (
+          <Box display="flex" justifyContent="center" alignItems="center" minHeight={240}>
+            <CircularProgress />
+          </Box>
+        ) : supervisedGames.length === 0 ? (
+          <Box textAlign="center" py={6}>
+            <Typography variant="body1" color="text.secondary" gutterBottom>
+              There are no games to supervise right now.
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              Create a new mixed game or wait for a session to begin.
+            </Typography>
+          </Box>
+        ) : (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Name</TableCell>
+                  <TableCell>Status</TableCell>
+                  <TableCell>Round</TableCell>
+                  <TableCell>Last Updated</TableCell>
+                  <TableCell align="right">Controls</TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </TableContainer>
-      )}
-    </Paper>
+              </TableHead>
+              <TableBody>
+                {supervisedGames.map((game) => (
+                  <TableRow hover key={game.id}>
+                    <TableCell>
+                      <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
+                        {game.name}
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        {game.description || 'No description provided'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip size="small" color={statusColor(game.status)} label={statusLabel(game.status)} />
+                    </TableCell>
+                    <TableCell>
+                      {game.current_round ?? 0} / {game.max_rounds ?? '—'}
+                    </TableCell>
+                    <TableCell>{formatDate(game.updated_at)}</TableCell>
+                    <TableCell align="right">{renderActions(game)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </Paper>
+
+    <Dialog
+      open={Boolean(autoProgress)}
+      fullWidth
+      maxWidth="xs"
+      onClose={() => setAutoProgress(null)}
+    >
+      <DialogTitle>Running unsupervised game</DialogTitle>
+      <DialogContent>
+        {autoProgress && (
+          <Stack spacing={2} alignItems="center" sx={{ py: 1 }}>
+            {autoProgress.done ? (
+              <CompleteIcon color="success" fontSize="large" />
+            ) : (
+              <CircularProgress color="primary" />
+            )}
+            <Box textAlign="center">
+              <Typography variant="subtitle1" sx={{ fontWeight: 600 }}>
+                {autoProgress.name}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Round {autoProgress.currentRound ?? 0} / {autoProgress.maxRounds || '—'}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Status: {statusLabel(autoProgress.status)}
+              </Typography>
+            </Box>
+            {autoProgress.error && (
+              <Typography variant="body2" color="error" align="center">
+                {autoProgress.error}
+              </Typography>
+            )}
+            {!autoProgress.done && (
+              <Typography variant="body2" color="text.secondary" align="center">
+                We&apos;re advancing each round automatically. You can close this dialog at any time.
+              </Typography>
+            )}
+            {autoProgress.done && (
+              <Typography variant="body2" align="center" sx={{ color: 'success.main' }}>
+                All rounds complete. Preparing summary…
+              </Typography>
+            )}
+          </Stack>
+        )}
+      </DialogContent>
+    </Dialog>
+  </>
   );
 };
 
