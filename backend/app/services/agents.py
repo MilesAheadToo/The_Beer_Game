@@ -272,7 +272,7 @@ class DaybreakGlobalController:
             reasons=reasons,
         )
         explanation = explain_supervisor_adjustment(
-            role=f"{agent_type.name.replace("_", " ").title()} (Global)",
+            role=f"{agent_type.name.replace('_', ' ').title()} (Global)",
             week=round_number,
             pre_qty=int(round(safe_base)),
             post_qty=final_qty,
@@ -377,7 +377,7 @@ class BeerGameAgent:
 
         # Make decision based on strategy
         if self.strategy == AgentStrategy.NAIVE:
-            order = self._naive_strategy(current_demand)
+            order = self._naive_strategy(current_demand, backlog_level)
         elif self.strategy == AgentStrategy.BULLWHIP:
             order = self._bullwhip_strategy(current_demand, upstream_data)
         elif self.strategy == AgentStrategy.CONSERVATIVE:
@@ -442,11 +442,12 @@ class BeerGameAgent:
         }
         return mapping.get(self.agent_type)
     
-    def _naive_strategy(self, current_demand: Optional[int]) -> int:
-        """Order exactly what was demanded this round."""
-        if current_demand is not None and (self.agent_type == AgentType.RETAILER or self.can_see_demand):
-            return current_demand
-        return self.last_order  # Default to last order if no demand info
+    def _naive_strategy(self, current_demand: Optional[int], backlog: float) -> int:
+        """Order enough to cover observed demand plus any backlog."""
+        if current_demand is not None:
+            demand_to_cover = max(0.0, float(current_demand)) + max(0.0, float(backlog or 0.0))
+            return int(round(demand_to_cover))
+        return self.last_order
     
     def _bullwhip_strategy(self, current_demand: Optional[int], upstream_data: Optional[Dict]) -> int:
         """Tend to over-order when demand increases."""
@@ -820,7 +821,7 @@ class BeerGameAgent:
             )
             return explanation
         except Exception:
-            return f"Decision (Week {week}, {self.agent_type.name.replace("_", " ").title()}): order **{action_qty}** units upstream."
+            return f"Decision (Week {week}, {self.agent_type.name.replace('_', ' ').title()}): order **{action_qty}** units upstream."
 
     def _format_daybreak_notes(self, context: Optional[Dict[str, Any]]) -> Optional[str]:
         if not context:

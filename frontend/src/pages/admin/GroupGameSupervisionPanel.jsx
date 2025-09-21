@@ -19,6 +19,7 @@ import {
   TableRow,
   Tooltip,
   Typography,
+  LinearProgress,
 } from '@mui/material';
 import {
   PlayArrow as StartIcon,
@@ -406,8 +407,25 @@ const GroupGameSupervisionPanel = ({
                     <TableCell>
                       <Chip size="small" color={statusColor(game.status)} label={statusLabel(game.status)} />
                     </TableCell>
-                    <TableCell>
-                      {game.current_round ?? 0} / {game.max_rounds ?? '—'}
+                    <TableCell sx={{ minWidth: 140 }}>
+                      <Stack spacing={0.5}>
+                        <Typography variant="body2">
+                          {game.current_round ?? 0} / {game.max_rounds ?? '—'}
+                        </Typography>
+                        <LinearProgress
+                          variant="determinate"
+                          value={(() => {
+                            const current = Number(game.current_round ?? 0);
+                            const total = Number(game.max_rounds ?? 0);
+                            if (!total || Number.isNaN(total) || total <= 0) {
+                              return 0;
+                            }
+                            const pct = (current / total) * 100;
+                            return Math.max(0, Math.min(100, pct));
+                          })()}
+                          sx={{ height: 6, borderRadius: 3 }}
+                        />
+                      </Stack>
                     </TableCell>
                     <TableCell>{formatDate(game.updated_at)}</TableCell>
                     <TableCell align="right">{renderActions(game)}</TableCell>
