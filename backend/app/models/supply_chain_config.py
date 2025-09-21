@@ -22,9 +22,9 @@ if TYPE_CHECKING:
 
 class NodeType(str, PyEnum):
     RETAILER = "retailer"
+    WHOLESALER = "wholesaler"
     DISTRIBUTOR = "distributor"
     MANUFACTURER = "manufacturer"
-    SUPPLIER = "supplier"
 
 class SupplyChainConfig(Base):
     """Core configuration for the supply chain"""

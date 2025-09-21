@@ -114,30 +114,25 @@ def ensure_default_setup(db: Session, user: User) -> None:
 
         # Nodes
         retailer = Node(config_id=config.id, name="Retailer", type=NodeType.RETAILER)
+        wholesaler = Node(
+            config_id=config.id, name="Wholesaler", type=NodeType.WHOLESALER
+        )
         distributor = Node(
             config_id=config.id, name="Distributor", type=NodeType.DISTRIBUTOR
         )
         manufacturer = Node(
             config_id=config.id, name="Manufacturer", type=NodeType.MANUFACTURER
         )
-        supplier = Node(config_id=config.id, name="Supplier", type=NodeType.SUPPLIER)
-        db.add_all([retailer, distributor, manufacturer, supplier])
+        db.add_all([retailer, wholesaler, distributor, manufacturer])
         db.commit()
         db.refresh(retailer)
+        db.refresh(wholesaler)
         db.refresh(distributor)
         db.refresh(manufacturer)
-        db.refresh(supplier)
 
         # Lanes with high capacity and typical leadtimes
         cap = 9999
         lanes = [
-            Lane(
-                config_id=config.id,
-                upstream_node_id=supplier.id,
-                downstream_node_id=manufacturer.id,
-                capacity=cap,
-                lead_time_days={"min": 2, "max": 10},
-            ),
             Lane(
                 config_id=config.id,
                 upstream_node_id=manufacturer.id,
@@ -148,6 +143,13 @@ def ensure_default_setup(db: Session, user: User) -> None:
             Lane(
                 config_id=config.id,
                 upstream_node_id=distributor.id,
+                downstream_node_id=wholesaler.id,
+                capacity=cap,
+                lead_time_days={"min": 2, "max": 10},
+            ),
+            Lane(
+                config_id=config.id,
+                upstream_node_id=wholesaler.id,
                 downstream_node_id=retailer.id,
                 capacity=cap,
                 lead_time_days={"min": 2, "max": 10},
@@ -157,7 +159,7 @@ def ensure_default_setup(db: Session, user: User) -> None:
         db.commit()
 
         # Item-node configs with standard beer game ranges
-        for node in [retailer, distributor, manufacturer, supplier]:
+        for node in [retailer, wholesaler, distributor, manufacturer]:
             db.add(
                 ItemNodeConfig(
                     item_id=item.id,
@@ -203,7 +205,7 @@ def ensure_default_setup(db: Session, user: User) -> None:
     db.commit()
     db.refresh(game)
 
-    roles = ["retailer", "distributor", "manufacturer", "supplier"]
+    roles = ["retailer", "wholesaler", "distributor", "manufacturer"]
     assignments = {}
     for role in roles:
         ac = AgentConfig(game_id=game.id, role=role, agent_type="bullwhip", config={})

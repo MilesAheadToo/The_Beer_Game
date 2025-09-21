@@ -11,13 +11,22 @@ const roleOptions = [
   { value: 'retailer', label: 'Retailer' },
   { value: 'wholesaler', label: 'Wholesaler' },
   { value: 'distributor', label: 'Distributor' },
-  { value: 'factory', label: 'Factory' },
+  { value: 'manufacturer', label: 'Manufacturer' },
 ];
 
 const agentStrategyLabels = {
   DAYBREAK_DTCE: 'Daybreak - Roles',
   DAYBREAK_DTCE_CENTRAL: 'Daybreak - Roles + Supervisor',
   DAYBREAK_DTCE_GLOBAL: 'Daybreak - SC Orchestrator',
+  LLM_BALANCED: 'LLM - Balanced',
+  LLM_CONSERVATIVE: 'LLM - Conservative',
+  LLM_AGGRESSIVE: 'LLM - Aggressive',
+  LLM_ADAPTIVE: 'LLM - Adaptive',
+  NAIVE: 'Heuristic - Naive',
+  BULLWHIP: 'Heuristic - Bullwhip',
+  CONSERVATIVE: 'Heuristic - Conservative',
+  RANDOM: 'Heuristic - Random',
+  PI_HEURISTIC: 'Heuristic - PI',
 };
 
 const resolveStrategyLabel = (player) => {
@@ -213,6 +222,9 @@ const PlayersPage = () => {
                       <option value="LLM_AGGRESSIVE">LLM - Aggressive</option>
                       <option value="NAIVE">Heuristic - Naive</option>
                       <option value="BULLWHIP">Heuristic - Bullwhip</option>
+                      <option value="CONSERVATIVE">Heuristic - Conservative</option>
+                      <option value="RANDOM">Heuristic - Random</option>
+                      <option value="PI_HEURISTIC">Heuristic - PI</option>
                     </Select>
                   </FormControl>
                 )}

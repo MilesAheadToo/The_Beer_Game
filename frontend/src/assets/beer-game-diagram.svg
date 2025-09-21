@@ -5,9 +5,9 @@
   <!-- Title -->
   <text x="200" y="40" font-family="Arial, sans-serif" font-size="20" font-weight="bold" fill="white" text-anchor="middle">Beer Game Supply Chain</text>
   
-  <!-- Factory -->
+  <!-- Manufacturer -->
   <rect x="200" y="80" width="80" height="60" rx="4" fill="#3B82F6" stroke="#2563EB" stroke-width="2" />
-  <text x="240" y="115" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="white" text-anchor="middle">Factory</text>
+  <text x="240" y="115" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="white" text-anchor="middle">Manufacturer</text>
   
   <!-- Distributor -->
   <rect x="100" y="160" width="80" height="60" rx="4" fill="#60A5FA" stroke="#3B82F6" stroke-width="2" />

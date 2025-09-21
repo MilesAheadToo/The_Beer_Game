@@ -355,6 +355,6 @@ if __name__ == "__main__":
         pre_qty=36,
         post_qty=39,
         ctx=SupervisorContext(max_scale_pct=10, rule="stability_smoothing",
-                              reasons=["upstream backlog rising", "factory idle capacity"]),
+                              reasons=["upstream backlog rising", "manufacturer idle capacity"]),
     )
     print("\n" + sup)

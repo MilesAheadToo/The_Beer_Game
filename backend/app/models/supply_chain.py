@@ -18,7 +18,7 @@ class PlayerRole(str, PyEnum):
     RETAILER = "retailer"
     WHOLESALER = "wholesaler"
     DISTRIBUTOR = "distributor"
-    FACTORY = "factory"
+    MANUFACTURER = "manufacturer"
 
 class Game(Base):
     __tablename__ = "games"
@@ -74,7 +74,7 @@ class Player(Base):
         upstream_role = {
             PlayerRole.WHOLESALER: PlayerRole.RETAILER,
             PlayerRole.DISTRIBUTOR: PlayerRole.WHOLESALER,
-            PlayerRole.FACTORY: PlayerRole.DISTRIBUTOR
+            PlayerRole.MANUFACTURER: PlayerRole.DISTRIBUTOR
         }.get(self.role)
         
         if not upstream_role:
@@ -94,13 +94,13 @@ class Player(Base):
             async with get_db() as db_session:
                 return await self.downstream_player(db_session)
                 
-        if self.role == PlayerRole.FACTORY:
+        if self.role == PlayerRole.MANUFACTURER:
             return None
             
         downstream_role = {
             PlayerRole.RETAILER: PlayerRole.WHOLESALER,
             PlayerRole.WHOLESALER: PlayerRole.DISTRIBUTOR,
-            PlayerRole.DISTRIBUTOR: PlayerRole.FACTORY
+            PlayerRole.DISTRIBUTOR: PlayerRole.MANUFACTURER
         }.get(self.role)
         
         if not downstream_role:

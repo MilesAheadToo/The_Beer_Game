@@ -55,7 +55,7 @@ const sampleBullwhipData = [
   { name: 'Retailer', value: 1.2 },
   { name: 'Distributor', value: 1.8 },
   { name: 'Wholesaler', value: 2.3 },
-  { name: 'Factory', value: 2.9 },
+  { name: 'Manufacturer', value: 2.9 },
 ];
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042'];
@@ -269,7 +269,7 @@ const Analysis = () => {
                     <MenuItem value="retailer">Retailer</MenuItem>
                     <MenuItem value="distributor">Distributor</MenuItem>
                     <MenuItem value="warehouse">Warehouse</MenuItem>
-                    <MenuItem value="factory">Factory</MenuItem>
+                    <MenuItem value="manufacturer">Manufacturer</MenuItem>
                   </Select>
                 </FormControl>
               </Grid>

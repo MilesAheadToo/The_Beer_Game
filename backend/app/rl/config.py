@@ -8,15 +8,15 @@ from typing import Dict, List, Tuple
 ACTION_LEVELS: List[int] = list(range(0, 105, 5))  # [0, 5, 10, ..., 100]
 
 # --- Supply chain topology (classic Beer Game) --------------------------------
-# Node order is fixed: 0=Retailer, 1=Wholesaler, 2=Distributor, 3=Factory
-NODES: List[str] = ["retailer", "wholesaler", "distributor", "factory"]
+# Node order is fixed: 0=Retailer, 1=Wholesaler, 2=Distributor, 3=Manufacturer
+NODES: List[str] = ["retailer", "wholesaler", "distributor", "manufacturer"]
 NODE_INDEX: Dict[str, int] = {name: i for i, name in enumerate(NODES)}
 
-# Upstream shipments move Factory -> Distributor -> Wholesaler -> Retailer
-# Downstream orders move Retailer -> Wholesaler -> Distributor -> Factory
+# Upstream shipments move Manufacturer -> Distributor -> Wholesaler -> Retailer
+# Downstream orders move Retailer -> Wholesaler -> Distributor -> Manufacturer
 # Adjacency for shipments (directed): edge u->v means shipments flow u -> v
 SHIPMENT_EDGES: List[Tuple[int, int]] = [
-    (NODE_INDEX["factory"], NODE_INDEX["distributor"]),
+    (NODE_INDEX["manufacturer"], NODE_INDEX["distributor"]),
     (NODE_INDEX["distributor"], NODE_INDEX["wholesaler"]),
     (NODE_INDEX["wholesaler"], NODE_INDEX["retailer"]),
 ]

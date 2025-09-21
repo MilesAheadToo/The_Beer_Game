@@ -395,7 +395,7 @@ class MixedGameService:
         # Initialize simple engine state if not present
         cfg = game.config or {}
         node_policies = cfg.get('node_policies', {})
-        roles = ['retailer','wholesaler','distributor','manufacturer','factory']
+        roles = ['retailer','wholesaler','distributor','manufacturer']
         # allow different naming in node_policies
         if not node_policies:
             node_policies = {r: {"info_delay": 2, "ship_delay": 2, "init_inventory": 12, "min_order_qty": 0} for r in roles}
@@ -499,7 +499,7 @@ class MixedGameService:
         # roles chain inferred from node_policies order
         chain = list(node_policies.keys())
         if not chain:
-            chain = ['retailer','wholesaler','distributor','manufacturer','factory']
+            chain = ['retailer','wholesaler','distributor','manufacturer']
         # 1) incoming orders at retailer
         if 'retailer' in engine:
             engine['retailer']['info_queue'].append(int(demand))

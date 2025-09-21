@@ -35,8 +35,8 @@ def _role_key(player: Player) -> str:
 
 def _agent_type_for(role: str) -> AgentType:
     mapping = {
-        "factory": AgentType.FACTORY,
-        "manufacturer": AgentType.FACTORY,
+        "factory": AgentType.MANUFACTURER,
+        "manufacturer": AgentType.MANUFACTURER,
         "distributor": AgentType.DISTRIBUTOR,
         "wholesaler": AgentType.WHOLESALER,
         "retailer": AgentType.RETAILER,

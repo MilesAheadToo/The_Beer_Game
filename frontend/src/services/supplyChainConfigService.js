@@ -157,9 +157,9 @@ export const deleteMarketDemand = async (configId, demandId) => {
 export const getNodeTypeDisplayName = (nodeType) => {
   const displayNames = {
     retailer: 'Retailer',
+    wholesaler: 'Wholesaler',
     distributor: 'Distributor',
     manufacturer: 'Manufacturer',
-    supplier: 'Supplier',
   };
   return displayNames[nodeType] || nodeType;
 };
@@ -167,9 +167,9 @@ export const getNodeTypeDisplayName = (nodeType) => {
 export const getNodeTypeColor = (nodeType) => {
   const colors = {
     retailer: 'success',
+    wholesaler: 'error',
     distributor: 'info',
     manufacturer: 'warning',
-    supplier: 'error',
   };
   return colors[nodeType] || 'default';
 };
@@ -246,9 +246,9 @@ export const CLASSIC_SUPPLY_CHAIN = {
     },
   ],
   nodes: [
-    { id: 1, name: 'Supplier 1', type: 'supplier', description: '' },
-    { id: 2, name: 'Manufacturer 1', type: 'manufacturer', description: '' },
-    { id: 3, name: 'Distributor 1', type: 'distributor', description: '' },
+    { id: 1, name: 'Manufacturer 1', type: 'manufacturer', description: '' },
+    { id: 2, name: 'Distributor 1', type: 'distributor', description: '' },
+    { id: 3, name: 'Wholesaler 1', type: 'wholesaler', description: '' },
     { id: 4, name: 'Retailer 1', type: 'retailer', description: '' },
   ],
   lanes: [

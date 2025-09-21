@@ -50,7 +50,7 @@ const playerRoles = [
   { value: 'retailer', label: 'Retailer' },
   { value: 'wholesaler', label: 'Wholesaler' },
   { value: 'distributor', label: 'Distributor' },
-  { value: 'factory', label: 'Factory' },
+  { value: 'manufacturer', label: 'Manufacturer' },
 ];
 
 const agentStrategies = [
@@ -61,6 +61,7 @@ const agentStrategies = [
       { value: 'BULLWHIP', label: 'Bullwhip (heuristic)' },
       { value: 'CONSERVATIVE', label: 'Conservative (heuristic)' },
       { value: 'RANDOM', label: 'Random (heuristic)' },
+      { value: 'PI_HEURISTIC', label: 'PI Heuristic (control)' },
     ]
   },
   {
@@ -105,6 +106,7 @@ const strategyDescriptions = {
   BULLWHIP: 'Tends to overreact to demand changes.',
   CONSERVATIVE: 'Maintains stable inventory levels.',
   RANDOM: 'Makes random order decisions.',
+  PI_HEURISTIC: 'Uses a proportional-integral controller to balance demand forecast and inventory error.',
   DEMAND_DRIVEN: 'LLM: demand-driven analysis.',
   COST_OPTIMIZATION: 'LLM: optimizes for lower cost.',
   LLM_CONSERVATIVE: 'AI-powered strategy using language models.',
@@ -152,7 +154,7 @@ const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
             <option value="retailer">Retailer</option>
             <option value="distributor">Distributor</option>
             <option value="manufacturer">Manufacturer</option>
-            <option value="supplier">Supplier</option>
+            <option value="wholesaler">Wholesaler</option>
           </Select>
         </FormControl>
         <Text color="gray.500" fontSize="sm">Configure policy values for the selected node.</Text>
@@ -275,7 +277,7 @@ const CreateMixedGame = () => {
     retailer: { selling_price: 100.0, standard_cost: 80.0 },
     wholesaler: { selling_price: 75.0, standard_cost: 60.0 },
     distributor: { selling_price: 60.0, standard_cost: 45.0 },
-    factory: { selling_price: 45.0, standard_cost: 30.0 }
+    manufacturer: { selling_price: 45.0, standard_cost: 30.0 }
   });
   // Missing local state for system configuration ranges and per-node policies
   // Node policies for each role in the supply chain
@@ -311,7 +313,7 @@ const CreateMixedGame = () => {
       smoothing_gamma: 0.2,
       forecast_horizon: 4
     },
-    factory: {
+    manufacturer: {
       policy_type: 'base_stock',
       base_stock_level: 200,
       reorder_point: 80,
@@ -589,9 +591,9 @@ const CreateMixedGame = () => {
             selling_price: parseFloat(pricingConfig.distributor.selling_price),
             standard_cost: parseFloat(pricingConfig.distributor.standard_cost)
           },
-          factory: {
-            selling_price: parseFloat(pricingConfig.factory.selling_price),
-            standard_cost: parseFloat(pricingConfig.factory.standard_cost)
+          manufacturer: {
+            selling_price: parseFloat(pricingConfig.manufacturer.selling_price),
+            standard_cost: parseFloat(pricingConfig.manufacturer.standard_cost)
           }
         },
         player_assignments: players.map(player => {
@@ -1000,7 +1002,7 @@ const CreateMixedGame = () => {
                             retailer: defaults(p),
                             distributor: defaults(p),
                             manufacturer: defaults(p),
-                            supplier: defaults(p),
+                            wholesaler: defaults(p),
                           });
                         }}>
                           Reset Node Policies to Server Defaults
@@ -1061,7 +1063,7 @@ const CreateMixedGame = () => {
                     retailer: { selling_price: p, standard_cost: std },
                     wholesaler: { selling_price: p, standard_cost: std },
                     distributor: { selling_price: p, standard_cost: std },
-                    factory: { selling_price: p, standard_cost: std },
+                    manufacturer: { selling_price: p, standard_cost: std },
                   });
                 }}>
                   Reset Pricing to Server Defaults

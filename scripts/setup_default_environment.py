@@ -139,9 +139,9 @@ async def create_default_environment():
                 # Create nodes
                 nodes = [
                     {"name": "Retailer", "type": "RETAILER", "position_x": 100, "position_y": 100},
-                    {"name": "Distributor", "type": "DISTRIBUTOR", "position_x": 300, "position_y": 100},
-                    {"name": "Manufacturer", "type": "MANUFACTURER", "position_x": 500, "position_y": 100},
-                    {"name": "Supplier", "type": "SUPPLIER", "position_x": 700, "position_y": 100}
+                    {"name": "Wholesaler", "type": "WHOLESALER", "position_x": 300, "position_y": 100},
+                    {"name": "Distributor", "type": "DISTRIBUTOR", "position_x": 500, "position_y": 100},
+                    {"name": "Manufacturer", "type": "MANUFACTURER", "position_x": 700, "position_y": 100}
                 ]
                 
                 node_ids = {}
@@ -164,9 +164,9 @@ async def create_default_environment():
                 
                 # Create lanes between nodes
                 lanes = [
-                    {"from_node": "Retailer", "to_node": "Distributor"},
-                    {"from_node": "Distributor", "to_node": "Manufacturer"},
-                    {"from_node": "Manufacturer", "to_node": "Supplier"}
+                    {"from_node": "Retailer", "to_node": "Wholesaler"},
+                    {"from_node": "Wholesaler", "to_node": "Distributor"},
+                    {"from_node": "Distributor", "to_node": "Manufacturer"}
                 ]
                 
                 for lane in lanes:
@@ -225,7 +225,7 @@ async def create_default_environment():
             
             # Create AI users for each role if they don't exist
             ai_users = {}
-            roles = ["retailer", "distributor", "manufacturer", "supplier"]
+            roles = ["retailer", "wholesaler", "distributor", "manufacturer"]
             
             for role in roles:
                 # Check if AI user exists
@@ -317,9 +317,9 @@ async def create_default_environment():
             logger.error(f"❌ Error setting up default environment: {e}")
             raise
                     {"name": "Retailer", "node_type": NodeType.RETAILER, "position_x": 0, "position_y": 0, "role": PlayerRole.RETAILER},
-                    {"name": "Distributor", "node_type": NodeType.DISTRIBUTOR, "position_x": 1, "position_y": 0, "role": PlayerRole.DISTRIBUTOR},
-                    {"name": "Manufacturer", "node_type": NodeType.MANUFACTURER, "position_x": 2, "position_y": 0, "role": PlayerRole.MANUFACTURER},
-                    {"name": "Supplier", "node_type": NodeType.SUPPLIER, "position_x": 3, "position_y": 0, "role": PlayerRole.SUPPLIER},
+                    {"name": "Wholesaler", "node_type": NodeType.WHOLESALER, "position_x": 1, "position_y": 0, "role": PlayerRole.WHOLESALER},
+                    {"name": "Distributor", "node_type": NodeType.DISTRIBUTOR, "position_x": 2, "position_y": 0, "role": PlayerRole.DISTRIBUTOR},
+                    {"name": "Manufacturer", "node_type": NodeType.MANUFACTURER, "position_x": 3, "position_y": 0, "role": PlayerRole.MANUFACTURER},
                 ]
                 
                 node_objs = []
@@ -380,7 +380,7 @@ async def create_default_environment():
             
             # Create AI users for each role
             ai_users = {}
-            for role in ["retailer", "distributor", "manufacturer", "supplier"]:
+            for role in ["retailer", "wholesaler", "distributor", "manufacturer"]:
                 ai_user = User(
                     username=f"ai_{role}",
                     email=f"ai_{role}@daybreak.ai",

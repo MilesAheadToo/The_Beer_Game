@@ -421,25 +421,25 @@ async def get_game_metrics(
     # Calculate overall metrics
     avg_weekly_demand = total_demand / (len(rounds) * len(players)) if players and rounds else 0
     
-    # Calculate overall bullwhip effect (retailer variance vs factory variance)
+    # Calculate overall bullwhip effect (retailer variance vs manufacturer variance)
     retailer_orders = []
-    factory_orders = []
+    manufacturer_orders = []
     
     for player in player_performances:
         if player.role == "retailer":
             retailer_orders = [m.order_placed for m in player.round_metrics]
-        elif player.role == "factory":
-            factory_orders = [m.order_placed for m in player.round_metrics]
+        elif player.role == "manufacturer":
+            manufacturer_orders = [m.order_placed for m in player.round_metrics]
     
     overall_bullwhip = None
-    if retailer_orders and factory_orders and len(retailer_orders) == len(factory_orders):
+    if retailer_orders and manufacturer_orders and len(retailer_orders) == len(manufacturer_orders):
         avg_retailer = sum(retailer_orders) / len(retailer_orders)
-        avg_factory = sum(factory_orders) / len(factory_orders)
+        avg_manufacturer = sum(manufacturer_orders) / len(manufacturer_orders)
         
         if avg_retailer > 0:
             retailer_var = sum((o - avg_retailer) ** 2 for o in retailer_orders) / len(retailer_orders)
-            factory_var = sum((o - avg_factory) ** 2 for o in factory_orders) / len(factory_orders)
-            overall_bullwhip = factory_var / retailer_var if retailer_var > 0 else None
+            manufacturer_var = sum((o - avg_manufacturer) ** 2 for o in manufacturer_orders) / len(manufacturer_orders)
+            overall_bullwhip = manufacturer_var / retailer_var if retailer_var > 0 else None
     
     # Prepare final response
     response = GameMetricsResponse(

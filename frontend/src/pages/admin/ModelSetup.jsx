@@ -34,30 +34,30 @@ import PageLayout from '../../components/PageLayout';
 import { mixedGameApi } from '../../services/api';
 import { useSystemConfig } from '../../contexts/SystemConfigContext.jsx';
 
-const siteTypes = ['supplier','manufacturer','distributor','retailer'];
+const siteTypes = ['manufacturer','distributor','wholesaler','retailer'];
 
 const classicPreset = () => ({
   version: 1,
   items: [{ id: 'item_1', name: 'Item 1' }],
   sites: [
-    { id: 'supplier_1', type: 'supplier', name: 'Supplier 1', items_sold: ['item_1'] },
     { id: 'manufacturer_1', type: 'manufacturer', name: 'Manufacturer 1', items_sold: ['item_1'] },
     { id: 'distributor_1', type: 'distributor', name: 'Distributor 1', items_sold: ['item_1'] },
+    { id: 'wholesaler_1', type: 'wholesaler', name: 'Wholesaler 1', items_sold: ['item_1'] },
     { id: 'retailer_1', type: 'retailer', name: 'Retailer 1', items_sold: ['item_1'] },
   ],
   site_item_settings: {
-    supplier_1: { item_1: { inventory_target: 20, holding_cost: 0.5, backorder_cost: 1.0, avg_selling_price: 7.0, standard_cost: 5.0, moq: 0 } },
     manufacturer_1: { item_1: { inventory_target: 20, holding_cost: 0.5, backorder_cost: 1.0, avg_selling_price: 7.0, standard_cost: 5.0, moq: 0 } },
     distributor_1: { item_1: { inventory_target: 20, holding_cost: 0.5, backorder_cost: 1.0, avg_selling_price: 7.0, standard_cost: 5.0, moq: 0 } },
+    wholesaler_1: { item_1: { inventory_target: 20, holding_cost: 0.5, backorder_cost: 1.0, avg_selling_price: 7.0, standard_cost: 5.0, moq: 0 } },
     retailer_1: { item_1: { inventory_target: 20, holding_cost: 0.5, backorder_cost: 1.0, avg_selling_price: 7.0, standard_cost: 5.0, moq: 0 } },
   },
   lanes: [
-    { from_site_id: 'supplier_1', to_site_id: 'manufacturer_1', item_id: 'item_1', lead_time: 2, capacity: null, otif_target: 0.95 },
     { from_site_id: 'manufacturer_1', to_site_id: 'distributor_1', item_id: 'item_1', lead_time: 2, capacity: null, otif_target: 0.95 },
-    { from_site_id: 'distributor_1', to_site_id: 'retailer_1', item_id: 'item_1', lead_time: 2, capacity: null, otif_target: 0.95 },
+    { from_site_id: 'distributor_1', to_site_id: 'wholesaler_1', item_id: 'item_1', lead_time: 2, capacity: null, otif_target: 0.95 },
+    { from_site_id: 'wholesaler_1', to_site_id: 'retailer_1', item_id: 'item_1', lead_time: 2, capacity: null, otif_target: 0.95 },
   ],
   retailer_demand: { distribution: 'profile', params: { week1_4: 4, week5_plus: 8 }, expected_delivery_offset: 1 },
-  supplier_lead_times: { item_1: 2 },
+  manufacturer_lead_times: { item_1: 2 },
 });
 
 function numberIn(range, v) {
@@ -158,13 +158,13 @@ export default function ModelSetup() {
 
   const addLane = () => {
     const firstItem = items[0]?.id || 'item_1';
-    const supplier = sites.find((s) => s.type === 'supplier')?.id || '';
+    const manufacturer = sites.find((s) => s.type === 'manufacturer')?.id || '';
     const retailer = sites.find((s) => s.type === 'retailer')?.id || '';
-    setCfg((prev) => ({ ...prev, lanes: [...(prev.lanes || []), { from_site_id: supplier, to_site_id: retailer, item_id: firstItem, lead_time: 1, capacity: null, otif_target: 0.95 }] }));
+    setCfg((prev) => ({ ...prev, lanes: [...(prev.lanes || []), { from_site_id: manufacturer, to_site_id: retailer, item_id: firstItem, lead_time: 1, capacity: null, otif_target: 0.95 }] }));
   };
 
   const generateChainLanesAllToAll = () => {
-    const typesOrder = ['supplier','manufacturer','distributor','retailer'];
+    const typesOrder = ['manufacturer','distributor','wholesaler','retailer'];
     const byType = Object.fromEntries(typesOrder.map((t) => [t, sites.filter((s) => s.type === t)]));
     const newLanes = [];
     for (let i = 0; i < typesOrder.length - 1; i++) {

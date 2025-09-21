@@ -58,9 +58,9 @@ class SupplyChainConfigService:
         # Map node types to player roles
         role_mapping = {
             NodeType.RETAILER: "retailer",
+            NodeType.WHOLESALER: "wholesaler",
             NodeType.DISTRIBUTOR: "distributor",
-            NodeType.MANUFACTURER: "manufacturer",
-            NodeType.SUPPLIER: "supplier"
+            NodeType.MANUFACTURER: "manufacturer"
         }
         
         # Create node policies

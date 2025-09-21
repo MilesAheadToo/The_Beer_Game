@@ -5,9 +5,9 @@ from datetime import datetime
 
 class NodeType(str, Enum):
     RETAILER = "retailer"
+    WHOLESALER = "wholesaler"
     DISTRIBUTOR = "distributor"
     MANUFACTURER = "manufacturer"
-    SUPPLIER = "supplier"
 
 class RangeConfig(BaseModel):
     min: float = Field(..., ge=0, description="Minimum value")

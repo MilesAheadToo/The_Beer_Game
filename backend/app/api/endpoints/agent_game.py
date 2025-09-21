@@ -94,7 +94,7 @@ def set_agent_strategy(
     """
     Set the strategy for an AI agent.
     
-    - **role**: The role of the agent (retailer, wholesaler, distributor, factory)
+    - **role**: The role of the agent (retailer, wholesaler, distributor, manufacturer)
     - **strategy**: The strategy to use (naive, bullwhip, conservative, random)
     """
     try:

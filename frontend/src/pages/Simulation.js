@@ -179,7 +179,7 @@ const Simulation = () => {
     confidenceThreshold: 60,
     pipelineInventory: true,
     centralizedForecast: false,
-    supplierVisibility: false,
+    manufacturerVisibility: false,
     demandPattern: 'classic_step',
     initialDemand: 4,
     newDemand: 8,
@@ -300,7 +300,7 @@ const Simulation = () => {
                   <Grid item xs={12} sm={6}>
                     <ParameterSlider
                       label="Production delay (weeks)"
-                      description="Time required to produce factory orders"
+                      description="Time required to produce manufacturer orders"
                       value={config.productionDelay}
                       min={0}
                       max={6}
@@ -404,9 +404,9 @@ const Simulation = () => {
                       />
                       <ToggleControl
                         label="Supplier inventory visibility"
-                        description="Reveal upstream supplier inventory levels"
-                        checked={config.supplierVisibility}
-                        onChange={handleToggleChange('supplierVisibility')}
+                        description="Reveal upstream manufacturer inventory levels"
+                        checked={config.manufacturerVisibility}
+                        onChange={handleToggleChange('manufacturerVisibility')}
                       />
                     </Box>
                   </Paper>
@@ -558,7 +558,7 @@ const Simulation = () => {
                     />
                     <SummaryRow label="Pipeline inventory" value={formatBoolean(config.pipelineInventory)} />
                     <SummaryRow label="Centralized forecast" value={formatBoolean(config.centralizedForecast)} />
-                    <SummaryRow label="Supplier visibility" value={formatBoolean(config.supplierVisibility)} />
+                    <SummaryRow label="Manufacturer visibility" value={formatBoolean(config.manufacturerVisibility)} />
                   </Paper>
                 </Grid>
                 <Grid item xs={12}>

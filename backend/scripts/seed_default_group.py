@@ -103,7 +103,7 @@ ROLE_EMAIL_TEMPLATES = {
     PlayerRole.RETAILER: "retailer+g{group_id}@daybreak.ai",
     PlayerRole.WHOLESALER: "wholesaler+g{group_id}@daybreak.ai",
     PlayerRole.DISTRIBUTOR: "distributor+g{group_id}@daybreak.ai",
-    PlayerRole.MANUFACTURER: "factory+g{group_id}@daybreak.ai",
+    PlayerRole.MANUFACTURER: "manufacturer+g{group_id}@daybreak.ai",
 }
 
 
@@ -285,9 +285,9 @@ def ensure_supply_chain_config(session: Session, group: Group) -> SupplyChainCon
 
     node_specs = [
         ("Retailer", NodeType.RETAILER),
+        ("Wholesaler", NodeType.WHOLESALER),
         ("Distributor", NodeType.DISTRIBUTOR),
         ("Manufacturer", NodeType.MANUFACTURER),
-        ("Supplier", NodeType.SUPPLIER),
     ]
     nodes: Dict[NodeType, Node] = {}
     for name, node_type in node_specs:
@@ -301,9 +301,9 @@ def ensure_supply_chain_config(session: Session, group: Group) -> SupplyChainCon
         nodes[node_type] = node
 
     lane_specs = [
-        (NodeType.SUPPLIER, NodeType.MANUFACTURER),
         (NodeType.MANUFACTURER, NodeType.DISTRIBUTOR),
-        (NodeType.DISTRIBUTOR, NodeType.RETAILER),
+        (NodeType.DISTRIBUTOR, NodeType.WHOLESALER),
+        (NodeType.WHOLESALER, NodeType.RETAILER),
     ]
     for upstream_type, downstream_type in lane_specs:
         lane = Lane(
@@ -493,8 +493,9 @@ def configure_human_players_for_game(
             "user_id": user.id,
         }
 
-    if "wholesaler" in role_assignments and "supplier" not in role_assignments:
-        role_assignments["supplier"] = dict(role_assignments["wholesaler"])
+    if "supplier" in role_assignments:
+        role_assignments.setdefault("wholesaler", dict(role_assignments["supplier"]))
+        role_assignments.pop("supplier", None)
 
     # Remove any lingering agent configs from previous runs
     session.query(AgentConfig).filter(AgentConfig.game_id == game.id).delete(
@@ -587,8 +588,9 @@ def ensure_naive_agents(session: Session, game: Game) -> None:
             "user_id": None,
         }
 
-    if "wholesaler" in role_assignments and "supplier" not in role_assignments:
-        role_assignments["supplier"] = dict(role_assignments["wholesaler"])
+    if "supplier" in role_assignments:
+        role_assignments.setdefault("wholesaler", dict(role_assignments["supplier"]))
+        role_assignments.pop("supplier", None)
 
     game.role_assignments = role_assignments
     session.add(game)
@@ -604,7 +606,7 @@ def ensure_role_users(session: Session, group: Group) -> None:
         "retailer": f"retailer+g{group.id}@daybreak.ai",
         "wholesaler": f"wholesaler+g{group.id}@daybreak.ai",
         "distributor": f"distributor+g{group.id}@daybreak.ai",
-        "factory": f"factory+g{group.id}@daybreak.ai",
+        "manufacturer": f"manufacturer+g{group.id}@daybreak.ai",
     }
 
     for role, email in expected_emails.items():

@@ -25,7 +25,7 @@ const Tutorial = ({ onClose, showOnboarding = false }) => {
     },
     {
       title: 'The Supply Chain',
-      content: 'The game simulates a four-stage supply chain: Retailer, Wholesaler, Distributor, and Factory. You can play as any of these roles, each with its own challenges and strategies.',
+      content: 'The game simulates a four-stage supply chain: Retailer, Wholesaler, Distributor, and Manufacturer. You can play as any of these roles, each with its own challenges and strategies.',
       image: '/images/tutorial/supply-chain.svg',
       showNext: true,
       showPrev: true,
@@ -33,7 +33,7 @@ const Tutorial = ({ onClose, showOnboarding = false }) => {
     },
     {
       title: 'Making Orders',
-      content: 'Each turn, you\'ll need to decide how many units to order from your supplier. Consider your current inventory, incoming orders, and customer demand when making your decision.',
+      content: 'Each turn, you\'ll need to decide how many units to order from your upstream partner. Consider your current inventory, incoming orders, and customer demand when making your decision.',
       image: '/images/tutorial/orders.svg',
       showNext: true,
       showPrev: true,

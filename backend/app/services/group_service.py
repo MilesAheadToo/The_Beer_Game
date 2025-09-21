@@ -93,9 +93,9 @@ class GroupService:
 
             node_specs = [
                 ("Retailer", NodeType.RETAILER),
+                ("Wholesaler", NodeType.WHOLESALER),
                 ("Distributor", NodeType.DISTRIBUTOR),
                 ("Manufacturer", NodeType.MANUFACTURER),
-                ("Supplier", NodeType.SUPPLIER),
             ]
             nodes = {}
             for name, node_type in node_specs:
@@ -109,9 +109,9 @@ class GroupService:
                 nodes[node_type] = node
 
             lane_specs = [
-                (NodeType.SUPPLIER, NodeType.MANUFACTURER),
                 (NodeType.MANUFACTURER, NodeType.DISTRIBUTOR),
-                (NodeType.DISTRIBUTOR, NodeType.RETAILER),
+                (NodeType.DISTRIBUTOR, NodeType.WHOLESALER),
+                (NodeType.WHOLESALER, NodeType.RETAILER),
             ]
             for upstream_type, downstream_type in lane_specs:
                 lane = Lane(
@@ -186,9 +186,9 @@ class GroupService:
                     "role": PlayerRole.MANUFACTURER,
                 },
                 {
-                    "username": f"supplier_{group_suffix}",
-                    "email": f"supplier+{group_suffix}@daybreak.ai",
-                    "full_name": "Supplier",
+                    "username": f"wholesaler_{group_suffix}",
+                    "email": f"wholesaler+{group_suffix}@daybreak.ai",
+                    "full_name": "Wholesaler",
                     "role": PlayerRole.WHOLESALER,
                 },
             ]

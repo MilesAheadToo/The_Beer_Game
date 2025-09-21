@@ -92,7 +92,7 @@ const FALLBACK_DECISION_TIMELINE = [
   {
     week: 16,
     order: 2280,
-    reason: 'Maintained previous order to absorb variability from supplier delay.',
+    reason: 'Maintained previous order to absorb variability from manufacturer delay.',
     inventory: 1690,
     backlog: 140,
   },

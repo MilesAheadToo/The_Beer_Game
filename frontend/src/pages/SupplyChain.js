@@ -36,9 +36,9 @@ import {
 const CustomNode = ({ data, selected }) => {
   const getNodeIcon = () => {
     switch (data.type) {
-      case 'factory':
+      case 'manufacturer':
         return <FactoryIcon fontSize="large" />;
-      case 'warehouse':
+      case 'wholesaler':
         return <InventoryIcon fontSize="large" />;
       case 'distributor':
         return <ShippingIcon fontSize="large" />;
@@ -85,13 +85,13 @@ const SupplyChain = () => {
     {
       id: '1',
       type: 'custom',
-      data: { label: 'Factory', type: 'factory', capacity: '1000 units/day' },
+      data: { label: 'Manufacturer', type: 'manufacturer', capacity: '1000 units/day' },
       position: { x: 250, y: 25 },
     },
     {
       id: '2',
       type: 'custom',
-      data: { label: 'Warehouse', type: 'warehouse', capacity: '5000 units' },
+      data: { label: 'Wholesaler', type: 'wholesaler', capacity: '5000 units' },
       position: { x: 100, y: 200 },
     },
     {
@@ -304,8 +304,8 @@ const SupplyChain = () => {
               }
               sx={{ mb: 2 }}
             >
-              <MenuItem value="factory">Factory</MenuItem>
-              <MenuItem value="warehouse">Warehouse</MenuItem>
+              <MenuItem value="manufacturer">Manufacturer</MenuItem>
+              <MenuItem value="wholesaler">Wholesaler</MenuItem>
               <MenuItem value="distributor">Distributor</MenuItem>
               <MenuItem value="retailer">Retailer</MenuItem>
             </TextField>

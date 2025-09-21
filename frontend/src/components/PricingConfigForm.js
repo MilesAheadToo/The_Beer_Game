@@ -104,7 +104,7 @@ const PricingConfigForm = ({ pricingConfig, onChange }) => {
           <Box className="card-surface pad-6">{renderRolePricing('retailer', 'Retailer')}</Box>
           <Box className="card-surface pad-6">{renderRolePricing('wholesaler', 'Wholesaler')}</Box>
           <Box className="card-surface pad-6">{renderRolePricing('distributor', 'Distributor')}</Box>
-          <Box className="card-surface pad-6">{renderRolePricing('factory', 'Factory')}</Box>
+          <Box className="card-surface pad-6">{renderRolePricing('manufacturer', 'Manufacturer')}</Box>
         </VStack>
       </CardBody>
     </Card>

@@ -142,12 +142,12 @@ class BullwhipAnalysis(BaseModel):
                 "order_variations": {
                     "retailer": [0.1, 0.2, 0.15, ...],
                     "distributor": [0.2, 0.3, 0.25, ...],
-                    "factory": [0.3, 0.4, 0.35, ...]
+                    "manufacturer": [0.3, 0.4, 0.35, ...]
                 },
                 "inventory_variations": {
                     "retailer": [5, 4, 6, ...],
                     "distributor": [10, 12, 9, ...],
-                    "factory": [20, 18, 22, ...]
+                    "manufacturer": [20, 18, 22, ...]
                 },
                 "bullwhip_effect": 1.8
             }

@@ -38,16 +38,16 @@ import {
 
 const NODE_TYPES = [
   { value: 'retailer', label: 'Retailer' },
+  { value: 'wholesaler', label: 'Wholesaler' },
   { value: 'distributor', label: 'Distributor' },
   { value: 'manufacturer', label: 'Manufacturer' },
-  { value: 'supplier', label: 'Supplier' },
 ];
 
 const NODE_TYPE_COLORS = {
   retailer: 'success',
   distributor: 'info',
   manufacturer: 'warning',
-  supplier: 'error',
+  wholesaler: 'error',
 };
 
 const NodeForm = ({ nodes = [], onAdd, onUpdate, onDelete, loading = false }) => {

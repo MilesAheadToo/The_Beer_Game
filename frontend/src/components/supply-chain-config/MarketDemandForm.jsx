@@ -293,14 +293,14 @@ const MarketDemandForm = ({
     retailer: 'Retailer',
     distributor: 'Distributor',
     manufacturer: 'Manufacturer',
-    supplier: 'Supplier'
+    wholesaler: 'Wholesaler'
   };
 
   const NODE_TYPE_COLORS = {
     retailer: 'success',
     distributor: 'info',
     manufacturer: 'warning',
-    supplier: 'error'
+    wholesaler: 'error'
   };
 
   // Filter demands based on active tab

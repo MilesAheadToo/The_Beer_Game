@@ -123,9 +123,9 @@ async def create_default_environment():
                 # Create nodes
                 nodes = [
                     {"name": "Retailer", "node_type": NodeType.RETAILER, "position_x": 0, "position_y": 0, "role": PlayerRole.RETAILER},
-                    {"name": "Distributor", "node_type": NodeType.DISTRIBUTOR, "position_x": 1, "position_y": 0, "role": PlayerRole.DISTRIBUTOR},
-                    {"name": "Manufacturer", "node_type": NodeType.MANUFACTURER, "position_x": 2, "position_y": 0, "role": PlayerRole.MANUFACTURER},
-                    {"name": "Supplier", "node_type": NodeType.SUPPLIER, "position_x": 3, "position_y": 0, "role": PlayerRole.SUPPLIER},
+                    {"name": "Wholesaler", "node_type": NodeType.WHOLESALER, "position_x": 1, "position_y": 0, "role": PlayerRole.WHOLESALER},
+                    {"name": "Distributor", "node_type": NodeType.DISTRIBUTOR, "position_x": 2, "position_y": 0, "role": PlayerRole.DISTRIBUTOR},
+                    {"name": "Manufacturer", "node_type": NodeType.MANUFACTURER, "position_x": 3, "position_y": 0, "role": PlayerRole.MANUFACTURER},
                 ]
                 
                 node_objs = []
@@ -186,7 +186,7 @@ async def create_default_environment():
             
             # Create AI users for each role
             ai_users = {}
-            for role in ["retailer", "distributor", "manufacturer", "supplier"]:
+            for role in ["retailer", "wholesaler", "distributor", "manufacturer"]:
                 ai_user = User(
                     username=f"ai_{role}",
                     email=f"ai_{role}@daybreak.ai",

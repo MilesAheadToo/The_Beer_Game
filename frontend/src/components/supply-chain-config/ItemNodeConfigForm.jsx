@@ -235,16 +235,16 @@ const ItemNodeConfigForm = ({
 
   const NODE_TYPE_LABELS = {
     retailer: 'Retailer',
+    wholesaler: 'Wholesaler',
     distributor: 'Distributor',
-    manufacturer: 'Manufacturer',
-    supplier: 'Supplier'
+    manufacturer: 'Manufacturer'
   };
 
   const NODE_TYPE_COLORS = {
     retailer: 'success',
+    wholesaler: 'error',
     distributor: 'info',
-    manufacturer: 'warning',
-    supplier: 'error'
+    manufacturer: 'warning'
   };
 
   // Pagination

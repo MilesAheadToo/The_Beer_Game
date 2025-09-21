@@ -27,7 +27,7 @@ class PlayerRole(str, PyEnum):
     RETAILER = "retailer"
     WHOLESALER = "wholesaler"
     DISTRIBUTOR = "distributor"
-    FACTORY = "factory"
+    MANUFACTURER = "manufacturer"
 
 # Models
 class Game(Base):

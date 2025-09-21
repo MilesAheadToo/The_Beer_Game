@@ -47,7 +47,7 @@ async def suggest_orders(
           "retailer": {"inventory": 10, "backlog": 0, ...}, 
           "wholesaler": {...}, 
           "distributor": {...}, 
-          "factory": {...} 
+          "manufacturer": {...} 
         },
         ...  # window_size time steps
       ]

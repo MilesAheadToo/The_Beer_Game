@@ -765,7 +765,7 @@ class Item(BaseModel):
 
 class Site(BaseModel):
     id: str
-    type: str  # supplier|manufacturer|distributor|retailer
+    type: str  # manufacturer|distributor|wholesaler|retailer
     name: str
     items_sold: List[str] = Field(default_factory=list)
 
@@ -809,7 +809,7 @@ class ModelConfig(BaseModel):
     site_item_settings: Mapping[str, Mapping[str, SiteItemSettings]]
     lanes: List[Lane]
     retailer_demand: RetailerDemand
-    supplier_lead_times: Mapping[str, float] = Field(default_factory=dict)
+    manufacturer_lead_times: Mapping[str, float] = Field(default_factory=dict)
 
 
 def _read_model_cfg() -> ModelConfig:
@@ -847,24 +847,24 @@ def _read_model_cfg() -> ModelConfig:
     default = ModelConfig(
         items=[Item(id="item_1", name="Item 1")],
         sites=[
-            Site(id="supplier_1", type="supplier", name="Supplier 1", items_sold=["item_1"]),
             Site(id="manufacturer_1", type="manufacturer", name="Manufacturer 1", items_sold=["item_1"]),
             Site(id="distributor_1", type="distributor", name="Distributor 1", items_sold=["item_1"]),
+            Site(id="wholesaler_1", type="wholesaler", name="Wholesaler 1", items_sold=["item_1"]),
             Site(id="retailer_1", type="retailer", name="Retailer 1", items_sold=["item_1"]),
         ],
         site_item_settings={
-            "supplier_1": {"item_1": SiteItemSettings(inventory_target=20, holding_cost=0.5, backorder_cost=1.0, avg_selling_price=7.0, standard_cost=5.0, moq=0)},
             "manufacturer_1": {"item_1": SiteItemSettings(inventory_target=20, holding_cost=0.5, backorder_cost=1.0, avg_selling_price=7.0, standard_cost=5.0, moq=0)},
             "distributor_1": {"item_1": SiteItemSettings(inventory_target=20, holding_cost=0.5, backorder_cost=1.0, avg_selling_price=7.0, standard_cost=5.0, moq=0)},
+            "wholesaler_1": {"item_1": SiteItemSettings(inventory_target=20, holding_cost=0.5, backorder_cost=1.0, avg_selling_price=7.0, standard_cost=5.0, moq=0)},
             "retailer_1": {"item_1": SiteItemSettings(inventory_target=20, holding_cost=0.5, backorder_cost=1.0, avg_selling_price=7.0, standard_cost=5.0, moq=0)},
         },
         lanes=[
-            Lane(from_site_id="supplier_1", to_site_id="manufacturer_1", item_id="item_1", lead_time=2, capacity=None, otif_target=0.95),
             Lane(from_site_id="manufacturer_1", to_site_id="distributor_1", item_id="item_1", lead_time=2, capacity=None, otif_target=0.95),
-            Lane(from_site_id="distributor_1", to_site_id="retailer_1", item_id="item_1", lead_time=2, capacity=None, otif_target=0.95),
+            Lane(from_site_id="distributor_1", to_site_id="wholesaler_1", item_id="item_1", lead_time=2, capacity=None, otif_target=0.95),
+            Lane(from_site_id="wholesaler_1", to_site_id="retailer_1", item_id="item_1", lead_time=2, capacity=None, otif_target=0.95),
         ],
         retailer_demand=RetailerDemand(distribution="profile", params={"week1_4": 4, "week5_plus": 8}, expected_delivery_offset=1),
-        supplier_lead_times={"item_1": 2},
+        manufacturer_lead_times={"item_1": 2},
     )
     return default
 

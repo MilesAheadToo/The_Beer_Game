@@ -68,7 +68,7 @@ class SupplyChainDataset(InMemoryDataset):
         # Create raw directory if it doesn't exist
         self.raw_dir.mkdir(parents=True, exist_ok=True)
         
-        num_nodes = 4  # Retailer, Wholesaler, Distributor, Factory
+        num_nodes = 4  # Retailer, Wholesaler, Distributor, Manufacturer
         num_features = 10
         num_time_steps = 1000
         

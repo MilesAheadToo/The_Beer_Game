@@ -3,6 +3,7 @@ import random
 import statistics
 from enum import Enum
 from collections import deque
+from dataclasses import dataclass, field
 
 from .beer_game_xai_explain import (
     Obs,
@@ -24,17 +25,24 @@ class AgentType(Enum):
     RETAILER = "retailer"
     WHOLESALER = "wholesaler"
     DISTRIBUTOR = "distributor"
-    FACTORY = "factory"
+    MANUFACTURER = "manufacturer"
 
 class AgentStrategy(Enum):
     NAIVE = "naive"  # Simple strategy, always orders based on current demand
     BULLWHIP = "bullwhip"  # Tends to over-order when demand increases
     CONSERVATIVE = "conservative"  # Maintains stable orders
     RANDOM = "random"  # Random ordering for baseline
+    PI = "pi_heuristic"  # Proportional-integral controller
     LLM = "llm"  # Large Language Model strategy
     DAYBREAK_DTCE = "daybreak_dtce"  # Decentralized twin coordinated ensemble
     DAYBREAK_DTCE_CENTRAL = "daybreak_dtce_central"  # DTCE with central override
     DAYBREAK_DTCE_GLOBAL = "daybreak_dtce_global"  # Single agent orchestrating the network
+
+
+@dataclass
+class PIControllerState:
+    history: deque = field(default_factory=lambda: deque(maxlen=4))
+    integral: float = 0.0
 
 
 class DaybreakCoordinator:
@@ -136,7 +144,7 @@ class DaybreakCoordinator:
             reasons=reasons,
         )
         explanation = explain_supervisor_adjustment(
-            role=agent_type.name.title(),
+            role=agent_type.name.replace("_", " ").title(),
             week=week_val,
             pre_qty=pre_qty,
             post_qty=final_order,
@@ -264,7 +272,7 @@ class DaybreakGlobalController:
             reasons=reasons,
         )
         explanation = explain_supervisor_adjustment(
-            role=f"{agent_type.name.title()} (Global)",
+            role=f"{agent_type.name.replace("_", " ").title()} (Global)",
             week=round_number,
             pre_qty=int(round(safe_base)),
             post_qty=final_qty,
@@ -305,7 +313,16 @@ class BeerGameAgent:
         # Optional global coordinator when a single agent manages all roles
         self.global_controller = global_controller
         self.last_explanation: Optional[str] = None
-        
+        # PI controller state
+        self._pi_state = PIControllerState()
+        self._pi_alpha = 1.0
+        self._pi_beta = 0.6
+        self._pi_gamma = 0.05
+        self._pi_target_multiplier = 2.0
+        self._pi_integral_clip: Tuple[float, float] = (-500.0, 500.0)
+        self._pi_max_order: Optional[int] = 500
+        self.reset_for_strategy()
+
     def make_decision(
         self,
         current_round: int,
@@ -365,6 +382,15 @@ class BeerGameAgent:
             order = self._bullwhip_strategy(current_demand, upstream_data)
         elif self.strategy == AgentStrategy.CONSERVATIVE:
             order = self._conservative_strategy(current_demand)
+        elif self.strategy == AgentStrategy.PI:
+            order = self._pi_strategy(
+                current_round,
+                current_demand,
+                upstream_data or {},
+                inventory_level,
+                backlog_level,
+                processed_shipments,
+            )
         elif self.strategy == AgentStrategy.LLM:
             order = self._llm_strategy(current_round, current_demand, upstream_data)
         elif self.strategy == AgentStrategy.DAYBREAK_DTCE:
@@ -404,6 +430,17 @@ class BeerGameAgent:
         self.last_order = order
         self.order_history.append(order)
         return order
+
+    def reset_for_strategy(self) -> None:
+        self._pi_state = PIControllerState()
+
+    def _get_downstream_role_name(self) -> Optional[str]:
+        mapping = {
+            AgentType.WHOLESALER: AgentType.RETAILER.value,
+            AgentType.DISTRIBUTOR: AgentType.WHOLESALER.value,
+            AgentType.MANUFACTURER: AgentType.DISTRIBUTOR.value,
+        }
+        return mapping.get(self.agent_type)
     
     def _naive_strategy(self, current_demand: Optional[int]) -> int:
         """Order exactly what was demanded this round."""
@@ -432,7 +469,61 @@ class BeerGameAgent:
         # Moving average of last 3 orders
         recent_orders = self.order_history[-3:] if len(self.order_history) >= 3 else self.order_history
         return int(sum(recent_orders) / len(recent_orders))
-    
+
+    def _pi_strategy(
+        self,
+        current_round: int,
+        current_demand: Optional[int],
+        upstream_data: Dict[str, Any],
+        inventory_level: int,
+        backlog_level: int,
+        incoming_shipments: List[float],
+    ) -> int:
+        downstream_role = self._get_downstream_role_name()
+        previous_orders_by_role: Dict[str, int] = upstream_data.get("previous_orders_by_role", {})
+
+        if current_demand is not None and (
+            self.agent_type == AgentType.RETAILER or self.can_see_demand
+        ):
+            observed_demand = current_demand
+        elif downstream_role:
+            observed_demand = previous_orders_by_role.get(downstream_role)
+        else:
+            observed_demand = None
+
+        if observed_demand is None:
+            observed_demand = self._pi_state.history[-1] if self._pi_state.history else self.last_order
+
+        observed_demand = max(0, int(round(observed_demand)))
+        self._pi_state.history.append(observed_demand)
+        forecast = sum(self._pi_state.history) / len(self._pi_state.history) if self._pi_state.history else float(observed_demand)
+
+        inbound_sum = float(sum(incoming_shipments)) if incoming_shipments else 0.0
+        inventory_position = float(inventory_level - backlog_level) + inbound_sum
+
+        target_inventory = float(max(0, int(round(self._pi_target_multiplier * max(forecast, 1.0)))))
+        error = target_inventory - inventory_position
+
+        self._pi_state.integral += error
+        lo, hi = self._pi_integral_clip
+        self._pi_state.integral = max(lo, min(hi, self._pi_state.integral))
+
+        order = (
+            self._pi_alpha * forecast
+            + self._pi_beta * error
+            + self._pi_gamma * self._pi_state.integral
+        )
+
+        if self._pi_max_order is not None:
+            order = min(self._pi_max_order, order)
+
+        order = max(0.0, order)
+        self.demand_history.append(observed_demand)
+        self.last_explanation = (
+            f"PI heuristic | forecast {forecast:.1f} | error {error:.1f} | integral {self._pi_state.integral:.1f}"
+        )
+        return int(round(order))
+
     def _random_strategy(self) -> int:
         """Make random orders for baseline testing."""
         return random.randint(1, 8)
@@ -716,7 +807,7 @@ class BeerGameAgent:
             whatifs = self._daybreak_whatifs(inventory_level, backlog_level)
 
             explanation = explain_role_decision(
-                role=self.agent_type.name.title(),
+                role=self.agent_type.name.replace("_", " ").title(),
                 week=week,
                 obs=obs,
                 action_qty=action_qty,
@@ -729,7 +820,7 @@ class BeerGameAgent:
             )
             return explanation
         except Exception:
-            return f"Decision (Week {week}, {self.agent_type.name.title()}): order **{action_qty}** units upstream."
+            return f"Decision (Week {week}, {self.agent_type.name.replace("_", " ").title()}): order **{action_qty}** units upstream."
 
     def _format_daybreak_notes(self, context: Optional[Dict[str, Any]]) -> Optional[str]:
         if not context:
@@ -839,9 +930,9 @@ class AgentManager:
             global_controller=self.daybreak_global_controller,
         )
 
-        self.agents[AgentType.FACTORY] = BeerGameAgent(
+        self.agents[AgentType.MANUFACTURER] = BeerGameAgent(
             agent_id=4,
-            agent_type=AgentType.FACTORY,
+            agent_type=AgentType.MANUFACTURER,
             strategy=AgentStrategy.NAIVE,
             can_see_demand=self.can_see_demand,
             llm_model="gpt-4o-mini",
@@ -873,6 +964,7 @@ class AgentManager:
                     self.daybreak_coordinator.set_override_pct(agent_type, override_pct)
             else:
                 self.daybreak_coordinator.set_override_pct(agent_type, None)
+            agent.reset_for_strategy()
     
     def set_demand_visibility(self, visible: bool):
         """Set whether agents can see the actual customer demand."""

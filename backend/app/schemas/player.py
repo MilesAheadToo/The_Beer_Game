@@ -6,7 +6,7 @@ class PlayerRole(str, Enum):
     RETAILER = "retailer"
     WHOLESALER = "wholesaler"
     DISTRIBUTOR = "distributor"
-    FACTORY = "factory"
+    MANUFACTURER = "manufacturer"
 
 class PlayerType(str, Enum):
     HUMAN = "human"

@@ -40,7 +40,7 @@ class PlayerRole(str, Enum):
     RETAILER = "retailer"
     WHOLESALER = "wholesaler"
     DISTRIBUTOR = "distributor"
-    FACTORY = "factory"
+    MANUFACTURER = "manufacturer"
 
 class RolePricing(BaseModel):
     selling_price: float = Field(..., gt=0, description="Selling price per unit")
@@ -67,9 +67,9 @@ class PricingConfig(BaseModel):
         default_factory=lambda: RolePricing(selling_price=60.0, standard_cost=45.0),
         description="Pricing configuration for the distributor role"
     )
-    factory: RolePricing = Field(
+    manufacturer: RolePricing = Field(
         default_factory=lambda: RolePricing(selling_price=45.0, standard_cost=30.0),
-        description="Pricing configuration for the factory role"
+        description="Pricing configuration for the manufacturer role"
     )
 
 class NodePolicy(BaseModel):

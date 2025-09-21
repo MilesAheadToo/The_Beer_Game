@@ -53,7 +53,7 @@ class AgentGameService:
             (PlayerRole.RETAILER, "AI Retailer"),
             (PlayerRole.WHOLESALER, "AI Wholesaler"),
             (PlayerRole.DISTRIBUTOR, "AI Distributor"),
-            (PlayerRole.FACTORY, "AI Factory")
+            (PlayerRole.MANUFACTURER, "AI Manufacturer")
         ]
         
         for role, name in roles:
@@ -106,7 +106,7 @@ class AgentGameService:
         demand_pattern = DemandPattern(**game.demand_pattern)
         current_demand = self._get_current_demand(game.current_round, demand_pattern)
         
-        # Get all players in the correct order (Retailer -> Wholesaler -> Distributor -> Factory)
+        # Get all players in the correct order (Retailer -> Wholesaler -> Distributor -> Manufacturer)
         players = (
             self.db.query(Player)
             .filter(Player.game_id == game_id)
@@ -130,7 +130,7 @@ class AgentGameService:
     def _process_player_turn(self, player: Player, game: Game, current_demand: int):
         """Process a single player's turn using AI agent."""
         # Get the AI agent for this player
-        agent_type = AgentType(player.role.lower())
+        agent_type = AgentType(player.role.value)
         agent = self.agent_manager.get_agent(agent_type)
         
         # Get player's current state
@@ -165,11 +165,31 @@ class AgentGameService:
             "incoming_shipments": incoming_shipments,
         }
 
+        previous_orders: List[int] = []
+        previous_orders_by_role: Dict[str, int] = {}
+        if previous_round:
+            for pr in previous_round.player_rounds:
+                quantity = getattr(pr, "order_quantity", getattr(pr, "order_placed", 0))
+                try:
+                    previous_orders.append(int(quantity))
+                except (TypeError, ValueError):
+                    continue
+                role_key: Optional[str] = None
+                if getattr(pr, "player", None) is not None:
+                    role_obj = getattr(pr.player, "role", None)
+                    if hasattr(role_obj, "value"):
+                        role_key = str(role_obj.value)
+                    elif isinstance(role_obj, str):
+                        role_key = role_obj.lower()
+                if role_key:
+                    previous_orders_by_role[role_key] = int(quantity)
+
         order_quantity = agent.make_decision(
             current_round=game.current_round,
             current_demand=current_demand if player.role == PlayerRole.RETAILER else None,
             upstream_data={
-                'previous_orders': [pr.order_quantity for pr in previous_round.player_rounds] if previous_round else []
+                'previous_orders': previous_orders,
+                'previous_orders_by_role': previous_orders_by_role,
             },
             local_state=local_state,
         )

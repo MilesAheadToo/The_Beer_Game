@@ -85,7 +85,7 @@ class AgentGameDemo:
             "retailer": "naive",
             "wholesaler": "bullwhip",
             "distributor": "conservative",
-            "factory": "random"
+            "manufacturer": "random"
         }
         
         for role, strategy in strategies.items():

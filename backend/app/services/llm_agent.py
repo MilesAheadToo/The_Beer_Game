@@ -41,11 +41,11 @@ class LLMAgent:
                          "You receive orders from the Retailer and place orders to the Distributor. "
                          "You need to balance inventory costs with order fulfillment.",
             "distributor": "You are the Distributor in the Beer Game supply chain. "
-                          "You receive orders from the Wholesaler and place orders to the Factory. "
+                          "You receive orders from the Wholesaler and place orders to the Manufacturer. "
                           "You need to manage the bullwhip effect in the supply chain.",
-            "factory": "You are the Factory in the Beer Game supply chain. "
-                      "You receive orders from the Distributor and manufacture products. "
-                      "You need to manage production capacity and lead times effectively."
+            "manufacturer": "You are the Manufacturer in the Beer Game supply chain. "
+                           "You receive orders from the Distributor and produce finished goods. "
+                           "You need to manage production capacity and lead times effectively."
         }
         
         strategy_context = {
@@ -65,7 +65,7 @@ class LLMAgent:
         
         Game Rules:
         1. Each round, you'll receive information about current inventory, backorders, and incoming shipments.
-        2. You need to decide how many units to order from your supplier.
+        2. You need to decide how many units to order from your immediate upstream partner.
         3. Your goal is to minimize total costs, which include:
            - Holding costs: $0.5 per unit per round
            - Backorder costs: $2 per unit per round

@@ -68,7 +68,7 @@ class AIService:
             PlayerRole.RETAILER: 1.0,
             PlayerRole.WHOLESALER: 1.2,
             PlayerRole.DISTRIBUTOR: 1.5,
-            PlayerRole.FACTORY: 2.0
+            PlayerRole.MANUFACTURER: 2.0
         }
         
         base_stock = 12 * role_multiplier.get(player_state.role, 1.0)
@@ -156,7 +156,7 @@ class AIService:
             PlayerRole.RETAILER: 1.0,
             PlayerRole.WHOLESALER: 1.1,
             PlayerRole.DISTRIBUTOR: 1.3,
-            PlayerRole.FACTORY: 1.5
+            PlayerRole.MANUFACTURER: 1.5
         }.get(role, 1.0)
     
     def _calculate_safety_stock(self, history: List[Dict]) -> float:

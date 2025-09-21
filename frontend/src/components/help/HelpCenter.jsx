@@ -22,12 +22,12 @@ const HelpCenter = ({ onClose }) => {
         {
           id: 'what-is-beer-game',
           question: 'What is The Beer Game?',
-          answer: 'The Beer Game is a simulation that demonstrates the challenges of supply chain management. Players take on different roles in a supply chain (Retailer, Wholesaler, Distributor, or Factory) and make decisions to manage inventory and meet customer demand.'
+          answer: 'The Beer Game is a simulation that demonstrates the challenges of supply chain management. Players take on different roles in a supply chain (Retailer, Wholesaler, Distributor, or Manufacturer) and make decisions to manage inventory and meet customer demand.'
         },
         {
           id: 'how-to-play',
           question: 'How do I play?',
-          answer: '1. Join or create a game\n2. Choose your role in the supply chain\n3. Each turn, decide how many units to order from your supplier\n4. Try to minimize costs while meeting customer demand\n5. The player with the lowest total cost at the end of the game wins!'
+          answer: '1. Join or create a game\n2. Choose your role in the supply chain\n3. Each turn, decide how many units to order from your upstream partner\n4. Try to minimize costs while meeting customer demand\n5. The player with the lowest total cost at the end of the game wins!'
         },
         {
           id: 'game-objective',
@@ -45,7 +45,7 @@ const HelpCenter = ({ onClose }) => {
         {
           id: 'turns',
           question: 'How do turns work?',
-          answer: 'Each turn represents one week in the simulation. During your turn, you will:\n1. Receive and process incoming orders from your customer\n2. Update your inventory\n3. Place new orders to your supplier\n4. Receive and process incoming shipments\n5. Ship orders to your customer'
+          answer: 'Each turn represents one week in the simulation. During your turn, you will:\n1. Receive and process incoming orders from your customer\n2. Update your inventory\n3. Place new orders to your upstream partner\n4. Receive and process incoming shipments\n5. Ship orders to your customer'
         },
         {
           id: 'costs',

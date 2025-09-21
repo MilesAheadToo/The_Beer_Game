@@ -68,13 +68,13 @@ const LaneForm = ({
         const fromType = fromNode?.type;
         const toType = node.type;
         
-        // Enforce supply chain flow: supplier -> manufacturer -> distributor -> retailer
+        // Enforce supply chain flow: manufacturer -> distributor -> wholesaler -> retailer
         switch (fromType) {
-          case 'supplier':
-            return toType === 'manufacturer';
           case 'manufacturer':
             return toType === 'distributor';
           case 'distributor':
+            return toType === 'wholesaler';
+          case 'wholesaler':
             return toType === 'retailer';
           default:
             return false; // Retailers can't have outgoing lanes
@@ -222,14 +222,14 @@ const LaneForm = ({
     retailer: 'Retailer',
     distributor: 'Distributor',
     manufacturer: 'Manufacturer',
-    supplier: 'Supplier'
+    wholesaler: 'Wholesaler'
   };
 
   const NODE_TYPE_COLORS = {
     retailer: 'success',
     distributor: 'info',
     manufacturer: 'warning',
-    supplier: 'error'
+    wholesaler: 'error'
   };
 
   // Get source nodes that can have outgoing lanes (all except retailers)

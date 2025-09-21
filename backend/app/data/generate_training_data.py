@@ -1,11 +1,11 @@
 import os
 import json
 import random
-import numpy as np
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from dataclasses import dataclass, field
+from collections import deque
+from typing import List, Dict, Any, Optional, Tuple, Deque, Union
 
-import torch
 from sqlalchemy.orm import Session
 
 from app.db import base  # noqa: F401
@@ -15,6 +15,73 @@ from app import crud, schemas, models
 # Ensure all models are imported for metadata
 from app.db.base_class import Base
 Base.metadata.create_all(bind=engine)
+
+
+@dataclass
+class PIHeuristicPolicy:
+    """Proportional-Integral ordering policy used for synthetic data generation."""
+
+    target_inv: int
+    alpha: float = 1.0
+    beta: float = 0.5
+    gamma: float = 0.1
+    forecast_window: int = 4
+    integral_clip: Optional[Tuple[float, float]] = None  # e.g., (-1000, 1000)
+    min_order: int = 0
+    max_order: Optional[int] = None
+
+    _state: Dict[str, Dict[str, object]] = field(default_factory=dict, repr=False)
+
+    def _resolve_role_name(self, role: Union[str, Dict[str, Any]]) -> str:
+        if isinstance(role, str):
+            return role
+        if isinstance(role, dict) and "name" in role:
+            return str(role["name"])
+        return str(role)
+
+    def _get_state(self, role: Union[str, Dict[str, Any]]) -> Dict[str, object]:
+        name = self._resolve_role_name(role)
+        if name not in self._state:
+            self._state[name] = {"hist": deque(maxlen=self.forecast_window), "integral": 0.0}
+        st = self._state[name]
+        hist = st["hist"]
+        if isinstance(hist, deque) and hist.maxlen != self.forecast_window:
+            preserved = list(hist)[-self.forecast_window:]
+            st["hist"] = deque(preserved, maxlen=self.forecast_window)
+        return st
+
+    def order(
+        self,
+        *,
+        I_prime: int,
+        B_next: int,
+        inbound_pipeline_sum: int,
+        observed_demand: int,
+        role: Union[str, Dict[str, Any]],
+        week: int,
+    ) -> int:
+        st = self._get_state(role)
+        hist: Deque[int] = st["hist"]  # type: ignore[assignment]
+        integral: float = float(st["integral"])  # type: ignore[assignment]
+
+        hist.append(max(0, int(observed_demand)))
+        forecast = (sum(hist) / len(hist)) if hist else 0.0
+
+        e_t = float(self.target_inv - I_prime + B_next)
+        integral += e_t
+        if self.integral_clip is not None:
+            lo, hi = self.integral_clip
+            integral = max(lo, min(hi, integral))
+        st["integral"] = integral
+
+        O = self.alpha * forecast + self.beta * e_t + self.gamma * integral
+        if self.max_order is not None:
+            O = min(self.max_order, O)
+        O = max(self.min_order, O)
+        return int(round(max(0.0, O)))
+
+    def produce(self, *, O_t: int, role: Union[str, Dict[str, Any]], week: int) -> int:
+        return int(max(0, O_t))
 
 def generate_synthetic_game(num_rounds: int = 100) -> Dict[str, Any]:
     """Generate a synthetic game with realistic supply chain dynamics."""
@@ -44,6 +111,21 @@ def generate_synthetic_game(num_rounds: int = 100) -> Dict[str, Any]:
     backlogs = {role: 0 for role in roles}
     in_transit = {role: {i: 0 for i in range(1, 5)} for role in roles}  # Up to 4 periods in transit
     
+    # Create PI heuristic policies per role
+    policies: Dict[str, PIHeuristicPolicy] = {
+        role: PIHeuristicPolicy(
+            target_inv=int(2 * base_demand[0]),
+            alpha=1.0,
+            beta=0.6,
+            gamma=0.05,
+            forecast_window=4,
+            integral_clip=(-500.0, 500.0),
+            min_order=0,
+            max_order=500,
+        )
+        for role in roles
+    }
+
     # Generate rounds
     for round_num in range(1, num_rounds + 1):
         round_data = {
@@ -52,6 +134,8 @@ def generate_synthetic_game(num_rounds: int = 100) -> Dict[str, Any]:
             "demand": base_demand[round_num - 1] * random.uniform(0.8, 1.2)  # Add some noise
         }
         
+        downstream_orders: Dict[str, int] = {}
+
         # Process each role in the supply chain
         for i, role in enumerate(roles):
             # Calculate incoming shipments (arriving this round)
@@ -65,39 +149,39 @@ def generate_synthetic_game(num_rounds: int = 100) -> Dict[str, Any]:
             # Calculate available inventory
             available = inventories[role] + incoming
             
-            # Determine demand (retailer sees customer demand, others see orders from downstream)
+            # Determine demand (retailer sees customer demand, upstream roles see orders)
             if role == "retailer":
-                demand = round(round_data["demand"])
+                demand = int(round(round_data["demand"]))
             else:
-                # Other roles see orders from the downstream role
-                downstream_role = roles[i - 1] if i > 0 else "retailer"
-                # Add some noise to simulate order variability
-                demand = round(round_data["demand"] * random.uniform(0.8, 1.2))
-            
+                downstream_role = roles[i - 1]
+                demand = downstream_orders.get(downstream_role, 0)
+
             # Calculate fulfilled demand and update backlog
             fulfilled = min(available, demand + backlogs[role])
             new_backlog = max(0, demand + backlogs[role] - fulfilled)
-            
+
             # Update inventory
             new_inventory = max(0, available - fulfilled)
-            
-            # Generate order (using a simple policy with some randomness)
-            # Base order: try to maintain inventory at 2x weekly demand
-            target_inventory = 2 * base_demand[min(round_num, len(base_demand)-1)]
-            safety_stock = base_demand[min(round_num, len(base_demand)-1)]
-            
-            # Simple order-up-to policy with some noise
-            order_quantity = max(0, 
-                target_inventory - new_inventory 
-                + new_backlog  # Account for backlog
-                + random.randint(-2, 2)  # Add some noise
+
+            # PI heuristic order decision
+            target_inventory = int(2 * base_demand[min(round_num - 1, len(base_demand) - 1)])
+            policy = policies[role]
+            policy.target_inv = target_inventory
+            inbound_sum = int(sum(in_transit[role].values()))
+            order_quantity = policy.order(
+                I_prime=int(new_inventory),
+                B_next=int(new_backlog),
+                inbound_pipeline_sum=inbound_sum,
+                observed_demand=int(demand),
+                role=role,
+                week=round_num,
             )
-            
+
             # Add order to in-transit for upstream
             if role != "manufacturer":  # Manufacturer has infinite supply
                 upstream_role = roles[i + 1] if i < len(roles) - 1 else "manufacturer"
                 in_transit[upstream_role][2] = in_transit[upstream_role].get(2, 0) + order_quantity
-            
+
             # Record decision
             decision = {
                 "role": role,
@@ -113,6 +197,7 @@ def generate_synthetic_game(num_rounds: int = 100) -> Dict[str, Any]:
             # Update state for next round
             inventories[role] = new_inventory
             backlogs[role] = new_backlog
+            downstream_orders[role] = order_quantity
         
         game_data["rounds"].append(round_data)
     

@@ -71,7 +71,7 @@ class GameService:
         PlayerRole.RETAILER: 2,
         PlayerRole.WHOLESALER: 2,
         PlayerRole.DISTRIBUTOR: 2,
-        PlayerRole.FACTORY: 2
+        PlayerRole.MANUFACTURER: 2
     }
     
     def __init__(self, db: AsyncSession):
@@ -501,7 +501,7 @@ class GameService:
         player.inventory.cost += total_cost
         
         # Place order with upstream player
-        if player.role != PlayerRole.FACTORY:  # Factory doesn't place orders
+        if player.role != PlayerRole.MANUFACTURER:  # Manufacturer doesn't place orders
             self._place_order(player, player_round.order_placed, game_round.round_number)
         
         self.db.commit()
@@ -545,7 +545,7 @@ class GameService:
             PlayerRole.RETAILER,
             PlayerRole.WHOLESALER,
             PlayerRole.DISTRIBUTOR,
-            PlayerRole.FACTORY
+            PlayerRole.MANUFACTURER
         ]
         
         current_index = role_order.index(player.role)
@@ -563,7 +563,7 @@ class GameService:
             PlayerRole.RETAILER,
             PlayerRole.WHOLESALER,
             PlayerRole.DISTRIBUTOR,
-            PlayerRole.FACTORY
+            PlayerRole.MANUFACTURER
         ]
         
         current_index = role_order.index(player.role)

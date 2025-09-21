@@ -48,7 +48,7 @@ def upgrade():
         sa.Column('id', sa.Integer(), nullable=False, autoincrement=True),
         sa.Column('config_id', sa.Integer(), nullable=False),
         sa.Column('name', sa.String(length=100), nullable=False),
-        sa.Column('type', sa.Enum('retailer', 'distributor', 'manufacturer', 'supplier', name='nodetype'), nullable=False),
+        sa.Column('type', sa.Enum('retailer', 'wholesaler', 'distributor', 'manufacturer', name='nodetype'), nullable=False),
         sa.ForeignKeyConstraint(['config_id'], ['supply_chain_configs.id'], ondelete='CASCADE'),
         sa.PrimaryKeyConstraint('id'),
         sa.UniqueConstraint('name', 'config_id', name='_node_name_config_uc')
