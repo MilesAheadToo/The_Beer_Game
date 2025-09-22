@@ -32,6 +32,11 @@ COPY requirements.txt ./
 RUN python -m pip install --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt && \
     pip install --no-cache-dir \
+        torch==2.2.0+cu121 \
+        torchvision==0.17.0+cu121 \
+        torchaudio==2.2.0+cu121 \
+        -f https://download.pytorch.org/whl/cu121 && \
+    pip install --no-cache-dir \
         torch-geometric==2.5.0 \
         -f https://data.pyg.org/whl/torch-2.2.0+cu121.html && \
     python - <<'PY_SETUP_TORCH'
