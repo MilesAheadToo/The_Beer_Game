@@ -150,6 +150,11 @@ export const mixedGameApi = {
     return data;
   },
 
+  async resetGame(gameId) {
+    const { data } = await http.post(`/mixed-games/${gameId}/reset`);
+    return data;
+  },
+
   async nextRound(gameId) {
     const { data } = await http.post(`/mixed-games/${gameId}/next-round`);
     return data;

@@ -100,7 +100,19 @@ const GroupGameConfigPanel = ({
     }
   };
 
-  const handleRestart = (gameId) => runAction(gameId, 'restart', mixedGameApi.startGame, 'Game restarted');
+  const handleRestart = async (gameId) => {
+    try {
+      await mixedGameApi.resetGame(gameId);
+      await mixedGameApi.startGame(gameId);
+      enqueueSnackbar('Game restarted', { variant: 'success' });
+      if (onRefresh) {
+        await onRefresh();
+      }
+    } catch (err) {
+      const detail = err?.response?.data?.detail || err?.message || 'Unable to restart game';
+      enqueueSnackbar(detail, { variant: 'error' });
+    }
+  };
   const handleDelete = async (gameId, name) => {
     if (!window.confirm(`Delete game "${name}"? This cannot be undone.`)) return;
     await runAction(gameId, 'delete', mixedGameApi.deleteGame, 'Game deleted');

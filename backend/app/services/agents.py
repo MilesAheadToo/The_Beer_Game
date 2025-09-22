@@ -377,7 +377,7 @@ class BeerGameAgent:
 
         # Make decision based on strategy
         if self.strategy == AgentStrategy.NAIVE:
-            order = self._naive_strategy(current_demand, backlog_level)
+            order = self._naive_strategy(current_demand, backlog_level, inventory_level)
         elif self.strategy == AgentStrategy.BULLWHIP:
             order = self._bullwhip_strategy(current_demand, upstream_data)
         elif self.strategy == AgentStrategy.CONSERVATIVE:
@@ -442,12 +442,24 @@ class BeerGameAgent:
         }
         return mapping.get(self.agent_type)
     
-    def _naive_strategy(self, current_demand: Optional[int], backlog: float) -> int:
-        """Order enough to cover observed demand plus any backlog."""
-        if current_demand is not None:
-            demand_to_cover = max(0.0, float(current_demand)) + max(0.0, float(backlog or 0.0))
-            return int(round(demand_to_cover))
-        return self.last_order
+    def _naive_strategy(
+        self,
+        current_demand: Optional[int],
+        backlog: float,
+        inventory: float,
+    ) -> int:
+        """Order enough to cover demand plus backlog, adjusted for on-hand inventory."""
+        demand = max(0.0, float(current_demand or 0.0))
+        backlog_val = max(0.0, float(backlog or 0.0))
+        inventory_val = max(0.0, float(inventory or 0.0))
+
+        # If we have no signal at all, fall back to previous order
+        if demand == 0.0 and backlog_val == 0.0 and inventory_val == 0.0:
+            return max(0, int(round(self.last_order)))
+
+        shortfall = max(0.0, backlog_val + demand - inventory_val)
+        target = max(demand, shortfall)
+        return max(0, int(round(target)))
     
     def _bullwhip_strategy(self, current_demand: Optional[int], upstream_data: Optional[Dict]) -> int:
         """Tend to over-order when demand increases."""

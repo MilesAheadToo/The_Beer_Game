@@ -38,6 +38,12 @@ from app.db.session import sync_engine
 from app.models.game import Game as DbGame, GameStatus as DbGameStatus, Round, PlayerAction
 from app.models.player import Player, PlayerRole, PlayerStrategy
 from app.models.supply_chain_config import SupplyChainConfig
+from app.models.supply_chain import (
+    PlayerInventory,
+    Order as SupplyOrder,
+    GameRound as SupplyGameRound,
+    PlayerRound as SupplyPlayerRound,
+)
 from app.models.user import User, UserTypeEnum
 from app.core.security import verify_password
 from app.services.agents import AgentManager, AgentType, AgentStrategy as AgentStrategyEnum
@@ -995,6 +1001,20 @@ PROGRESSION_UNSUPERVISED = "unsupervised"
 
 ROLES_IN_ORDER = ["retailer", "wholesaler", "distributor", "manufacturer"]
 
+DOWNSTREAM_ROLE = {
+    "manufacturer": "distributor",
+    "distributor": "wholesaler",
+    "wholesaler": "retailer",
+    "retailer": None,
+}
+
+UPSTREAM_ROLE = {
+    "retailer": "wholesaler",
+    "wholesaler": "distributor",
+    "distributor": "manufacturer",
+    "manufacturer": None,
+}
+
 _AUTO_ADVANCE_TASKS: Dict[int, asyncio.Task] = {}
 _AUTO_TASKS_LOCK = threading.Lock()
 
@@ -1049,6 +1069,14 @@ def _get_progression_mode(game: DbGame) -> str:
     if mode not in {PROGRESSION_SUPERVISED, PROGRESSION_UNSUPERVISED}:
         return PROGRESSION_SUPERVISED
     return mode
+
+
+def _advance_queue(queue: List[int]) -> int:
+    if not queue:
+        return 0
+    head = queue.pop(0)
+    queue.append(0)
+    return int(head)
 
 
 def _ensure_round(db: Session, game: DbGame, round_number: Optional[int] = None) -> Round:
@@ -1139,124 +1167,66 @@ def _compute_customer_demand(game: DbGame, round_number: int) -> int:
 def _ensure_simulation_state(config: Dict[str, Any]) -> Dict[str, Any]:
     params = _simulation_parameters(config)
     initial_inventory = int(params.get("initial_inventory", 12))
-    shipping_lead_time = max(1, int(params.get("shipping_lead_time", params.get("ship2", 2))))
-    state = config.setdefault(
-        "simulation_state",
-        {
+    ship_lt = max(1, int(params.get("shipping_lead_time", params.get("ship2", 2))))
+    order_lt = max(1, int(params.get("order_lead_time", params.get("order_lead", 1))))
+    prod_lt = max(0, int(params.get("production_lead_time", params.get("prod2", 2))))
+
+    state = config.setdefault("simulation_state", {})
+    if state.get("_version") != 2:
+        state = {
+            "_version": 2,
             "inventory": {role: initial_inventory for role in ROLES_IN_ORDER},
             "backlog": {role: 0 for role in ROLES_IN_ORDER},
-            "incoming": {role: [0] * shipping_lead_time for role in ROLES_IN_ORDER},
-        },
-    )
-    # Ensure all roles exist (in case config mutated externally)
+            "ship_pipeline": {role: [0] * ship_lt for role in ROLES_IN_ORDER},
+            "order_pipeline": {role: [0] * order_lt for role in ROLES_IN_ORDER},
+            "production_pipeline": [0] * max(1, prod_lt),
+            "last_orders": {role: 0 for role in ROLES_IN_ORDER},
+        }
+        config["simulation_state"] = state
+
+    inventory = state.setdefault("inventory", {})
+    backlog = state.setdefault("backlog", {})
+    ship_pipeline = state.setdefault("ship_pipeline", {})
+    order_pipeline = state.setdefault("order_pipeline", {})
+    production_pipeline = state.setdefault("production_pipeline", [0] * max(1, prod_lt))
+    last_orders = state.setdefault("last_orders", {role: 0 for role in ROLES_IN_ORDER})
+
     for role in ROLES_IN_ORDER:
-        state.setdefault("inventory", {}).setdefault(role, initial_inventory)
-        state.setdefault("backlog", {}).setdefault(role, 0)
-        incoming = state.setdefault("incoming", {}).setdefault(role, [0] * shipping_lead_time)
-        if len(incoming) != shipping_lead_time:
-            if len(incoming) < shipping_lead_time:
-                incoming.extend([0] * (shipping_lead_time - len(incoming)))
+        inventory.setdefault(role, initial_inventory)
+        backlog.setdefault(role, 0)
+
+        ship_queue = ship_pipeline.setdefault(role, [0] * ship_lt)
+        if len(ship_queue) != ship_lt:
+            if len(ship_queue) < ship_lt:
+                ship_queue.extend([0] * (ship_lt - len(ship_queue)))
             else:
-                state["incoming"][role] = incoming[-shipping_lead_time:]
+                ship_pipeline[role] = ship_queue[-ship_lt:]
+
+        order_queue = order_pipeline.setdefault(role, [0] * order_lt)
+        if len(order_queue) != order_lt:
+            if len(order_queue) < order_lt:
+                order_queue.extend([0] * (order_lt - len(order_queue)))
+            else:
+                order_pipeline[role] = order_queue[-order_lt:]
+
+        last_orders.setdefault(role, 0)
+
+    if len(production_pipeline) != max(1, prod_lt):
+        if len(production_pipeline) < max(1, prod_lt):
+            production_pipeline.extend([0] * (max(1, prod_lt) - len(production_pipeline)))
+        else:
+            state["production_pipeline"] = production_pipeline[-max(1, prod_lt):]
+
     if "initial_state" not in config:
         config["initial_state"] = {
             role: {
-                "inventory": int(state["inventory"].get(role, initial_inventory)),
-                "backlog": int(state["backlog"].get(role, 0)),
+                "inventory": int(inventory.get(role, initial_inventory)),
+                "backlog": int(backlog.get(role, 0)),
             }
             for role in ROLES_IN_ORDER
         }
+
     return state
-
-
-def _record_round_history(
-    game: DbGame,
-    config: Dict[str, Any],
-    round_number: int,
-    demand: int,
-    orders_by_role: Dict[str, Dict[str, Any]],
-    timestamp: datetime,
-) -> None:
-    params = _simulation_parameters(config)
-    holding_cost_rate = float(params.get("holding_cost_per_unit", params.get("holding_cost", 0.5)))
-    backlog_cost_rate = float(params.get("backorder_cost_per_unit", params.get("backorder_cost", 5.0)))
-    state = _ensure_simulation_state(config)
-    history = config.setdefault("history", [])
-
-    # Copy for calculations
-    inventory = state["inventory"].copy()
-    backlog = state["backlog"].copy()
-    incoming = state["incoming"]
-
-    role_demand_map = {
-        "retailer": demand,
-        "wholesaler": orders_by_role.get("retailer", {}).get("quantity", 0),
-        "distributor": orders_by_role.get("wholesaler", {}).get("quantity", 0),
-        "manufacturer": orders_by_role.get("distributor", {}).get("quantity", 0),
-    }
-
-    round_costs: Dict[str, Dict[str, float]] = {}
-    node_states: Dict[str, Dict[str, Any]] = {}
-
-    for role in ROLES_IN_ORDER:
-        queue = incoming.setdefault(role, [0])
-        arriving = queue.pop(0) if queue else 0
-        starting_inventory = inventory.get(role, 0)
-        starting_backlog = backlog.get(role, 0)
-        net_start = starting_inventory - starting_backlog
-
-        base_demand = max(0, int(role_demand_map.get(role, 0)))
-        total_demand = base_demand + starting_backlog
-        available = max(0, starting_inventory) + arriving
-
-        shipped = min(available, total_demand)
-        ending_stock = available - shipped
-        ending_backlog = total_demand - shipped
-
-        new_inventory = max(0, ending_stock)
-        new_backlog = max(0, ending_backlog)
-        inventory[role] = new_inventory
-        backlog[role] = new_backlog
-
-        placed_order = max(0, int(orders_by_role.get(role, {}).get("quantity", 0)))
-        queue.append(placed_order)
-
-        holding_qty = max(net_start, 0)
-        backlog_qty = max(-net_start, 0)
-        holding_cost = holding_qty * holding_cost_rate
-        backlog_cost = backlog_qty * backlog_cost_rate
-        round_costs[role] = {
-            "holding_cost": round(holding_cost, 2),
-            "backlog_cost": round(backlog_cost, 2),
-            "total_cost": round(holding_cost + backlog_cost, 2),
-        }
-        node_states[role] = {
-            "starting_inventory": net_start,
-            "demand": base_demand,
-            "supply": arriving,
-            "ending_inventory": new_inventory - new_backlog,
-            "backlog_cost": round(backlog_cost, 2),
-            "holding_cost": round(holding_cost, 2),
-        }
-
-    # Persist updated state
-    state["inventory"] = inventory
-    state["backlog"] = backlog
-    state["incoming"] = incoming
-
-    history.append(
-        {
-            "round": round_number,
-            "timestamp": timestamp.isoformat() + "Z",
-            "demand": demand,
-            "orders": {role: orders_by_role.get(role, {}) for role in ROLES_IN_ORDER},
-            "inventory_positions": inventory.copy(),
-            "backlogs": backlog.copy(),
-            "costs": round_costs,
-            "total_cost": round(sum(c["total_cost"] for c in round_costs.values()), 2),
-            "node_states": node_states,
-        }
-    )
 
 
 def _finalize_round_if_ready(
@@ -1276,7 +1246,20 @@ def _finalize_round_if_ready(
 
     timestamp = datetime.utcnow()
     round_number = round_record.round_number
-    demand = _compute_customer_demand(game, round_number)
+    external_demand = _compute_customer_demand(game, round_number)
+
+    players = db.query(Player).filter(Player.game_id == game.id).all()
+    players_by_role = {
+        str(player.role.value if hasattr(player.role, "value") else player.role).lower(): player
+        for player in players
+    }
+
+    agent_manager = AgentManager()
+    configured_agents: Set[str] = set()
+    overrides = config.get("daybreak_overrides") or {}
+    info_sharing_cfg = config.get("info_sharing") or {}
+    full_visibility = str(info_sharing_cfg.get("visibility", "")).lower() == "full"
+
     actions = (
         db.query(PlayerAction, Player)
         .join(Player, Player.id == PlayerAction.player_id)
@@ -1289,6 +1272,7 @@ def _finalize_round_if_ready(
     )
 
     orders_by_role = {}
+    actions_by_role = {}
     for action, player in actions:
         role_key = str(player.role.value if hasattr(player.role, "value") else player.role).lower()
         pending_entry = pending.get(role_key, {}) if pending else {}
@@ -1298,19 +1282,196 @@ def _finalize_round_if_ready(
             "comment": pending_entry.get("comment"),
             "submitted_at": pending_entry.get("submitted_at") or action.created_at.isoformat() + "Z",
         }
+        actions_by_role[role_key] = action
 
-    # Update round metadata
-    round_record.status = "completed"
-    round_record.completed_at = timestamp
-    _record_round_history(game, config, round_number, demand, orders_by_role, timestamp)
+    state = _ensure_simulation_state(config)
+    inventory = state["inventory"]
+    backlog = state["backlog"]
+    ship_pipeline = state["ship_pipeline"]
+    order_pipeline = state["order_pipeline"]
+    production_pipeline = state["production_pipeline"]
+    last_orders = state["last_orders"]
+
+    # Advance manufacturer production pipeline (orders already in transit to supplier)
+    order_to_production = _advance_queue(order_pipeline["manufacturer"])
+    if production_pipeline:
+        production_pipeline[-1] += order_to_production
+    produced_today = _advance_queue(production_pipeline)
+    inventory["manufacturer"] += produced_today
+
+    arrivals = {}
+    role_stats: Dict[str, Dict[str, Any]] = {}
+
+    for role in ROLES_IN_ORDER:
+        arrivals[role] = _advance_queue(ship_pipeline[role])
+        inventory[role] += arrivals[role]
+
+    # Determine inbound demand for each role
+    inbound_demand = {"retailer": external_demand}
+    for role in ROLES_IN_ORDER[1:]:
+        downstream = DOWNSTREAM_ROLE[role]
+        inbound_demand[role] = _advance_queue(order_pipeline[downstream])
+
+    sim_params = _simulation_parameters(config)
+    holding_cost_rate = float(sim_params.get("holding_cost_per_unit", sim_params.get("holding_cost", 0.5)))
+    backlog_cost_rate = float(sim_params.get("backorder_cost_per_unit", sim_params.get("backorder_cost", 5.0)))
+
+    for role in ROLES_IN_ORDER:
+        inv_before = float(inventory.get(role, 0))
+        backlog_before = float(backlog.get(role, 0))
+        demand_here = float(inbound_demand.get(role, 0))
+
+        total_demand = backlog_before + demand_here
+        shipped = min(inv_before, total_demand)
+        inv_after = inv_before - shipped
+        backlog_after = total_demand - shipped
+
+        inventory[role] = inv_after
+        backlog[role] = backlog_after
+
+        downstream = DOWNSTREAM_ROLE[role]
+        if downstream:
+            ship_pipeline[downstream][-1] += shipped
+
+        order_info = orders_by_role.get(role)
+        player = players_by_role.get(role)
+        action_obj = actions_by_role.get(role)
+
+        is_ai = bool(player and player.is_ai)
+        if is_ai and role not in configured_agents:
+            try:
+                agent_manager.set_agent_strategy(
+                    _agent_type_for_role(role),
+                    _strategy_for_player(player),
+                    llm_model=player.llm_model,
+                    override_pct=overrides.get(role),
+                )
+            except ValueError:
+                pass
+            configured_agents.add(role)
+
+        order_qty: float
+        if is_ai:
+            try:
+                agent = agent_manager.get_agent(_agent_type_for_role(role))
+            except ValueError:
+                agent = None
+            if agent:
+                agent.can_see_demand = bool(player.can_see_demand or role == "retailer" or full_visibility)
+                local_state = {
+                    "inventory": inv_before,
+                    "backlog": backlog_before,
+                    "incoming_shipments": list(ship_pipeline[role]),
+                    "pipeline_on_order": sum(ship_pipeline[role]),
+                }
+                previous_qty = last_orders.get(role, 0)
+                upstream_data = {"previous_orders": [previous_qty]}
+                try:
+                    order_calc = agent.make_decision(
+                        current_round=round_record.round_number,
+                        current_demand=demand_here if agent.can_see_demand else None,
+                        upstream_data=upstream_data,
+                        local_state=local_state,
+                    )
+                except Exception:
+                    order_calc = previous_qty
+                order_qty = max(0.0, float(order_calc))
+            else:
+                order_qty = float(order_info.get("quantity", 0)) if order_info else 0.0
+        else:
+            order_qty = float(order_info.get("quantity", 0)) if order_info else 0.0
+
+        if order_info is None:
+            player_id = player.id if player else None
+            order_info = {
+                "player_id": player_id,
+                "quantity": int(round(order_qty)),
+                "comment": None,
+                "submitted_at": timestamp.isoformat() + "Z",
+            }
+            orders_by_role[role] = order_info
+        else:
+            order_info["quantity"] = int(round(order_qty))
+
+        if action_obj is None and player and player.is_ai:
+            action_obj = PlayerAction(
+                game_id=game.id,
+                round_id=round_record.id,
+                player_id=player.id,
+                action_type="order",
+                quantity=int(round(order_qty)),
+                created_at=timestamp,
+            )
+            db.add(action_obj)
+            actions_by_role[role] = action_obj
+        elif action_obj is not None:
+            action_obj.quantity = int(round(order_qty))
+
+        order_pipeline[role][-1] += order_qty
+        last_orders[role] = int(round(order_qty))
+
+        holding_cost = holding_cost_rate * max(inv_after, 0)
+        backlog_cost = backlog_cost_rate * max(backlog_after, 0)
+
+        role_stats[role] = {
+            "inventory_before": inv_before,
+            "inventory_after": inv_after,
+            "backlog_before": backlog_before,
+            "backlog_after": backlog_after,
+            "demand": demand_here,
+            "shipped": shipped,
+            "order": order_qty,
+            "holding_cost": round(holding_cost, 2),
+            "backlog_cost": round(backlog_cost, 2),
+        }
+
+    state["inventory"] = {role: int(round(inventory[role])) for role in ROLES_IN_ORDER}
+    state["backlog"] = {role: int(round(backlog[role])) for role in ROLES_IN_ORDER}
+
+    history_entry = {
+        "round": round_number,
+        "timestamp": timestamp.isoformat() + "Z",
+        "demand": external_demand,
+        "orders": {role: dict(order_data) for role, order_data in orders_by_role.items()},
+        "inventory_positions": {role: role_stats[role]["inventory_after"] for role in ROLES_IN_ORDER},
+        "backlogs": {role: role_stats[role]["backlog_after"] for role in ROLES_IN_ORDER},
+        "node_states": {
+            role: {
+                "inventory_before": role_stats[role]["inventory_before"],
+                "inventory_after": role_stats[role]["inventory_after"],
+                "backlog_before": role_stats[role]["backlog_before"],
+                "backlog_after": role_stats[role]["backlog_after"],
+                "incoming_order": inbound_demand.get(role, 0),
+                "arrivals": arrivals.get(role, 0),
+                "shipped": role_stats[role]["shipped"],
+                "last_order": last_orders.get(role, 0),
+            }
+            for role in ROLES_IN_ORDER
+        },
+        "costs": {
+            role: {
+                "holding_cost": role_stats[role]["holding_cost"],
+                "backlog_cost": role_stats[role]["backlog_cost"],
+                "total_cost": round(role_stats[role]["holding_cost"] + role_stats[role]["backlog_cost"], 2),
+            }
+            for role in ROLES_IN_ORDER
+        },
+        "total_cost": round(
+            sum(role_stats[role]["holding_cost"] + role_stats[role]["backlog_cost"] for role in ROLES_IN_ORDER),
+            2,
+        ),
+    }
+
+    config.setdefault("history", []).append(history_entry)
     config["pending_orders"] = {}
 
-    latest_entry = (config.get("history") or [])[-1] if config.get("history") else {}
+    round_record.status = "completed"
+    round_record.completed_at = timestamp
     round_record.config = json.dumps(
         {
             "orders": orders_by_role,
-            "demand": demand,
-            "node_states": latest_entry.get("node_states", {}),
+            "demand": external_demand,
+            "node_states": history_entry.get("node_states", {}),
         }
     )
 
@@ -1365,8 +1526,6 @@ def _auto_advance_unsupervised_game_sync(
             )
             return
 
-        agent_manager = AgentManager()
-        configured_roles: Set[str] = set()
         iteration = 0
 
         while True:
@@ -1406,113 +1565,6 @@ def _auto_advance_unsupervised_game_sync(
             _ensure_simulation_state(config)
             pending = _pending_orders(config)
             pending.clear()
-
-            demand = _compute_customer_demand(game, round_record.round_number)
-            history = config.get("history", [])
-            last_orders = history[-1].get("orders", {}) if history else {}
-            sim_state = config.get("simulation_state", {})
-            overrides = config.get("daybreak_overrides") or {}
-            info_sharing = config.get("info_sharing") or {}
-            full_visibility = str(info_sharing.get("visibility", "")).lower() == "full"
-            now_iso = datetime.utcnow().isoformat() + "Z"
-
-            players = session.query(Player).filter(Player.game_id == game.id).all()
-            for player in players:
-                if not player.is_ai:
-                    continue
-
-                role_key = _role_key(player)
-
-                if role_key not in configured_roles:
-                    try:
-                        agent_manager.set_agent_strategy(
-                            _agent_type_for_role(role_key),
-                            _strategy_for_player(player),
-                            llm_model=player.llm_model,
-                            override_pct=overrides.get(role_key),
-                        )
-                        configured_roles.add(role_key)
-                    except ValueError as exc:
-                        logger.warning(
-                            "Skipping agent setup for role %s in game %s: %s",
-                            role_key,
-                            game_id,
-                            exc,
-                        )
-                        continue
-
-                try:
-                    agent = agent_manager.get_agent(_agent_type_for_role(role_key))
-                except ValueError:
-                    logger.debug("No agent mapping for role %s; skipping", role_key)
-                    continue
-
-                local_state = {
-                    "inventory": sim_state.get("inventory", {}).get(role_key, player.inventory),
-                    "backlog": sim_state.get("backlog", {}).get(role_key, player.backlog),
-                    "incoming_shipments": sim_state.get("incoming", {}).get(role_key, []),
-                }
-                previous_qty = last_orders.get(role_key, {}).get("quantity", 0)
-                upstream_data = {"previous_orders": [previous_qty]}
-                visible_demand = (
-                    demand
-                    if (player.can_see_demand or role_key == "retailer" or full_visibility)
-                    else None
-                )
-
-                try:
-                    quantity = int(
-                        max(
-                            0,
-                            agent.make_decision(
-                                current_round=round_record.round_number,
-                                current_demand=visible_demand,
-                                upstream_data=upstream_data,
-                                local_state=local_state,
-                            ),
-                        )
-                    )
-                except Exception as exc:
-                    logger.exception(
-                        "Agent decision failed for game %s role %s: %s",
-                        game_id,
-                        role_key,
-                        exc,
-                    )
-                    quantity = max(0, int(previous_qty))
-
-                action = (
-                    session.query(PlayerAction)
-                    .filter(
-                        PlayerAction.game_id == game.id,
-                        PlayerAction.round_id == round_record.id,
-                        PlayerAction.player_id == player.id,
-                        PlayerAction.action_type == "order",
-                    )
-                    .first()
-                )
-                if action:
-                    action.quantity = quantity
-                    action.created_at = datetime.utcnow()
-                else:
-                    session.add(
-                        PlayerAction(
-                            game_id=game.id,
-                            round_id=round_record.id,
-                            player_id=player.id,
-                            action_type="order",
-                            quantity=quantity,
-                            created_at=datetime.utcnow(),
-                        )
-                    )
-
-                comment = agent.get_last_explanation_comment()
-                pending[role_key] = {
-                    "player_id": player.id,
-                    "quantity": quantity,
-                    "comment": comment or f"Daybreak decision: order {quantity} units.",
-                    "submitted_at": now_iso,
-                }
 
             session.flush()
             _save_game_config(session, game, config)
@@ -1561,67 +1613,21 @@ async def _schedule_unsupervised_autoplay(game_id: int) -> None:
     logger.info("Scheduled unsupervised auto-advance for game %s", game_id)
 
 
+def _cancel_unsupervised_autoplay(game_id: int) -> None:
+    with _AUTO_TASKS_LOCK:
+        task = _AUTO_ADVANCE_TASKS.pop(game_id, None)
+    if task and not task.done():
+        task.cancel()
+        # Cancellation is cooperative; once cancelled, the background task will
+        # exit on its own when the event loop next runs. No further action needed.
+
+
 def _replay_history_from_rounds(db: Session, game: DbGame) -> List[Dict[str, Any]]:
-    rounds = (
-        db.query(Round)
-        .filter(Round.game_id == game.id)
-        .order_by(Round.round_number.asc())
-        .all()
-    )
-    if not rounds:
-        return []
-
-    base_config = _coerce_game_config(game)
-    serialized_copy = json.loads(json.dumps(base_config or {}))
-    serialized_copy.pop("history", None)
-    serialized_copy["history"] = []
-    _ensure_simulation_state(serialized_copy)
-
-    for round_record in rounds:
-        raw_config = round_record.config or {}
-        if isinstance(raw_config, str):
-            try:
-                raw_config = json.loads(raw_config)
-            except json.JSONDecodeError:
-                raw_config = {}
-
-        orders_payload = raw_config.get("orders") or {}
-        orders_by_role: Dict[str, Dict[str, Any]] = {}
-        for role in ROLES_IN_ORDER:
-            role_payload = (
-                orders_payload.get(role)
-                or orders_payload.get(role.capitalize())
-                or orders_payload.get(role.upper())
-                or {}
-            )
-            quantity = role_payload.get("quantity", 0)
-            try:
-                quantity = int(float(quantity))
-            except (TypeError, ValueError):
-                quantity = 0
-
-            timestamp = (
-                role_payload.get("submitted_at")
-                or (round_record.completed_at or round_record.started_at or datetime.utcnow()).isoformat() + "Z"
-            )
-
-            orders_by_role[role] = {
-                "player_id": role_payload.get("player_id"),
-                "quantity": quantity,
-                "comment": role_payload.get("comment"),
-                "submitted_at": timestamp,
-            }
-
-        demand = raw_config.get("demand")
-        try:
-            demand = int(float(demand))
-        except (TypeError, ValueError):
-            demand = _compute_customer_demand(game, round_record.round_number)
-
-        event_timestamp = round_record.completed_at or round_record.started_at or datetime.utcnow()
-        _record_round_history(game, serialized_copy, round_record.round_number, demand, orders_by_role, event_timestamp)
-
-    return serialized_copy.get("history", [])
+    config = _coerce_game_config(game)
+    history = config.get("history")
+    if isinstance(history, list) and history:
+        return history
+    return []
 
 
 def _compute_game_report(db: Session, game: DbGame) -> Dict[str, Any]:
@@ -2143,6 +2149,82 @@ async def stop_game(game_id: int, user: Dict[str, Any] = Depends(get_current_use
     try:
         game = _get_game_for_user(db, user, game_id)
         game.status = DbGameStatus.ROUND_COMPLETED
+        _touch_game(game)
+        db.add(game)
+        db.commit()
+        db.refresh(game)
+        return _serialize_game(game)
+    finally:
+        db.close()
+
+
+@api.post("/mixed-games/{game_id}/reset")
+async def reset_game(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
+    _cancel_unsupervised_autoplay(game_id)
+    db = SyncSessionLocal()
+    try:
+        game = _get_game_for_user(db, user, game_id)
+
+        # Remove historical round data
+        round_ids = [rid for (rid,) in db.query(Round.id).filter(Round.game_id == game.id).all()]
+        if round_ids:
+            db.query(PlayerAction).filter(PlayerAction.game_id == game.id).delete(synchronize_session=False)
+        db.query(Round).filter(Round.game_id == game.id).delete(synchronize_session=False)
+
+        sc_round_ids = [rid for (rid,) in db.query(SupplyGameRound.id).filter(SupplyGameRound.game_id == game.id).all()]
+        if sc_round_ids:
+            db.query(SupplyPlayerRound).filter(SupplyPlayerRound.round_id.in_(sc_round_ids)).delete(synchronize_session=False)
+        db.query(SupplyGameRound).filter(SupplyGameRound.game_id == game.id).delete(synchronize_session=False)
+        db.query(SupplyOrder).filter(SupplyOrder.game_id == game.id).delete(synchronize_session=False)
+
+        config = _coerce_game_config(game)
+        config["pending_orders"] = {}
+        config["history"] = []
+        config.pop("simulation_state", None)
+        config.pop("engine_state", None)
+
+        node_policies = config.get("node_policies", {})
+        sim_params = _simulation_parameters(config)
+
+        players = db.query(Player).filter(Player.game_id == game.id).all()
+        for player in players:
+            role_key = _role_key(player)
+            policy_cfg = node_policies.get(role_key, {})
+            init_inventory = int(policy_cfg.get("init_inventory", sim_params.get("initial_inventory", 12)))
+            ship_delay = int(policy_cfg.get("ship_delay", sim_params.get("shipping_lead_time", 2)))
+            incoming = [0] * max(1, ship_delay)
+
+            inventory = (
+                db.query(PlayerInventory)
+                .filter(PlayerInventory.player_id == player.id)
+                .first()
+            )
+            if inventory is None:
+                inventory = PlayerInventory(
+                    player_id=player.id,
+                    current_stock=init_inventory,
+                    incoming_shipments=incoming,
+                    backorders=0,
+                    cost=0.0,
+                )
+                db.add(inventory)
+            else:
+                inventory.current_stock = init_inventory
+                inventory.incoming_shipments = incoming
+                inventory.backorders = 0
+                inventory.cost = 0.0
+
+            player.last_order = None
+            player.is_ready = False
+
+        _ensure_simulation_state(config)
+        _save_game_config(db, game, config)
+
+        game.current_round = 0
+        game.status = DbGameStatus.CREATED
+        game.started_at = None
+        game.finished_at = None
+        game.completed_at = None
         _touch_game(game)
         db.add(game)
         db.commit()
