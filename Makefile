@@ -139,7 +139,7 @@ rebuild-backend:
 	echo "\n[✓] Backend rebuilt and restarted."
 
 # GPU-specific targets
-gpu-up gpu-up-dev:
+gpu-up-dev:
 	$(MAKE) $(subst gpu-,,$@) FORCE_GPU=1
 
 # CPU-specific targets

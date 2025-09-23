@@ -51,11 +51,6 @@ class Player(Base):
     can_see_demand: Mapped[bool] = mapped_column(Boolean, default=False)
     llm_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, default="gpt-4o-mini")
     
-    # Inventory and order tracking
-    inventory: Mapped[int] = mapped_column(Integer, default=0)
-    backlog: Mapped[int] = mapped_column(Integer, default=0)
-    cost: Mapped[int] = mapped_column(Integer, default=0)
-    
     # Game state
     is_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     last_order: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
@@ -68,6 +63,13 @@ class Player(Base):
     game: Mapped["Game"] = relationship("Game", back_populates="players", lazy="selectin")
     user: Mapped[Optional["User"]] = relationship("User", back_populates="players", lazy="selectin")
     actions: Mapped[List["PlayerAction"]] = relationship("PlayerAction", back_populates="player", lazy="selectin")
+    inventory: Mapped["PlayerInventory"] = relationship(
+        "PlayerInventory", back_populates="player", lazy="selectin", uselist=False
+    )
+    orders: Mapped[List["Order"]] = relationship("Order", back_populates="player", lazy="selectin")
+    player_rounds: Mapped[List["PlayerRound"]] = relationship(
+        "PlayerRound", back_populates="player", lazy="selectin"
+    )
     
     def __repr__(self) -> str:
         return f"<Player {self.name} ({self.role})>"
