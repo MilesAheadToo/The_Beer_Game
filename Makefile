@@ -213,6 +213,10 @@ db-bootstrap:
 	@echo "\n[+] Bootstrapping Daybreak defaults (config, users, training, showcase games)..."; \
 	$(DOCKER_COMPOSE_CMD) exec backend python3 scripts/seed_default_group.py
 
+bootstrap-system:
+	@echo "\n[+] Running full system bootstrap (DB init, seeding, dataset, GNN training)..."; \
+	$(DOCKER_COMPOSE_CMD) exec backend python3 scripts/bootstrap_system.py
+
 db-reset:
 	@echo "\n[+] Resetting games and rebuilding Daybreak training artifacts..."; \
 	$(DOCKER_COMPOSE_CMD) exec backend python3 scripts/seed_default_group.py --reset-games
@@ -261,6 +265,7 @@ help:
 	echo "  make rebuild-frontend - rebuild and restart only frontend"; \
 	echo "  make rebuild-backend  - rebuild and restart only backend"; \
 	echo "  make db-bootstrap  - create default config, users, training data, and Daybreak games"; \
+	echo "  make bootstrap-system - initialise DB, seed defaults, generate dataset, and train Daybreak GNN"; \
 	echo "  make db-reset      - delete games then rerun Daybreak bootstrap"; \
 	echo "  make proxy-up      - start or restart only the proxy container"; \
 	echo "  make proxy-recreate - force-rebuild the proxy container without touching deps"; \

@@ -392,7 +392,14 @@ class BeerGameAgent:
                 processed_shipments,
             )
         elif self.strategy == AgentStrategy.LLM:
-            order = self._llm_strategy(current_round, current_demand, upstream_data)
+            order = self._llm_strategy(
+                current_round,
+                current_demand,
+                upstream_data,
+                inventory_level,
+                backlog_level,
+                processed_shipments,
+            )
         elif self.strategy == AgentStrategy.DAYBREAK_DTCE:
             order = self._daybreak_dtce_strategy(
                 current_round,
@@ -546,10 +553,25 @@ class BeerGameAgent:
         current_round: int,
         current_demand: Optional[int],
         upstream_data: Optional[Dict],
+        inventory_level: int,
+        backlog_level: int,
+        incoming_shipments: List[float],
     ) -> int:
         """Use a Daybreak LLM-backed agent to decide the order quantity."""
+
+        def _fallback_to_pi() -> int:
+            shipments = incoming_shipments or [float(x) for x in self.pipeline]
+            return self._pi_strategy(
+                current_round,
+                current_demand,
+                upstream_data or {},
+                inventory_level,
+                backlog_level,
+                shipments,
+            )
+
         if LLMAgent is None:  # Daybreak LLM dependencies not available
-            return self._naive_strategy(current_demand)
+            return _fallback_to_pi()
 
         if self._llm_agent is None:
             try:
@@ -561,7 +583,7 @@ class BeerGameAgent:
                 )
             except Exception:
                 # Fallback to simple strategy if Daybreak LLM initialization fails
-                return self._naive_strategy(current_demand)
+                return _fallback_to_pi()
 
         try:
             return self._llm_agent.make_decision(
@@ -576,7 +598,7 @@ class BeerGameAgent:
             )
         except Exception:
             # Fallback if the Daybreak LLM call fails for any reason
-            return self._naive_strategy(current_demand)
+            return _fallback_to_pi()
 
     def _compute_daybreak_base(
         self,

@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Seed the default Daybreak group, configuration, and game with naive AI players."""
+"""Seed the default Daybreak group, configuration, and games with AI players."""
 
 from __future__ import annotations
 
 import argparse
 from datetime import datetime
 import json
+import logging
+import os
 import subprocess
 import sys
 import re
@@ -60,6 +62,7 @@ from app.models import (
 from app.models.user import UserTypeEnum
 from app.services.supply_chain_config_service import SupplyChainConfigService
 from app.core.security import get_password_hash
+from app.services.llm_agent import check_daybreak_llm_access
 
 DEFAULT_GROUP_NAME = "Default TBG"
 DEFAULT_GROUP_DESCRIPTION = "Default Daybreak Beer Game group"
@@ -68,7 +71,12 @@ DEFAULT_ADMIN_EMAIL = "groupadmin@daybreak.ai"
 DEFAULT_ADMIN_FULL_NAME = "Group Administrator"
 DEFAULT_PASSWORD = "Daybreak@2025"
 DEFAULT_GAME_NAME = "The Beer Game"
-DEFAULT_AGENT_TYPE = "naive"
+DEFAULT_AGENT_TYPE = "pi_heuristic"
+DEFAULT_LLM_MODEL = os.getenv("DAYBREAK_LLM_MODEL", "gpt-4o-mini")
+
+logger = logging.getLogger(__name__)
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO)
 
 
 def _normalize_user_type(value: Any) -> UserTypeEnum:
@@ -87,6 +95,36 @@ def _normalize_user_type(value: Any) -> UserTypeEnum:
 
 def _role_key(role: PlayerRole) -> str:
     return role.name.lower()
+
+
+def resolve_default_agent_strategy(
+    preferred_strategy: Optional[str] = None,
+    preferred_llm_model: Optional[str] = None,
+) -> Tuple[str, Optional[str], Optional[str]]:
+    """Determine which agent strategy to assign to default AI players."""
+
+    if preferred_strategy:
+        strategy = preferred_strategy.strip().lower()
+        llm_model = preferred_llm_model or DEFAULT_LLM_MODEL if strategy == "llm" else None
+        logger.info(
+            "Using caller-specified default agent strategy '%s'%s.",
+            strategy,
+            f" (LLM model {llm_model})" if llm_model else "",
+        )
+        return strategy, llm_model, None
+
+    available, detail = check_daybreak_llm_access(model=preferred_llm_model or DEFAULT_LLM_MODEL)
+    if available:
+        llm_model = preferred_llm_model or DEFAULT_LLM_MODEL
+        logger.info("Daybreak LLM available; default AI players will use the LLM strategy (%s).", llm_model)
+        return "llm", llm_model, None
+
+    logger.warning(
+        "Daybreak LLM unavailable (%s); default AI players will use '%s' strategy instead.",
+        detail,
+        DEFAULT_AGENT_TYPE,
+    )
+    return DEFAULT_AGENT_TYPE, None, detail
 
 
 DAYBREAK_AGENT_SPECS = [
@@ -113,7 +151,7 @@ DAYBREAK_AGENT_SPECS = [
         "agent_type": "llm_adaptive",
         "description": "Daybreak LLM-driven agents with full information sharing across the supply chain.",
         "override_pct": None,
-        "llm_model": "gpt-5-mini",
+        "llm_model": DEFAULT_LLM_MODEL,
         "can_see_demand_all": True,
     },
 ]
@@ -139,7 +177,9 @@ class SeedOptions:
     force_dataset: bool = False
     force_training: bool = False
     create_daybreak_games: bool = True
-    use_naive_agents: bool = True
+    assign_ai_agents: bool = True
+    preferred_agent_strategy: Optional[str] = None
+    preferred_llm_model: Optional[str] = None
 
 FALLBACK_DB_FILENAME = "seed_default_group.sqlite"
 FALLBACK_DB_PATH = BACKEND_ROOT / FALLBACK_DB_FILENAME
@@ -548,7 +588,12 @@ def configure_human_players_for_game(
     )
 
 
-def _ensure_default_players(session: Session, game: Game) -> None:
+def _ensure_default_players(
+    session: Session,
+    game: Game,
+    agent_type: str,
+    llm_model: Optional[str],
+) -> None:
     """Create placeholder AI players if none exist for the game."""
     players = session.query(Player).filter(Player.game_id == game.id).all()
     if players:
@@ -563,16 +608,23 @@ def _ensure_default_players(session: Session, game: Game) -> None:
             type=PlayerType.AI,
             strategy=PlayerStrategy.MANUAL,
             is_ai=True,
-            ai_strategy=DEFAULT_AGENT_TYPE,
+            ai_strategy=agent_type,
             can_see_demand=(role == PlayerRole.RETAILER),
         )
+        if agent_type == "llm":
+            player.llm_model = llm_model or DEFAULT_LLM_MODEL
         session.add(player)
     session.flush()
 
 
-def ensure_naive_agents(session: Session, game: Game) -> None:
-    """Assign naive AI agents to each role in the game and switch to auto progression."""
-    _ensure_default_players(session, game)
+def ensure_ai_agents(
+    session: Session,
+    game: Game,
+    agent_type: str,
+    llm_model: Optional[str],
+) -> None:
+    """Assign AI agents to each role in the game and switch to auto progression."""
+    _ensure_default_players(session, game, agent_type, llm_model)
 
     players = session.query(Player).filter(Player.game_id == game.id).all()
     if not players:
@@ -582,10 +634,14 @@ def ensure_naive_agents(session: Session, game: Game) -> None:
     for player in players:
         player.is_ai = True
         player.type = PlayerType.AI
-        player.ai_strategy = DEFAULT_AGENT_TYPE
+        player.ai_strategy = agent_type
         player.user_id = None
         if player.strategy != PlayerStrategy.MANUAL:
             player.strategy = PlayerStrategy.MANUAL
+        if agent_type == "llm":
+            player.llm_model = llm_model or DEFAULT_LLM_MODEL
+        else:
+            player.llm_model = None
         session.add(player)
 
         agent_config = (
@@ -596,15 +652,19 @@ def ensure_naive_agents(session: Session, game: Game) -> None:
             .first()
         )
         if agent_config:
-            agent_config.agent_type = DEFAULT_AGENT_TYPE
+            agent_config.agent_type = agent_type
             agent_config.config = agent_config.config or {}
+            if agent_type == "llm":
+                agent_config.config["llm_model"] = llm_model or DEFAULT_LLM_MODEL
+            else:
+                agent_config.config.pop("llm_model", None)
             session.add(agent_config)
         else:
             agent_config = AgentConfig(
                 game_id=game.id,
                 role=player.role.value,
-                agent_type=DEFAULT_AGENT_TYPE,
-                config={},
+                agent_type=agent_type,
+                config={"llm_model": llm_model or DEFAULT_LLM_MODEL} if agent_type == "llm" else {},
             )
             session.add(agent_config)
             session.flush()
@@ -613,6 +673,7 @@ def ensure_naive_agents(session: Session, game: Game) -> None:
             "is_ai": True,
             "agent_config_id": agent_config.id,
             "user_id": None,
+            "strategy": agent_type,
         }
 
     if "supplier" in role_assignments:
@@ -627,13 +688,23 @@ def ensure_naive_agents(session: Session, game: Game) -> None:
         config_payload = {}
 
     config_payload["progression_mode"] = "unsupervised"
+    config_payload.setdefault("daybreak", {})
+    config_payload["daybreak"].update({"strategy": agent_type})
+    if agent_type == "llm" and (llm_model or DEFAULT_LLM_MODEL):
+        config_payload["daybreak"]["llm_model"] = llm_model or DEFAULT_LLM_MODEL
+    elif "daybreak" in config_payload:
+        config_payload["daybreak"].pop("llm_model", None)
+
     game.config = json.loads(json.dumps(config_payload))
     game.role_assignments = role_assignments
     session.add(game)
     session.flush()
+    agent_label = f"{agent_type}"
+    if agent_type == "llm" and (llm_model or DEFAULT_LLM_MODEL):
+        agent_label += f" ({llm_model or DEFAULT_LLM_MODEL})"
     print(
-        "[success] Assigned naive agents to roles: "
-        + ", ".join(sorted(role_assignments.keys()))
+        "[success] Assigned AI agents (%s) to roles: %s"
+        % (agent_label, ", ".join(sorted(role_assignments.keys())))
     )
 
 
@@ -1046,8 +1117,15 @@ def seed_default_data(session: Session, options: Optional[SeedOptions] = None) -
     group, _ = ensure_group(session)
     ensure_role_users(session, group)
     game = ensure_default_game(session, group)
-    if options.use_naive_agents:
-        ensure_naive_agents(session, game)
+    strategy, llm_model, probe_detail = resolve_default_agent_strategy(
+        options.preferred_agent_strategy,
+        options.preferred_llm_model,
+    )
+
+    if options.assign_ai_agents:
+        ensure_ai_agents(session, game, strategy, llm_model)
+        if probe_detail and strategy != "llm":
+            print(f"[warn] Daybreak LLM check failed: {probe_detail}")
     else:
         configure_human_players_for_game(session, group, game)
 
@@ -1134,7 +1212,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--use-human-players",
         action="store_true",
-        help="Assign the default Beer Game to human accounts instead of naive AI agents.",
+        help="Assign the default Beer Game to human accounts instead of AI agents.",
+    )
+    parser.add_argument(
+        "--agent-strategy",
+        default=None,
+        help="Override the default AI agent strategy (e.g. llm, pi_heuristic, naive).",
+    )
+    parser.add_argument(
+        "--llm-model",
+        default=None,
+        help="LLM model to use when the agent strategy is 'llm'.",
     )
     return parser.parse_args()
 
@@ -1146,7 +1234,9 @@ def main() -> None:
         force_dataset=args.force_dataset or args.reset_games,
         force_training=args.force_training or args.reset_games,
         create_daybreak_games=not args.skip_daybreak_games,
-        use_naive_agents=not args.use_human_players,
+        assign_ai_agents=not args.use_human_players,
+        preferred_agent_strategy=args.agent_strategy,
+        preferred_llm_model=args.llm_model,
     )
     print(f"[DEBUG] Database URL from settings: {settings.SQLALCHEMY_DATABASE_URI}")
 

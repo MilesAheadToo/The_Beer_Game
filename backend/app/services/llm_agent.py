@@ -1,5 +1,6 @@
+import logging
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 import openai
 from enum import Enum
 import json
@@ -22,7 +23,8 @@ class LLMAgent:
     ):
         self.role = role
         self.strategy = strategy
-        self.model = model
+        default_model = os.getenv("DAYBREAK_LLM_MODEL")
+        self.model = model or default_model or "gpt-4"
         self.openai_api_key = os.getenv("OPENAI_API_KEY")
         if not self.openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable not set")
@@ -170,7 +172,7 @@ class LLMAgent:
             print(f"Error calling OpenAI API: {e}")
             # Fallback to a simple strategy if API call fails
             return self._fallback_strategy(current_inventory, backorders, current_demand)
-    
+
     def _fallback_strategy(
         self, 
         current_inventory: int, 
@@ -187,6 +189,40 @@ class LLMAgent:
             return max(0, current_demand - current_inventory + backorders)
         else:  # BALANCED or ADAPTIVE
             return max(0, int(current_demand * 1.5) - current_inventory + backorders)
+
+
+logger = logging.getLogger(__name__)
+
+
+def check_daybreak_llm_access(
+    *,
+    model: Optional[str] = None,
+    request_timeout: float = 5.0,
+) -> Tuple[bool, str]:
+    """Probe the configured Daybreak LLM endpoint to confirm availability."""
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return False, "OPENAI_API_KEY environment variable not set"
+
+    target_model = model or os.getenv("DAYBREAK_LLM_MODEL") or "gpt-4o-mini"
+
+    try:
+        openai.api_key = api_key
+        openai.ChatCompletion.create(  # type: ignore[attr-defined]
+            model=target_model,
+            messages=[
+                {"role": "system", "content": "You are a health-check for the Daybreak Beer Game."},
+                {"role": "user", "content": "Reply with \"ok\"."},
+            ],
+            max_tokens=1,
+            temperature=0.0,
+            request_timeout=request_timeout,
+        )
+        return True, target_model
+    except Exception as exc:  # pragma: no cover - depends on external service
+        logger.warning("Daybreak LLM probe failed for model %s: %s", target_model, exc)
+        return False, str(exc)
 
 # Example usage
 if __name__ == "__main__":

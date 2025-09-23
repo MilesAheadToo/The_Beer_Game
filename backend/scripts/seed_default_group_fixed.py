@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Seed the default Daybreak group, configuration, and game with naive AI players."""
+"""Seed the default Daybreak group, configuration, and game with AI players."""
 
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ DEFAULT_ADMIN_EMAIL = "groupadmin@daybreak.ai"
 DEFAULT_ADMIN_FULL_NAME = "Group Administrator"
 DEFAULT_PASSWORD = "Daybreak@2025"
 DEFAULT_GAME_NAME = "The Beer Game"
-DEFAULT_AGENT_TYPE = "naive"
+DEFAULT_AGENT_TYPE = "pi_heuristic"
 
 def ensure_group(session: Session) -> Tuple[Group, bool]:
     """Create the default group and admin if they do not already exist."""
@@ -218,7 +218,7 @@ def _ensure_default_players(session: Session, game: Game) -> None:
     print(f"Created {len(player_roles)} default players")
 
 def ensure_naive_agents(session: Session, game: Game) -> None:
-    """Assign naive AI agents to each role in the game."""
+    """Assign AI agents to each role in the game."""
     # Get all AI players in the game
     players = session.query(Player).filter(
         Player.game_id == game.id,
@@ -229,7 +229,7 @@ def ensure_naive_agents(session: Session, game: Game) -> None:
         print("No AI players found for the game")
         return
     
-    print(f"Ensuring naive AI agents for {len(players)} players")
+    print(f"Ensuring {DEFAULT_AGENT_TYPE} AI agents for {len(players)} players")
     
     for player in players:
         # Check if agent config already exists
@@ -245,7 +245,7 @@ def ensure_naive_agents(session: Session, game: Game) -> None:
         agent_config = AgentConfig(
             player_id=player.id,
             agent_type=DEFAULT_AGENT_TYPE,
-            config={"strategy": "naive"},  # Simple configuration
+            config={"strategy": DEFAULT_AGENT_TYPE},
             is_active=True,
         )
         session.add(agent_config)
