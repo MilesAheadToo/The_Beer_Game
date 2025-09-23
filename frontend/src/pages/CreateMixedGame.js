@@ -554,7 +554,7 @@ const CreateMixedGame = () => {
     return () => {
       cancelled = true;
     };
-  }, [isEditing, gameId, toast, navigate]);
+  }, [isEditing, gameId, toast, navigate, user]);
 
   // Optional prefill via query params for node policies (JSON-encoded)
   useEffect(() => {
@@ -848,7 +848,7 @@ const CreateMixedGame = () => {
   return (
     <PageLayout title={isEditing ? 'Edit Mixed Game' : 'Mixed Game Definition'}>
       {/* Quick links to saved Game Configurations */}
-      {configs?.length > 0 && (
+      {!isEditing && configs?.length > 0 && (
         <Box mb={4}>
           <Alert status="info" borderRadius="md" mb={3}>
             <AlertIcon />
