@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link, useParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Box, 
@@ -36,7 +36,8 @@ import {
   AlertTitle,
   AlertDescription,
   RadioGroup,
-  Radio
+  Radio,
+  Spinner
 } from '@chakra-ui/react';
 import PageLayout from '../components/PageLayout';
 import { getAllConfigs } from '../services/supplyChainConfigService';
@@ -116,6 +117,81 @@ const strategyDescriptions = {
   DAYBREAK_DTCE: daybreakStrategyDescriptions.DAYBREAK_DTCE,
   DAYBREAK_DTCE_CENTRAL: daybreakStrategyDescriptions.DAYBREAK_DTCE_CENTRAL,
   DAYBREAK_DTCE_GLOBAL: daybreakStrategyDescriptions.DAYBREAK_DTCE_GLOBAL,
+};
+
+const DEFAULT_SYSTEM_CONFIG = {
+  min_order_quantity: 0,
+  max_order_quantity: 100,
+  min_holding_cost: 0,
+  max_holding_cost: 10,
+  min_backlog_cost: 0,
+  max_backlog_cost: 20,
+  min_demand: 0,
+  max_demand: 100,
+  min_lead_time: 0,
+  max_lead_time: 4,
+  min_starting_inventory: 0,
+  max_starting_inventory: 100,
+};
+
+const DEFAULT_NODE_POLICIES = {
+  retailer: {
+    policy_type: 'base_stock',
+    base_stock_level: 50,
+    reorder_point: 20,
+    order_up_to: 100,
+    smoothing_alpha: 0.3,
+    smoothing_beta: 0.1,
+    smoothing_gamma: 0.2,
+    forecast_horizon: 4,
+  },
+  wholesaler: {
+    policy_type: 'base_stock',
+    base_stock_level: 100,
+    reorder_point: 40,
+    order_up_to: 200,
+    smoothing_alpha: 0.3,
+    smoothing_beta: 0.1,
+    smoothing_gamma: 0.2,
+    forecast_horizon: 4,
+  },
+  distributor: {
+    policy_type: 'base_stock',
+    base_stock_level: 150,
+    reorder_point: 60,
+    order_up_to: 300,
+    smoothing_alpha: 0.3,
+    smoothing_beta: 0.1,
+    smoothing_gamma: 0.2,
+    forecast_horizon: 4,
+  },
+  manufacturer: {
+    policy_type: 'base_stock',
+    base_stock_level: 200,
+    reorder_point: 80,
+    order_up_to: 400,
+    smoothing_alpha: 0.3,
+    smoothing_beta: 0.1,
+    smoothing_gamma: 0.2,
+    forecast_horizon: 4,
+  },
+};
+
+const DEFAULT_POLICY = {
+  info_delay: 2,
+  ship_delay: 2,
+  init_inventory: 12,
+  holding_cost: 0.5,
+  backlog_cost: 1.0,
+  max_inbound_per_link: 100,
+  max_order: 100,
+};
+
+const DEFAULT_PRICING_CONFIG = {
+  retailer: { selling_price: 100.0, standard_cost: 80.0 },
+  wholesaler: { selling_price: 75.0, standard_cost: 60.0 },
+  distributor: { selling_price: 60.0, standard_cost: 45.0 },
+  manufacturer: { selling_price: 45.0, standard_cost: 30.0 },
 };
 
 const demandPatterns = [
@@ -248,23 +324,13 @@ const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
 };
 
 const CreateMixedGame = () => {
+  const { gameId } = useParams();
+  const isEditing = Boolean(gameId);
   const [searchParams] = useSearchParams();
   const [gameName, setGameName] = useState(searchParams.get('name') || '');
-  const [systemConfig, setSystemConfig] = useState({
-    // Default system configuration values
-    min_order_quantity: 0,
-    max_order_quantity: 100,
-    min_holding_cost: 0,
-    max_holding_cost: 10,
-    min_backlog_cost: 0,
-    max_backlog_cost: 20,
-    min_demand: 0,
-    max_demand: 100,
-    min_lead_time: 0,
-    max_lead_time: 4,
-    min_starting_inventory: 0,
-    max_starting_inventory: 100,
-  });
+  const [systemConfig, setSystemConfig] = useState(() => ({
+    ...DEFAULT_SYSTEM_CONFIG,
+  }));
   const [maxRounds, setMaxRounds] = useState(20);
   const [description, setDescription] = useState(searchParams.get('description') || '');
   const [isPublic, setIsPublic] = useState(true);
@@ -273,67 +339,12 @@ const CreateMixedGame = () => {
   const [initialDemand, setInitialDemand] = useState(4);
   const [demandChangeWeek, setDemandChangeWeek] = useState(6);
   const [finalDemand, setFinalDemand] = useState(8);
-  const [pricingConfig, setPricingConfig] = useState({
-    retailer: { selling_price: 100.0, standard_cost: 80.0 },
-    wholesaler: { selling_price: 75.0, standard_cost: 60.0 },
-    distributor: { selling_price: 60.0, standard_cost: 45.0 },
-    manufacturer: { selling_price: 45.0, standard_cost: 30.0 }
-  });
+  const [pricingConfig, setPricingConfig] = useState(() => ({ ...DEFAULT_PRICING_CONFIG }));
   // Missing local state for system configuration ranges and per-node policies
   // Node policies for each role in the supply chain
-  const [nodePolicies, setNodePolicies] = useState({
-    retailer: {
-      // Default policy values for retailer
-      policy_type: 'base_stock',
-      base_stock_level: 50,
-      reorder_point: 20,
-      order_up_to: 100,
-      smoothing_alpha: 0.3,
-      smoothing_beta: 0.1,
-      smoothing_gamma: 0.2,
-      forecast_horizon: 4
-    },
-    wholesaler: {
-      policy_type: 'base_stock',
-      base_stock_level: 100,
-      reorder_point: 40,
-      order_up_to: 200,
-      smoothing_alpha: 0.3,
-      smoothing_beta: 0.1,
-      smoothing_gamma: 0.2,
-      forecast_horizon: 4
-    },
-    distributor: {
-      policy_type: 'base_stock',
-      base_stock_level: 150,
-      reorder_point: 60,
-      order_up_to: 300,
-      smoothing_alpha: 0.3,
-      smoothing_beta: 0.1,
-      smoothing_gamma: 0.2,
-      forecast_horizon: 4
-    },
-    manufacturer: {
-      policy_type: 'base_stock',
-      base_stock_level: 200,
-      reorder_point: 80,
-      order_up_to: 400,
-      smoothing_alpha: 0.3,
-      smoothing_beta: 0.1,
-      smoothing_gamma: 0.2,
-      forecast_horizon: 4
-    }
-  });
+  const [nodePolicies, setNodePolicies] = useState(() => JSON.parse(JSON.stringify(DEFAULT_NODE_POLICIES)));
   // Policy/Simulation settings (bounded)
-  const [policy, setPolicy] = useState({
-    info_delay: 2,         // order delay (weeks)
-    ship_delay: 2,         // delivery delay (weeks)
-    init_inventory: 12,    // starting inventory per role
-    holding_cost: 0.5,     // per unit per week
-    backlog_cost: 1.0,     // per unit per week
-    max_inbound_per_link: 100, // shipment capacity
-    max_order: 100,
-  });
+  const [policy, setPolicy] = useState(() => ({ ...DEFAULT_POLICY }));
   const cardBg = useColorModeValue('white', 'gray.800');
   const borderColor = useColorModeValue('gray.200', 'gray.700');
   const { user } = useAuth();
@@ -357,6 +368,7 @@ const CreateMixedGame = () => {
   const [configs, setConfigs] = useState([]);
   const navigate = useNavigate();
   const toast = useToast();
+  const [initializing, setInitializing] = useState(isEditing);
 
   // Fetch available users
   useEffect(() => {
@@ -405,6 +417,145 @@ const CreateMixedGame = () => {
     })();
   }, []);
 
+  useEffect(() => {
+    if (!isEditing) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadGame = async () => {
+      try {
+        setInitializing(true);
+        const state = await mixedGameApi.getGameState(gameId);
+        if (cancelled) return;
+
+        const game = state?.game || {};
+        const config = game?.config || {};
+        setGameName(game.name || '');
+        setDescription(game.description || '');
+        setMaxRounds(game.max_rounds || 20);
+        setIsPublic(game.is_public !== undefined ? Boolean(game.is_public) : true);
+
+        const nextProgression = state?.progression_mode || config.progression_mode || 'supervised';
+        setProgressionMode(nextProgression);
+
+        const demand = game.demand_pattern || config.demand_pattern || {};
+        const demandType = String(demand.type || 'classic').toLowerCase();
+        setDemandPattern(demandType);
+        const demandParams = demand.params || {};
+        setInitialDemand(
+          Number.isFinite(Number(demandParams.initial_demand))
+            ? Number(demandParams.initial_demand)
+            : DEFAULT_CLASSIC_PARAMS.initial_demand
+        );
+        setDemandChangeWeek(
+          Number.isFinite(Number(demandParams.change_week))
+            ? Number(demandParams.change_week)
+            : DEFAULT_CLASSIC_PARAMS.change_week
+        );
+        setFinalDemand(
+          Number.isFinite(Number(demandParams.final_demand))
+            ? Number(demandParams.final_demand)
+            : DEFAULT_CLASSIC_PARAMS.final_demand
+        );
+
+        const pricing = config.pricing_config || {};
+        setPricingConfig({
+          retailer: {
+            selling_price: Number(pricing.retailer?.selling_price ?? DEFAULT_PRICING_CONFIG.retailer.selling_price),
+            standard_cost: Number(pricing.retailer?.standard_cost ?? DEFAULT_PRICING_CONFIG.retailer.standard_cost),
+          },
+          wholesaler: {
+            selling_price: Number(pricing.wholesaler?.selling_price ?? DEFAULT_PRICING_CONFIG.wholesaler.selling_price),
+            standard_cost: Number(pricing.wholesaler?.standard_cost ?? DEFAULT_PRICING_CONFIG.wholesaler.standard_cost),
+          },
+          distributor: {
+            selling_price: Number(pricing.distributor?.selling_price ?? DEFAULT_PRICING_CONFIG.distributor.selling_price),
+            standard_cost: Number(pricing.distributor?.standard_cost ?? DEFAULT_PRICING_CONFIG.distributor.standard_cost),
+          },
+          manufacturer: {
+            selling_price: Number(pricing.manufacturer?.selling_price ?? DEFAULT_PRICING_CONFIG.manufacturer.selling_price),
+            standard_cost: Number(pricing.manufacturer?.standard_cost ?? DEFAULT_PRICING_CONFIG.manufacturer.standard_cost),
+          },
+        });
+
+        const mergedPolicies = JSON.parse(JSON.stringify(DEFAULT_NODE_POLICIES));
+        Object.entries(config.node_policies || {}).forEach(([roleKey, policyValue]) => {
+          if (mergedPolicies[roleKey]) {
+            mergedPolicies[roleKey] = { ...mergedPolicies[roleKey], ...policyValue };
+          }
+        });
+        setNodePolicies(mergedPolicies);
+
+        setSystemConfig({ ...DEFAULT_SYSTEM_CONFIG, ...(config.system_config || {}) });
+        setPolicy({ ...DEFAULT_POLICY, ...(config.global_policy || {}) });
+
+        const overrides = config.daybreak_overrides || {};
+        const statePlayers = Array.isArray(state?.players) ? state.players : [];
+        const mappedPlayers = playerRoles.map(({ value: roleValue }) => {
+          const record = statePlayers.find(
+            (p) => String(p.role || '').toLowerCase() === roleValue
+          );
+          if (!record) {
+            return {
+              role: roleValue,
+              playerType: 'ai',
+              strategy: 'NAIVE',
+              canSeeDemand: roleValue === 'retailer',
+              userId: roleValue === 'retailer' && user ? user.id : null,
+              llmModel: 'gpt-4o-mini',
+              daybreakOverridePct: undefined,
+            };
+          }
+
+          const isAi = Boolean(record.is_ai);
+          const rawStrategy = record.ai_strategy
+            ? String(record.ai_strategy).toUpperCase()
+            : 'NAIVE';
+          const overrideDecimal =
+            overrides?.[roleValue] ??
+            overrides?.[roleValue.toLowerCase()] ??
+            overrides?.[roleValue.toUpperCase()];
+
+          return {
+            role: roleValue,
+            playerType: isAi ? 'ai' : 'human',
+            strategy: isAi ? rawStrategy : 'NAIVE',
+            canSeeDemand: Boolean(record.can_see_demand),
+            userId: record.user_id || null,
+            llmModel: record.llm_model || 'gpt-4o-mini',
+            daybreakOverridePct:
+              overrideDecimal != null
+                ? clampOverridePercent(Number(overrideDecimal) * 100)
+                : undefined,
+          };
+        });
+        setPlayers(mappedPlayers);
+      } catch (error) {
+        console.error('Failed to load game configuration', error);
+        toast({
+          title: 'Error loading game',
+          description:
+            error?.response?.data?.detail || 'Unable to load existing game configuration.',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+        });
+        navigate('/games');
+      } finally {
+        if (!cancelled) {
+          setInitializing(false);
+        }
+      }
+    };
+
+    loadGame();
+    return () => {
+      cancelled = true;
+    };
+  }, [isEditing, gameId, toast, navigate]);
+
   // Optional prefill via query params for node policies (JSON-encoded)
   useEffect(() => {
     const np = searchParams.get('node_policies');
@@ -448,10 +599,14 @@ const CreateMixedGame = () => {
 
   // If context ranges become available later, merge them
   useEffect(() => {
-    if (systemRanges && Object.keys(systemRanges).length) {
-      setSystemConfig(prev => ({ ...prev, ...systemRanges }));
+    if (!systemRanges || !Object.keys(systemRanges).length) {
+      return;
     }
-  }, [systemRanges]);
+    if (isEditing && !initializing) {
+      return;
+    }
+    setSystemConfig(prev => ({ ...prev, ...systemRanges }));
+  }, [systemRanges, isEditing, initializing]);
 
 
   const handlePlayerTypeChange = (index, type) => {
@@ -617,8 +772,10 @@ const CreateMixedGame = () => {
         })
       };
       
-      const newGame = await mixedGameApi.createGame(gameData);
-      return newGame;
+      const response = isEditing
+        ? await mixedGameApi.updateGame(gameId, gameData)
+        : await mixedGameApi.createGame(gameData);
+      return response;
       
     } catch (error) {
       console.error('Error creating game:', error);
@@ -635,35 +792,41 @@ const CreateMixedGame = () => {
     }
   };
 
-  const handleCreateGame = async (e) => {
+  const handleFormSubmit = async (e) => {
     if (e) e.preventDefault();
     try {
       const response = await handleSubmit();
-      
-      // Show success toast
+      if (!response) {
+        return null;
+      }
+
       toast({
-        title: 'Game created!',
-        description: 'The mixed game has been created successfully.',
+        title: isEditing ? 'Game updated!' : 'Game created!',
+        description: isEditing
+          ? 'The game configuration has been saved.'
+          : 'The mixed game has been created successfully.',
         status: 'success',
         duration: 2000,
         isClosable: true,
       });
-      
-      // Navigate to the game board after a short delay
+
       setTimeout(() => {
-        if (response && response.id) {
+        if (isEditing) {
+          navigate('/games');
+        } else if (response && response.id) {
           navigate(`/games/${response.id}`);
         } else {
           navigate('/games');
         }
       }, 1500);
-      
+
       return response;
     } catch (error) {
-      console.error('Error creating game:', error);
+      console.error(isEditing ? 'Error updating game:' : 'Error creating game:', error);
       toast({
-        title: 'Error creating game',
-        description: error.response?.data?.detail || 'Failed to create game. Please try again.',
+        title: isEditing ? 'Error updating game' : 'Error creating game',
+        description:
+          error?.response?.data?.detail || 'Failed to save game configuration. Please try again.',
         status: 'error',
         duration: 5000,
         isClosable: true,
@@ -672,8 +835,18 @@ const CreateMixedGame = () => {
     }
   };
 
+  if (isEditing && initializing) {
+    return (
+      <PageLayout title="Edit Mixed Game">
+        <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
+          <Spinner size="xl" />
+        </Box>
+      </PageLayout>
+    );
+  }
+
   return (
-    <PageLayout title="Mixed Game Definition">
+    <PageLayout title={isEditing ? 'Edit Mixed Game' : 'Mixed Game Definition'}>
       {/* Quick links to saved Game Configurations */}
       {configs?.length > 0 && (
         <Box mb={4}>
@@ -716,7 +889,7 @@ const CreateMixedGame = () => {
           </Box>
         </Alert>
       )}
-      <VStack as="form" onSubmit={handleCreateGame} spacing={6} align="stretch" maxW="4xl" mx="auto">
+      <VStack as="form" onSubmit={handleFormSubmit} spacing={6} align="stretch" maxW="4xl" mx="auto">
         <Tabs variant="enclosed" isFitted>
           <TabList mb="1em">
             <Tab>Game Settings</Tab>
@@ -1308,9 +1481,9 @@ const CreateMixedGame = () => {
             type="submit" 
             colorScheme="blue"
             isLoading={isLoading}
-            loadingText="Creating..."
+            loadingText={isEditing ? 'Saving...' : 'Creating...'}
           >
-            Create Game
+            {isEditing ? 'Save Changes' : 'Create Game'}
           </Button>
         </HStack>
       </VStack>

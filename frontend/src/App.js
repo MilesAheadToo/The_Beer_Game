@@ -122,6 +122,17 @@ const AppContent = () => {
             />
 
             <Route
+              path="/games/:gameId/edit"
+              element={
+                <>
+                  <Navbar />
+                  <Box sx={(theme) => theme.mixins.toolbar} />
+                  <CreateMixedGame />
+                </>
+              }
+            />
+
+            <Route
               path="/games/:gameId"
               element={
                 isGamePage ? (

@@ -26,6 +26,7 @@ from .game import Game, GameStatus, Round, PlayerAction
 from .agent_config import AgentConfig
 from .auth_models import PasswordHistory, PasswordResetToken
 from .session import TokenBlacklist, UserSession
+from .supply_chain import PlayerInventory, Order, GameRound, PlayerRound
 
 # 4. Supply chain configuration models
 from .supply_chain_config import (
@@ -79,5 +80,9 @@ __all__ = [
     'PlayerStrategy',
     'GameStatus',
     'Round',
-    'PlayerAction'
+    'PlayerAction',
+    'PlayerInventory',
+    'Order',
+    'GameRound',
+    'PlayerRound'
 ]

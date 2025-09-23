@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .player import Player
     from .user import User
     from .agent_config import AgentConfig
+    from .supply_chain import GameRound
 
 class GameStatus(str, Enum):
     CREATED = "CREATED"
@@ -46,6 +47,9 @@ class Game(Base):
     # Define relationships directly with string-based references
     players: Mapped[List["Player"]] = relationship("Player", back_populates="game", lazy="selectin")
     rounds: Mapped[List["Round"]] = relationship("Round", back_populates="game", lazy="selectin")
+    supply_chain_rounds: Mapped[List["GameRound"]] = relationship(
+        "GameRound", back_populates="game", lazy="selectin"
+    )
     users = relationship("User", secondary="user_games", back_populates="games", lazy="selectin")
     supervisor_actions = relationship("SupervisorAction", back_populates="game", lazy="selectin")
     agent_configs = relationship("AgentConfig", back_populates="game", lazy="selectin")

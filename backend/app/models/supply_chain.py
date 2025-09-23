@@ -49,7 +49,7 @@ class GameRound(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
     completed_at = Column(DateTime, nullable=True)
 
-    game = relationship("Game", back_populates="rounds")
+    game = relationship("Game", back_populates="supply_chain_rounds")
     player_rounds = relationship("PlayerRound", back_populates="game_round")
 
 

@@ -37,8 +37,13 @@ const gameApi = {
 
   // Update an existing game
   async updateGame(gameId, gameData) {
-    const response = await api.put(`/games/${gameId}`, gameData);
-    return response.data;
+    // Prefer modern mixed games endpoint for updates
+    try {
+      return await mixedGameApi.updateGame(gameId, gameData);
+    } catch (error) {
+      const response = await api.put(`/games/${gameId}`, gameData);
+      return response.data;
+    }
   },
 
   // Delete a game

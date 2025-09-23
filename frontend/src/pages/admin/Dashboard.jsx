@@ -36,7 +36,7 @@ const AdminDashboard = () => {
   const [activeTab, setActiveTab] = useState(tabItems.some((tab) => tab.value === initialTab) ? initialTab : 'game');
 
   useEffect(() => {
-    const section = searchParams.get('section') || 'sc';
+    const section = searchParams.get('section') || 'game';
     if (tabItems.some((tab) => tab.value === section) && section !== activeTab) {
       setActiveTab(section);
     }

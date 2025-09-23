@@ -9,7 +9,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.models.base import Base
 from app.models.user import User
-from scripts.seed_default_group import seed_default_data
+from scripts.seed_default_group import SeedOptions, seed_default_data
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -52,7 +52,7 @@ def main():
     db = SessionLocal()
     try:
         systemadmin = get_or_create_systemadmin(db)
-        seed_default_data(db)
+        seed_default_data(db, SeedOptions())
         db.commit()
         print(f"System administrator user ready: {systemadmin.email}")
     except Exception as e:

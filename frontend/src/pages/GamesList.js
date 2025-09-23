@@ -200,30 +200,10 @@ const GamesList = () => {
   // Handle dialog open/close
   const handleOpenDialog = (game = null) => {
     if (game) {
-      setSelectedGame(game);
-      const params = game.demand_pattern?.type === 'classic'
-        ? normalizeClassicParams(game.demand_pattern?.params)
-        : (game.demand_pattern?.params || {});
-      setFormData({
-        name: game.name,
-        max_rounds: game.max_rounds,
-        demand_pattern: {
-          type: game.demand_pattern?.type || 'classic',
-          params,
-        },
-      });
+      navigate(`/games/${game.id}/edit`);
     } else {
-      setSelectedGame(null);
-      setFormData({
-        name: '',
-        max_rounds: 20,
-        demand_pattern: {
-          type: 'classic',
-          params: { ...DEFAULT_CLASSIC_PARAMS },
-        },
-      });
+      navigate('/games/new');
     }
-    setOpenDialog(true);
   };
 
   const clearEditQuery = useCallback(() => {
@@ -316,26 +296,14 @@ const GamesList = () => {
 
   useEffect(() => {
     const editId = searchParams.get('edit');
-    if (!editId || loading) {
+    if (!editId) {
       return;
     }
-    if (!games.length) {
-      return;
-    }
-
-    const gameToEdit = games.find((game) => String(game.id) === editId);
-    if (gameToEdit) {
-      handleOpenDialog(gameToEdit);
-      const next = new URLSearchParams(searchParams);
-      next.delete('edit');
-      setSearchParams(next, { replace: true });
-    } else {
-      showSnackbar('Game not found for editing', 'error');
-      const next = new URLSearchParams(searchParams);
-      next.delete('edit');
-      setSearchParams(next, { replace: true });
-    }
-  }, [searchParams, games, loading, showSnackbar, setSearchParams]);
+    const next = new URLSearchParams(searchParams);
+    next.delete('edit');
+    setSearchParams(next, { replace: true });
+    navigate(`/games/${editId}/edit`);
+  }, [searchParams, navigate, setSearchParams]);
 
 
   // Format date

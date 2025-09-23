@@ -8,7 +8,7 @@ import logging
 import os
 import threading
 import time
-from typing import Optional, Dict, Any, List, Set
+from typing import Optional, Dict, Any, List, Set, Literal
 
 from fastapi import (
     FastAPI,
@@ -24,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from jose import JWTError, jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -32,11 +32,11 @@ from sqlalchemy.orm import Session
 from app.services.group_service import GroupService
 from app.services.bootstrap import build_default_group_payload, ensure_default_group_and_game
 from app.schemas.group import GroupCreate, GroupUpdate, Group as GroupSchema
-from app.schemas.game import GameCreate
-from app.schemas.player import PlayerType
+from app.schemas.game import GameCreate, PricingConfig, NodePolicy, DemandPattern
+from app.schemas.player import PlayerAssignment, PlayerType as PlayerTypeSchema
 from app.db.session import sync_engine
 from app.models.game import Game as DbGame, GameStatus as DbGameStatus, Round, PlayerAction
-from app.models.player import Player, PlayerRole, PlayerStrategy
+from app.models.player import Player, PlayerRole, PlayerStrategy, PlayerType as PlayerModelType
 from app.models.supply_chain_config import SupplyChainConfig
 from app.models.supply_chain import (
     PlayerInventory,
@@ -131,6 +131,20 @@ class OrderSubmission(BaseModel):
     player_id: int
     quantity: int
     comment: Optional[str] = None
+
+
+class GameUpdatePayload(BaseModel):
+    name: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+    is_public: Optional[bool] = None
+    max_rounds: Optional[int] = Field(None, ge=1, le=1000)
+    progression_mode: Optional[Literal["supervised", "unsupervised"]] = None
+    demand_pattern: Optional[DemandPattern] = None
+    pricing_config: Optional[PricingConfig] = None
+    node_policies: Optional[Dict[str, NodePolicy]] = None
+    system_config: Optional[Dict[str, Any]] = None
+    global_policy: Optional[Dict[str, Any]] = None
+    player_assignments: Optional[List[PlayerAssignment]] = None
 
 # ------------------------------------------------------------------------------
 # JWT utils
@@ -1623,11 +1637,33 @@ def _cancel_unsupervised_autoplay(game_id: int) -> None:
 
 
 def _replay_history_from_rounds(db: Session, game: DbGame) -> List[Dict[str, Any]]:
-    config = _coerce_game_config(game)
-    history = config.get("history")
-    if isinstance(history, list) and history:
-        return history
-    return []
+    records = (
+        db.query(Round)
+        .filter(Round.game_id == game.id)
+        .order_by(Round.round_number.asc())
+        .all()
+    )
+
+    history: List[Dict[str, Any]] = []
+    for record in records:
+        payload: Dict[str, Any] = {}
+        if record.config:
+            try:
+                payload = json.loads(record.config)
+            except json.JSONDecodeError:
+                payload = {}
+
+        history.append(
+            {
+                "round": record.round_number,
+                "timestamp": _iso(record.completed_at) if record.completed_at else None,
+                "demand": payload.get("demand"),
+                "orders": payload.get("orders", {}),
+                "node_states": payload.get("node_states", {}),
+            }
+        )
+
+    return history
 
 
 def _compute_game_report(db: Session, game: DbGame) -> Dict[str, Any]:
@@ -1716,6 +1752,7 @@ def _serialize_game(game: DbGame) -> Dict[str, Any]:
         "updated_at": _iso(getattr(game, "updated_at", None)),
         "group_id": game.group_id,
         "created_by": game.created_by,
+        "is_public": bool(getattr(game, "is_public", True)),
         "config": config,
         "demand_pattern": demand_pattern,
         "progression_mode": _get_progression_mode(game),
@@ -1782,7 +1819,7 @@ async def create_mixed_game(payload: GameCreate, user: Dict[str, Any] = Depends(
         }
 
         for assignment in payload.player_assignments:
-            is_agent = assignment.player_type == PlayerType.AGENT
+            is_agent = assignment.player_type == PlayerTypeSchema.AGENT
             role_value_raw = assignment.role.value if hasattr(assignment.role, "value") else str(assignment.role)
             role_key = role_value_raw.lower()
             role_enum_name = role_enum_map.get(role_key)
@@ -1821,6 +1858,74 @@ async def create_mixed_game(payload: GameCreate, user: Dict[str, Any] = Depends(
         db.close()
 
 
+def _apply_player_assignments_for_update(
+    db: Session,
+    game: DbGame,
+    assignments: List[PlayerAssignment],
+    config: Dict[str, Any],
+) -> None:
+    existing_players = {
+        (player.role.name if hasattr(player.role, "name") else str(player.role).upper()): player
+        for player in db.query(Player).filter(Player.game_id == game.id).all()
+    }
+
+    role_assignments: Dict[str, Dict[str, Any]] = {}
+    overrides: Dict[str, float] = {}
+
+    for assignment in assignments:
+        role_value = assignment.role.value if hasattr(assignment.role, "value") else str(assignment.role)
+        role_key = role_value.lower()
+        role_enum_name = role_value.upper()
+        if role_enum_name not in PlayerRole.__members__:
+            raise HTTPException(status_code=400, detail=f"Unsupported role: {role_value}")
+
+        role_enum = PlayerRole[role_enum_name]
+        player = existing_players.pop(role_enum.name, None)
+        if player is None:
+            player = Player(
+                game_id=game.id,
+                role=role_enum,
+                name=role_enum.name.title(),
+            )
+
+        is_agent = assignment.player_type == PlayerTypeSchema.AGENT
+        strategy_value = None
+        if assignment.strategy is not None:
+            strategy_value = (
+                assignment.strategy.value
+                if hasattr(assignment.strategy, "value")
+                else str(assignment.strategy)
+            )
+
+        player.is_ai = is_agent
+        player.type = PlayerModelType.AI if is_agent else PlayerModelType.HUMAN
+        player.ai_strategy = strategy_value if is_agent else None
+        player.can_see_demand = assignment.can_see_demand
+        player.user_id = None if is_agent else assignment.user_id
+        player.llm_model = assignment.llm_model if is_agent and assignment.llm_model else None
+        player.name = f"{role_enum.name.title()} ({'AI' if is_agent else 'Human'})"
+        player.strategy = PlayerStrategy.MANUAL
+        db.add(player)
+
+        role_assignments[role_key] = {
+            "is_ai": is_agent,
+            "agent_config_id": None,
+            "user_id": None if is_agent else assignment.user_id,
+        }
+
+        if assignment.daybreak_override_pct is not None:
+            overrides[role_key] = float(assignment.daybreak_override_pct)
+
+    for leftover in existing_players.values():
+        db.delete(leftover)
+
+    if overrides:
+        config["daybreak_overrides"] = overrides
+    else:
+        config.pop("daybreak_overrides", None)
+
+    game.role_assignments = role_assignments
+
 @api.get("/mixed-games/")
 async def list_mixed_games(user: Dict[str, Any] = Depends(get_current_user)):
     db = SyncSessionLocal()
@@ -1846,6 +1951,61 @@ async def list_mixed_games(user: Dict[str, Any] = Depends(get_current_user)):
                 await _schedule_unsupervised_autoplay(game.id)
             payload.append(_serialize_game(game))
         return payload
+    finally:
+        db.close()
+
+
+@api.put("/mixed-games/{game_id}")
+async def update_mixed_game(
+    game_id: int,
+    payload: GameUpdatePayload,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
+    db = SyncSessionLocal()
+    try:
+        game = _get_game_for_user(db, user, game_id)
+        if game.status not in {DbGameStatus.CREATED}:
+            raise HTTPException(
+                status_code=400,
+                detail="Games can only be edited while in the CREATED state.",
+            )
+
+        config = _coerce_game_config(game)
+        update_data = payload.dict(exclude_unset=True)
+
+        if "name" in update_data:
+            game.name = update_data["name"]
+        if "description" in update_data:
+            game.description = update_data["description"]
+        if "is_public" in update_data:
+            game.is_public = bool(update_data["is_public"])
+        if "max_rounds" in update_data:
+            game.max_rounds = update_data["max_rounds"]
+        if "progression_mode" in update_data:
+            config["progression_mode"] = update_data["progression_mode"]
+        if payload.demand_pattern is not None:
+            config["demand_pattern"] = payload.demand_pattern.dict()
+            game.demand_pattern = config["demand_pattern"]
+        if payload.pricing_config is not None:
+            config["pricing_config"] = payload.pricing_config.dict()
+        if payload.node_policies is not None:
+            config["node_policies"] = {
+                key: policy.dict() for key, policy in payload.node_policies.items()
+            }
+        if payload.system_config is not None:
+            config["system_config"] = payload.system_config
+        if payload.global_policy is not None:
+            config["global_policy"] = payload.global_policy
+        if payload.player_assignments is not None:
+            _apply_player_assignments_for_update(db, game, payload.player_assignments, config)
+
+        _ensure_simulation_state(config)
+        _save_game_config(db, game, config)
+        _touch_game(game)
+        db.add(game)
+        db.commit()
+        db.refresh(game)
+        return _serialize_game(game)
     finally:
         db.close()
 
@@ -1947,6 +2107,8 @@ async def list_rounds(game_id: int, user: Dict[str, Any] = Depends(get_current_u
         game = _get_game_for_user(db, user, game_id)
         config = _coerce_game_config(game)
         history = config.get("history", [])
+        if not history:
+            history = _replay_history_from_rounds(db, game)
         players = db.query(Player).filter(Player.game_id == game.id).all()
         players_by_role = {
             str(p.role.value if hasattr(p.role, "value") else p.role).lower(): p
@@ -2047,12 +2209,15 @@ async def get_game_state(game_id: int, user: Dict[str, Any] = Depends(get_curren
         ]
         round_record = _ensure_round(db, game, game.current_round or 1)
         pending = _pending_orders(config)
+        history = config.get("history", [])
+        if not history:
+            history = _replay_history_from_rounds(db, game)
         return {
             "game": _serialize_game(game),
             "progression_mode": _get_progression_mode(game),
             "round": round_record.round_number,
             "pending_orders": pending,
-            "history": config.get("history", []),
+            "history": history,
             "players": players_payload,
         }
     finally:

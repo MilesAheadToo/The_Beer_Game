@@ -10,6 +10,7 @@ from .base import Base
 if TYPE_CHECKING:
     from .game import Game, PlayerAction
     from .user import User
+    from .supply_chain import PlayerInventory, PlayerRound, Order
 
 class PlayerRole(str, Enum):
     RETAILER = "RETAILER"

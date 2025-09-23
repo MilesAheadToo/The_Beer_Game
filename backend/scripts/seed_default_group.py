@@ -132,6 +132,7 @@ class SeedOptions:
     force_dataset: bool = False
     force_training: bool = False
     create_daybreak_games: bool = True
+    use_naive_agents: bool = True
 
 FALLBACK_DB_FILENAME = "seed_default_group.sqlite"
 FALLBACK_DB_PATH = BACKEND_ROOT / FALLBACK_DB_FILENAME
@@ -425,7 +426,7 @@ def ensure_default_game(session: Session, group: Group) -> Game:
                 existing_config = json.loads(existing_config)
             except json.JSONDecodeError:
                 existing_config = {}
-        existing_config["progression_mode"] = "supervised"
+        existing_config.setdefault("progression_mode", "supervised")
         game.config = json.loads(json.dumps(existing_config))
         session.add(game)
         return game
@@ -563,7 +564,7 @@ def _ensure_default_players(session: Session, game: Game) -> None:
 
 
 def ensure_naive_agents(session: Session, game: Game) -> None:
-    """Assign naive AI agents to each role in the game."""
+    """Assign naive AI agents to each role in the game and switch to auto progression."""
     _ensure_default_players(session, game)
 
     players = session.query(Player).filter(Player.game_id == game.id).all()
@@ -611,8 +612,18 @@ def ensure_naive_agents(session: Session, game: Game) -> None:
         role_assignments.setdefault("wholesaler", dict(role_assignments["supplier"]))
         role_assignments.pop("supplier", None)
 
+    try:
+        config_payload = game.config or {}
+        if isinstance(config_payload, str):
+            config_payload = json.loads(config_payload)
+    except json.JSONDecodeError:
+        config_payload = {}
+
+    config_payload["progression_mode"] = "unsupervised"
+    game.config = json.loads(json.dumps(config_payload))
     game.role_assignments = role_assignments
     session.add(game)
+    session.flush()
     print(
         "[success] Assigned naive agents to roles: "
         + ", ".join(sorted(role_assignments.keys()))
@@ -989,8 +1000,11 @@ def ensure_daybreak_games(
 
 
 
-def seed_default_data(session: Session, options: SeedOptions) -> None:
+def seed_default_data(session: Session, options: Optional[SeedOptions] = None) -> None:
     """Run the seeding workflow using the provided session."""
+
+    if options is None:
+        options = SeedOptions()
 
     if options.reset_games:
         _purge_existing_games(session)
@@ -998,7 +1012,10 @@ def seed_default_data(session: Session, options: SeedOptions) -> None:
     group, _ = ensure_group(session)
     ensure_role_users(session, group)
     game = ensure_default_game(session, group)
-    configure_human_players_for_game(session, group, game)
+    if options.use_naive_agents:
+        ensure_naive_agents(session, game)
+    else:
+        configure_human_players_for_game(session, group, game)
 
     # Persist the base bootstrap objects so downstream helper scripts see them
     session.flush()
@@ -1079,6 +1096,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Regenerate the SimPy dataset even if cached output exists.",
     )
+    parser.add_argument(
+        "--use-human-players",
+        action="store_true",
+        help="Assign the default Beer Game to human accounts instead of naive AI agents.",
+    )
     return parser.parse_args()
 
 
@@ -1089,6 +1111,7 @@ def main() -> None:
         force_dataset=args.force_dataset or args.reset_games,
         force_training=args.force_training or args.reset_games,
         create_daybreak_games=not args.skip_daybreak_games,
+        use_naive_agents=not args.use_human_players,
     )
     print(f"[DEBUG] Database URL from settings: {settings.SQLALCHEMY_DATABASE_URI}")
 

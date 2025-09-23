@@ -20,6 +20,7 @@ import {
   Tooltip,
   Typography,
   LinearProgress,
+  Divider,
 } from '@mui/material';
 import {
   PlayArrow as StartIcon,
@@ -134,6 +135,7 @@ const GroupGameSupervisionPanel = ({
         lastUpdated: new Date().toISOString(),
         done: false,
         error: null,
+        history: Array.isArray(result?.config?.history) ? result.config.history : [],
       });
     }
   };
@@ -155,12 +157,14 @@ const GroupGameSupervisionPanel = ({
 
     const poll = async () => {
       try {
-        const data = await mixedGameApi.getGame(monitoringGameId);
+        const state = await mixedGameApi.getGameState(monitoringGameId);
+        const gameData = state?.game || {};
         if (cancelled) return;
 
-        const statusRaw = String(data?.status || '').toLowerCase();
-        const currentRound = data?.current_round ?? 0;
-        const maxRoundsFromData = data?.max_rounds ?? 0;
+        const statusRaw = String(gameData?.status || '').toLowerCase();
+        const currentRound = state?.round ?? gameData?.current_round ?? 0;
+        const maxRoundsFromData = gameData?.max_rounds ?? 0;
+        const history = Array.isArray(state?.history) ? state.history : [];
 
         let finished = false;
         setAutoProgress((prev) => {
@@ -181,10 +185,11 @@ const GroupGameSupervisionPanel = ({
             ...prev,
             currentRound,
             maxRounds: nextMaxRounds,
-            status: data?.status ?? prev.status,
+            status: gameData?.status ?? prev.status,
             lastUpdated: new Date().toISOString(),
             error: null,
             done,
+            history,
           };
         });
 
@@ -463,6 +468,34 @@ const GroupGameSupervisionPanel = ({
                 Status: {statusLabel(autoProgress.status)}
               </Typography>
             </Box>
+            {autoProgress.maxRounds > 0 && (
+              <Box sx={{ width: '100%' }}>
+                <LinearProgress
+                  variant="determinate"
+                  sx={{ height: 6, borderRadius: 3 }}
+                  value={(() => {
+                    const total = Number(autoProgress.maxRounds);
+                    const current = Number(autoProgress.currentRound ?? 0);
+                    if (!total || Number.isNaN(total) || total <= 0) {
+                      return 0;
+                    }
+                    const pct = (current / total) * 100;
+                    return Math.max(0, Math.min(100, pct));
+                  })()}
+                />
+                <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
+                  {(() => {
+                    const total = Number(autoProgress.maxRounds);
+                    const current = Number(autoProgress.currentRound ?? 0);
+                    if (!total || Number.isNaN(total) || total <= 0) {
+                      return 'Progress unavailable';
+                    }
+                    const pct = Math.max(0, Math.min(100, Math.round((current / total) * 100)));
+                    return `${pct}% complete`;
+                  })()}
+                </Typography>
+              </Box>
+            )}
             {autoProgress.error && (
               <Typography variant="body2" color="error" align="center">
                 {autoProgress.error}
@@ -478,6 +511,59 @@ const GroupGameSupervisionPanel = ({
                 All rounds complete. Preparing summary…
               </Typography>
             )}
+            {(() => {
+              const history = Array.isArray(autoProgress.history) ? autoProgress.history : [];
+              if (!history.length) {
+                return (
+                  <Typography variant="caption" color="text.secondary" align="center">
+                    Waiting for first round results…
+                  </Typography>
+                );
+              }
+              const latest = history[history.length - 1];
+              const orders = latest?.orders && typeof latest.orders === 'object' ? latest.orders : {};
+              const entries = Object.entries(orders);
+              if (!entries.length) {
+                return null;
+              }
+              return (
+                <Box sx={{ width: '100%' }}>
+                  <Divider sx={{ my: 1 }} />
+                  <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 1 }}>
+                    Latest orders (Round {latest?.round ?? autoProgress.currentRound ?? '—'})
+                  </Typography>
+                  <Stack spacing={0.75} sx={{ width: '100%' }}>
+                    {entries.map(([role, details]) => {
+                      const quantity = details?.quantity ?? details?.order ?? details?.amount ?? '—';
+                      const comment = details?.comment;
+                      return (
+                        <Box
+                          key={role}
+                          sx={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'flex-start',
+                            gap: 1,
+                          }}
+                        >
+                          <Typography variant="body2" sx={{ fontWeight: 600, textTransform: 'capitalize' }}>
+                            {role.replace(/_/g, ' ')}
+                          </Typography>
+                          <Box textAlign="right">
+                            <Typography variant="body2">{`${quantity} units`}</Typography>
+                            {comment && (
+                              <Typography variant="caption" color="text.secondary">
+                                {comment}
+                              </Typography>
+                            )}
+                          </Box>
+                        </Box>
+                      );
+                    })}
+                  </Stack>
+                </Box>
+              );
+            })()}
           </Stack>
         )}
       </DialogContent>

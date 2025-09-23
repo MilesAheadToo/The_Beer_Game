@@ -134,10 +134,17 @@ def auto_play_daybreak_games() -> None:
                     role_key = _role_key(player)
                     agent = agent_manager.get_agent(_agent_type_for(role_key))
 
+                    inventory_record = player.inventory
+                    inventory_value = inventory_record.current_stock if inventory_record else 0
+                    backlog_value = inventory_record.backorders if inventory_record else 0
+                    incoming_shipments = (
+                        inventory_record.incoming_shipments if inventory_record else []
+                    )
+
                     local_state = {
-                        'inventory': sim_state.get('inventory', {}).get(role_key, player.inventory),
-                        'backlog': sim_state.get('backlog', {}).get(role_key, player.backlog),
-                        'incoming_shipments': sim_state.get('incoming', {}).get(role_key, []),
+                        'inventory': sim_state.get('inventory', {}).get(role_key, inventory_value),
+                        'backlog': sim_state.get('backlog', {}).get(role_key, backlog_value),
+                        'incoming_shipments': sim_state.get('incoming', {}).get(role_key, incoming_shipments),
                     }
                     previous_qty = last_orders.get(role_key, {}).get('quantity', 0)
                     upstream_data = {'previous_orders': [previous_qty]}
