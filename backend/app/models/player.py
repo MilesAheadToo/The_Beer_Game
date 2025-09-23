@@ -32,7 +32,7 @@ class PlayerStrategy(str, Enum):
     DEMAND_AVERAGE = "DEMAND_AVERAGE"
     TREND_FOLLOWER = "TREND_FOLLOWER"
 
-    # LLM-based strategies
+    # Daybreak LLM-based strategies
     LLM_BASIC = "LLM_BASIC"
     LLM_ADVANCED = "LLM_ADVANCED"
     LLM_REINFORCEMENT = "LLM_REINFORCEMENT"

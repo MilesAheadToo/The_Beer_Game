@@ -36,7 +36,8 @@ from .supply_chain_config import (
     Node,
     Lane,
     ItemNodeConfig,
-    MarketDemand
+    MarketDemand,
+    SupplyChainTrainingArtifact,
 )
 
 # Verify all models are properly registered
@@ -67,6 +68,7 @@ __all__ = [
     'Lane',
     'ItemNodeConfig',
     'MarketDemand',
+    'SupplyChainTrainingArtifact',
     'Player',
     'Game',
     'AgentConfig',

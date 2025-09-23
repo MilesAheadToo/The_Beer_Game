@@ -66,12 +66,12 @@ const agentStrategies = [
     ]
   },
   {
-    group: 'LLM',
+    group: 'Daybreak LLM',
     options: [
-      { value: 'LLM_CONSERVATIVE', label: 'LLM - Conservative' },
-      { value: 'LLM_BALANCED', label: 'LLM - Balanced' },
-      { value: 'LLM_AGGRESSIVE', label: 'LLM - Aggressive' },
-      { value: 'LLM_ADAPTIVE', label: 'LLM - Adaptive' },
+      { value: 'LLM_CONSERVATIVE', label: 'Daybreak LLM - Conservative' },
+      { value: 'LLM_BALANCED', label: 'Daybreak LLM - Balanced' },
+      { value: 'LLM_AGGRESSIVE', label: 'Daybreak LLM - Aggressive' },
+      { value: 'LLM_ADAPTIVE', label: 'Daybreak LLM - Adaptive' },
     ]
   },
   {
@@ -108,12 +108,12 @@ const strategyDescriptions = {
   CONSERVATIVE: 'Maintains stable inventory levels.',
   RANDOM: 'Makes random order decisions.',
   PI_HEURISTIC: 'Uses a proportional-integral controller to balance demand forecast and inventory error.',
-  DEMAND_DRIVEN: 'LLM: demand-driven analysis.',
-  COST_OPTIMIZATION: 'LLM: optimizes for lower cost.',
-  LLM_CONSERVATIVE: 'AI-powered strategy using language models.',
-  LLM_BALANCED: 'Advanced AI with learning capabilities.',
-  LLM_AGGRESSIVE: 'Aggressive AI strategy.',
-  LLM_ADAPTIVE: 'Adaptive AI strategy.',
+  DEMAND_DRIVEN: 'Daybreak LLM: demand-driven analysis.',
+  COST_OPTIMIZATION: 'Daybreak LLM: optimizes for lower cost.',
+  LLM_CONSERVATIVE: 'Daybreak LLM strategy focused on stable inventory.',
+  LLM_BALANCED: 'Daybreak LLM strategy balancing service and cost.',
+  LLM_AGGRESSIVE: 'Daybreak LLM strategy that minimizes inventory aggressively.',
+  LLM_ADAPTIVE: 'Daybreak LLM strategy that adapts to observed trends.',
   DAYBREAK_DTCE: daybreakStrategyDescriptions.DAYBREAK_DTCE,
   DAYBREAK_DTCE_CENTRAL: daybreakStrategyDescriptions.DAYBREAK_DTCE_CENTRAL,
   DAYBREAK_DTCE_GLOBAL: daybreakStrategyDescriptions.DAYBREAK_DTCE_GLOBAL,
@@ -872,7 +872,7 @@ const CreateMixedGame = () => {
           <Box>
             <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
             <AlertDescription fontSize="sm">
-              The Daybreak agent has not yet been trained, so it cannot be used until training completes. You may still select Basic (heuristics) or LLM agents.
+              The Daybreak agent has not yet been trained, so it cannot be used until training completes. You may still select Basic (heuristics) or Daybreak LLM agents.
             </AlertDescription>
           </Box>
         </Alert>
@@ -1351,7 +1351,7 @@ const CreateMixedGame = () => {
                         <VStack align="stretch" spacing={3}>
                           {String(player.strategy).startsWith('LLM_') && (
                             <Box>
-                              <FormLabel>Choose LLM</FormLabel>
+                              <FormLabel>Choose Daybreak LLM</FormLabel>
                               <Select
                                 value={player.llmModel}
                                 onChange={(e) =>
@@ -1365,7 +1365,7 @@ const CreateMixedGame = () => {
                                 <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
                                 <option value="claude-3-5-haiku">Claude 3.5 Haiku</option>
                               </Select>
-                              <FormHelperText>Pick the LLM backend for this agent.</FormHelperText>
+                              <FormHelperText>Pick the Daybreak LLM backend for this agent.</FormHelperText>
                             </Box>
                           )}
 

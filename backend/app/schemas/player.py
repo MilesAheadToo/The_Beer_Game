@@ -21,7 +21,7 @@ class PlayerStrategy(str, Enum):
     # Advanced strategies
     DEMAND_DRIVEN = "demand_driven"
     COST_OPTIMIZATION = "cost_optimization"
-    # LLM-based strategies
+    # Daybreak LLM strategies
     LLM_CONSERVATIVE = "llm_conservative"
     LLM_BALANCED = "llm_balanced"
     LLM_AGGRESSIVE = "llm_aggressive"
@@ -39,7 +39,7 @@ class PlayerAssignment(BaseModel):
     strategy: Optional[PlayerStrategy] = PlayerStrategy.NAIVE  # For AI players
     can_see_demand: bool = False  # Whether this player can see customer demand
     llm_model: Optional[str] = Field(
-        default="gpt-4o-mini", description="Selected LLM when using LLM strategies"
+        default="gpt-4o-mini", description="Selected Daybreak LLM when using Daybreak LLM strategies"
     )
     llm_config: Optional[dict] = None  # temperature, max_tokens, prompt
     basic_config: Optional[dict] = None  # heuristic params, e.g., base_stock_target, smoothing

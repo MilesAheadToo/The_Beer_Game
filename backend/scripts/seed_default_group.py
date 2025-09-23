@@ -8,6 +8,7 @@ from datetime import datetime
 import json
 import subprocess
 import sys
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional, Tuple
@@ -19,6 +20,11 @@ if str(BACKEND_ROOT) not in sys.path:
 
 SCRIPTS_ROOT = Path(__file__).resolve().parent
 TRAINING_SCRIPTS_DIR = SCRIPTS_ROOT / "training"
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^0-9a-zA-Z]+", "-", value.strip().lower()).strip("-")
+    return slug or "config"
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
@@ -47,6 +53,7 @@ from app.models import (
     PlayerType,
     Round,
     SupplyChainConfig,
+    SupplyChainTrainingArtifact,
     SupervisorAction,
     User,
 )
@@ -104,7 +111,7 @@ DAYBREAK_AGENT_SPECS = [
     {
         "name": "Daybreak LLM Cooperative Showcase",
         "agent_type": "llm_adaptive",
-        "description": "LLM-driven agents with full information sharing across the supply chain.",
+        "description": "Daybreak LLM-driven agents with full information sharing across the supply chain.",
         "override_pct": None,
         "llm_model": "gpt-5-mini",
         "can_see_demand_all": True,
@@ -709,7 +716,8 @@ def _resolve_training_device(preferred: str = "cuda") -> str:
 
 
 def _run_post_seed_tasks(
-    config_id: int,
+    session: Session,
+    config: SupplyChainConfig,
     *,
     force_dataset: bool = False,
     force_training: bool = False,
@@ -719,6 +727,9 @@ def _run_post_seed_tasks(
     if not TRAINING_SCRIPTS_DIR.exists():
         print("[warn] Training scripts directory not found; skipping automatic training.")
         return {"dataset": None, "model": None, "device": None}
+
+    config_id = config.id
+    slug = _slugify(config.name)
 
     artifacts: Dict[str, Optional[Dict[str, Any]]] = {
         "dataset": None,
@@ -757,6 +768,14 @@ def _run_post_seed_tasks(
         status = dataset_payload.get("status", "unknown")
         print(f"[success] Generate SimPy dataset: {status}")
         if dataset_payload.get("path"):
+            original_path = Path(dataset_payload["path"])
+            target_path = original_path.with_name(f"{slug}_dataset.npz")
+            if original_path != target_path:
+                if target_path.exists():
+                    target_path.unlink()
+                original_path.rename(target_path)
+                dataset_payload["path"] = str(target_path)
+            dataset_payload["filename"] = Path(dataset_payload["path"]).name
             print(f"          Dataset: {dataset_payload['path']}")
         artifacts["dataset"] = dataset_payload
 
@@ -799,7 +818,22 @@ def _run_post_seed_tasks(
         status = training_payload.get("status", "unknown")
         print(f"[success] Train temporal GNN: {status}")
         if training_payload.get("model_path"):
+            model_path = Path(training_payload["model_path"])
+            target_model_path = model_path.with_name(f"{slug}_temporal_gnn.pt")
+            if model_path != target_model_path:
+                if target_model_path.exists():
+                    target_model_path.unlink()
+                model_path.rename(target_model_path)
+                training_payload["model_path"] = str(target_model_path)
             print(f"          Model: {training_payload['model_path']}")
+        if dataset_payload and training_payload:
+            artifact = SupplyChainTrainingArtifact(
+                config_id=config_id,
+                dataset_name=Path(dataset_payload["path"]).name,
+                model_name=Path(training_payload["model_path"]).name,
+            )
+            session.add(artifact)
+            session.commit()
         artifacts["model"] = training_payload
 
     return artifacts
@@ -1035,7 +1069,8 @@ def seed_default_data(session: Session, options: Optional[SeedOptions] = None) -
     }
     if config:
         artifacts = _run_post_seed_tasks(
-            config.id,
+            session,
+            config,
             force_dataset=options.force_dataset,
             force_training=options.force_training,
         )

@@ -6,7 +6,7 @@ A comprehensive simulation of the Beer Distribution Game featuring AI-powered su
 - **Advanced Analytics**: Real-time supply chain metrics and visualization
 - **AI-Powered Insights**: Machine learning models for demand forecasting and optimization
 - **Multiplayer Support**: Play with both human and AI players
-- **Automatic LLM Players**: Default retailer, wholesaler, distributor, and manufacturer players are created as LLM agents when a group is created
+- **Automatic Daybreak LLM Players**: Default retailer, wholesaler, distributor, and manufacturer players are created as Daybreak LLM agents when a group is created
 - **Containerized Deployment**: Easy setup with Docker and Docker Compose
 
 ## 🚀 Features

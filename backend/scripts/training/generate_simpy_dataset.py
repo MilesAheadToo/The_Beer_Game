@@ -5,8 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -38,7 +38,12 @@ class TrainingParams:
     use_simpy: bool = True
 
 
-def _generate_training_dataset(config_id: int, params: TrainingParams) -> Dict[str, Any]:
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^0-9a-zA-Z]+", "-", value.strip().lower()).strip("-")
+    return slug or "config"
+
+
+def _generate_training_dataset(config_id: int, slug: str, params: TrainingParams) -> Dict[str, Any]:
     TRAINING_ROOT.mkdir(parents=True, exist_ok=True)
 
     X, A, P, Y = generate_sim_training_windows(
@@ -53,8 +58,7 @@ def _generate_training_dataset(config_id: int, params: TrainingParams) -> Dict[s
         sim_wip_k=params.sim_wip_k,
     )
 
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    dataset_path = TRAINING_ROOT / f"dataset_cfg{config_id}_{timestamp}.npz"
+    dataset_path = TRAINING_ROOT / f"{slug}_dataset.npz"
     np.savez(dataset_path, X=X, A=A, P=P, Y=Y)
 
     return {
@@ -82,8 +86,11 @@ def _resolve_config_id(config_id: Optional[int], config_name: str) -> int:
         return int(result)
 
 
-def _latest_dataset_path(config_id: int) -> Optional[Path]:
+def _latest_dataset_path(config_id: int, slug: str) -> Optional[Path]:
     TRAINING_ROOT.mkdir(parents=True, exist_ok=True)
+    candidate = TRAINING_ROOT / f"{slug}_dataset.npz"
+    if candidate.exists():
+        return candidate
     matches = sorted(TRAINING_ROOT.glob(f"dataset_cfg{config_id}_*.npz"))
     return matches[-1] if matches else None
 
@@ -110,7 +117,13 @@ def main() -> None:
     args = parse_args()
     config_id = _resolve_config_id(args.config_id, args.config_name)
 
-    latest_dataset = _latest_dataset_path(config_id)
+    with SyncSession(sync_engine) as session:
+        config_obj = session.get(SupplyChainConfig, config_id)
+        if not config_obj:
+            raise RuntimeError(f"Supply chain configuration not found (id={config_id}).")
+        slug = _slugify(config_obj.name)
+
+    latest_dataset = _latest_dataset_path(config_id, slug)
     if latest_dataset and not args.force:
         logger.info(
             "Existing dataset found for config %s at %s; skipping generation.",
@@ -134,7 +147,7 @@ def main() -> None:
         sim_wip_k=float(args.sim_wip_k),
     )
 
-    dataset_info = _generate_training_dataset(config_id, params)
+    dataset_info = _generate_training_dataset(config_id, slug, params)
     dataset_info.update({
         "status": "created",
         "config_id": config_id,

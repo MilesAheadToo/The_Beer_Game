@@ -53,6 +53,12 @@ class SupplyChainConfig(Base):
     trained_model_path = Column(String(255), nullable=True)
     last_trained_config_hash = Column(String(128), nullable=True)
 
+    training_artifacts = relationship(
+        "SupplyChainTrainingArtifact",
+        back_populates="config",
+        cascade="all, delete-orphan",
+    )
+
 class Item(Base):
     """Products in the supply chain"""
     __tablename__ = "items"
@@ -157,3 +163,17 @@ class MarketDemand(Base):
     config = relationship("SupplyChainConfig", back_populates="market_demands")
     item = relationship("Item")
     retailer = relationship("Node")
+
+
+class SupplyChainTrainingArtifact(Base):
+    """Records the generated dataset and trained model for a supply chain configuration."""
+
+    __tablename__ = "supply_chain_training_artifacts"
+
+    id = Column(Integer, primary_key=True, index=True)
+    config_id = Column(Integer, ForeignKey("supply_chain_configs.id", ondelete="CASCADE"), nullable=False)
+    dataset_name = Column(String(255), nullable=False)
+    model_name = Column(String(255), nullable=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow, nullable=False)
+
+    config = relationship("SupplyChainConfig", back_populates="training_artifacts")

@@ -22,6 +22,7 @@ from .config import (
     ORDER_EDGES,
     SHIPMENT_EDGES,
 )
+from app.services.agents import BeerGameAgent, AgentStrategy, AgentType
 
 logger = logging.getLogger(__name__)
 
@@ -387,6 +388,18 @@ def simulate_beer_game(
         inventory, backlog, incoming_orders, incoming_shipments, on_order, placed_order
     """
     roles = NODES
+    agents = {
+        role: BeerGameAgent(
+            agent_id=index,
+            agent_type=AgentType[role.upper()],
+            strategy=AgentStrategy.LLM,
+            can_see_demand=True,
+            initial_inventory=params.init_inventory,
+            initial_orders=4,
+            llm_model="gpt-4o-mini",
+        )
+        for index, role in enumerate(roles)
+    }
     # state
     inv = {r: [params.init_inventory] for r in roles}
     back = {r: [0] for r in roles}
@@ -442,13 +455,40 @@ def simulate_beer_game(
             back[r].append(new_back)
 
         # simple heuristic ordering (base-stock vibe) for behavior traces
+        previous_orders_by_role = {
+            role: placed[role][-1] if placed[role] else 0 for role in roles
+        }
+
         for r in roles:
-            target = params.init_inventory + params.ship_delay * 2
-            # try to restore inventory + clear backlog + maintain pipeline
-            desired = target + back[r][-1] - inv[r][-1] - on_ord[r][-1]
-            raw_order = int(np.clip(desired, 0, params.max_order))
-            # snap to discrete action
-            act_idx = order_units_to_action_idx(raw_order)
+            agent = agents[r]
+            agent.inventory = inv[r][-1]
+            agent.backlog = back[r][-1]
+            agent.pipeline = list(ship_pipes[r])
+            local_state = {
+                "inventory": inv[r][-1],
+                "backlog": back[r][-1],
+                "incoming_shipments": ship_pipes[r],
+                "pipeline": on_ord[r][-1],
+            }
+            upstream_data = {
+                "previous_orders_by_role": previous_orders_by_role,
+                "previous_orders": placed[r][-3:] if len(placed[r]) >= 3 else placed[r],
+            }
+            current_demand = in_ord[r][-1] if in_ord[r] else None
+            try:
+                order_units = agent.make_decision(
+                    current_round=t,
+                    current_demand=current_demand,
+                    upstream_data=upstream_data,
+                    local_state=local_state,
+                )
+            except Exception:
+                target = params.init_inventory + params.ship_delay * 2
+                desired = target + back[r][-1] - inv[r][-1] - on_ord[r][-1]
+                order_units = int(np.clip(desired, 0, params.max_order))
+            order_units = max(0, int(order_units))
+            order_units = min(order_units, params.max_order)
+            act_idx = order_units_to_action_idx(order_units)
             order_units = action_idx_to_order_units(act_idx)
             placed[r].append(order_units)
             on_ord[r].append(max(0, on_ord[r][-1] + order_units - in_ship[r][-1]))

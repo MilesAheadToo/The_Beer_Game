@@ -1,4 +1,4 @@
-"""Utilities for constructing structured payloads for the Beer Game LLM agent."""
+"""Utilities for constructing structured payloads for the Beer Game Daybreak LLM agent."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from app.models.game import Game
 from app.models.player import Player
 from app.models.supply_chain import PlayerInventory, PlayerRound, GameRound
 
-# Mapping between backend role identifiers and the labels expected by the LLM
+# Mapping between backend role identifiers and the labels expected by the Daybreak LLM
 ROLE_NAME_MAP = {
     "manufacturer": "factory",
 }
@@ -60,7 +60,7 @@ def build_llm_decision_payload(
     action_role: str,
     history_window: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Assemble the structured JSON payload expected by the LLM agent."""
+    """Assemble the structured JSON payload expected by the Daybreak LLM agent."""
 
     config_raw = _coerce_dict(getattr(game, "config", {}))
     sim_params = _coerce_dict(config_raw.get("simulation_parameters", {}))

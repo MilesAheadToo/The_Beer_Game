@@ -14,7 +14,7 @@ from .beer_game_xai_explain import (
     explain_supervisor_adjustment,
 )
 
-# Import the LLM agent only when needed to avoid unnecessary dependencies
+# Import the Daybreak LLM agent only when needed to avoid unnecessary dependencies
 try:  # pragma: no cover - optional import
     from .llm_agent import LLMAgent, LLMStrategy
 except Exception:  # pragma: no cover - tests may not have openai deps
@@ -33,7 +33,7 @@ class AgentStrategy(Enum):
     CONSERVATIVE = "conservative"  # Maintains stable orders
     RANDOM = "random"  # Random ordering for baseline
     PI = "pi_heuristic"  # Proportional-integral controller
-    LLM = "llm"  # Large Language Model strategy
+    LLM = "llm"  # Daybreak LLM strategy
     DAYBREAK_DTCE = "daybreak_dtce"  # Decentralized twin coordinated ensemble
     DAYBREAK_DTCE_CENTRAL = "daybreak_dtce_central"  # DTCE with central override
     DAYBREAK_DTCE_GLOBAL = "daybreak_dtce_global"  # Single agent orchestrating the network
@@ -305,7 +305,7 @@ class BeerGameAgent:
         self.order_history = []
         self.demand_history = []
         self.last_order = initial_orders
-        # LLM specific configuration
+        # Daybreak LLM specific configuration
         self.llm_model = llm_model
         self._llm_agent: Optional[LLMAgent] = None
         # Optional centralized coordinator for Daybreak variants
@@ -547,8 +547,8 @@ class BeerGameAgent:
         current_demand: Optional[int],
         upstream_data: Optional[Dict],
     ) -> int:
-        """Use an LLM-backed agent to decide the order quantity."""
-        if LLMAgent is None:  # LLM dependencies not available
+        """Use a Daybreak LLM-backed agent to decide the order quantity."""
+        if LLMAgent is None:  # Daybreak LLM dependencies not available
             return self._naive_strategy(current_demand)
 
         if self._llm_agent is None:
@@ -560,7 +560,7 @@ class BeerGameAgent:
                     model=model,
                 )
             except Exception:
-                # Fallback to simple strategy if initialization fails
+                # Fallback to simple strategy if Daybreak LLM initialization fails
                 return self._naive_strategy(current_demand)
 
         try:
@@ -575,7 +575,7 @@ class BeerGameAgent:
                 upstream_data=upstream_data,
             )
         except Exception:
-            # Fallback if the LLM call fails for any reason
+            # Fallback if the Daybreak LLM call fails for any reason
             return self._naive_strategy(current_demand)
 
     def _compute_daybreak_base(
@@ -964,7 +964,7 @@ class AgentManager:
         llm_model: Optional[str] = None,
         override_pct: Optional[float] = None,
     ):
-        """Set strategy and optional LLM model for a specific agent."""
+        """Set strategy and optional Daybreak LLM model for a specific agent."""
         if agent_type in self.agents:
             agent = self.agents[agent_type]
             agent.strategy = strategy

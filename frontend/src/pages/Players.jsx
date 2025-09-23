@@ -18,10 +18,10 @@ const agentStrategyLabels = {
   DAYBREAK_DTCE: 'Daybreak - Roles',
   DAYBREAK_DTCE_CENTRAL: 'Daybreak - Roles + Supervisor',
   DAYBREAK_DTCE_GLOBAL: 'Daybreak - SC Orchestrator',
-  LLM_BALANCED: 'LLM - Balanced',
-  LLM_CONSERVATIVE: 'LLM - Conservative',
-  LLM_AGGRESSIVE: 'LLM - Aggressive',
-  LLM_ADAPTIVE: 'LLM - Adaptive',
+  LLM_BALANCED: 'Daybreak LLM - Balanced',
+  LLM_CONSERVATIVE: 'Daybreak LLM - Conservative',
+  LLM_AGGRESSIVE: 'Daybreak LLM - Aggressive',
+  LLM_ADAPTIVE: 'Daybreak LLM - Adaptive',
   NAIVE: 'Heuristic - Naive',
   BULLWHIP: 'Heuristic - Bullwhip',
   CONSERVATIVE: 'Heuristic - Conservative',
@@ -217,9 +217,9 @@ const PlayersPage = () => {
                       <option value="DAYBREAK_DTCE">Daybreak - Roles</option>
                       <option value="DAYBREAK_DTCE_CENTRAL">Daybreak - Roles + Supervisor</option>
                       <option value="DAYBREAK_DTCE_GLOBAL">Daybreak - SC Orchestrator</option>
-                      <option value="LLM_BALANCED">LLM - Balanced</option>
-                      <option value="LLM_CONSERVATIVE">LLM - Conservative</option>
-                      <option value="LLM_AGGRESSIVE">LLM - Aggressive</option>
+                      <option value="LLM_BALANCED">Daybreak LLM - Balanced</option>
+                      <option value="LLM_CONSERVATIVE">Daybreak LLM - Conservative</option>
+                      <option value="LLM_AGGRESSIVE">Daybreak LLM - Aggressive</option>
                       <option value="NAIVE">Heuristic - Naive</option>
                       <option value="BULLWHIP">Heuristic - Bullwhip</option>
                       <option value="CONSERVATIVE">Heuristic - Conservative</option>

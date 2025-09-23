@@ -5,9 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -16,7 +18,7 @@ from sqlalchemy.orm import Session as SyncSession
 
 from app.core.config import settings
 from app.db.session import sync_engine
-from app.models.supply_chain_config import SupplyChainConfig
+from app.models.supply_chain_config import SupplyChainConfig, SupplyChainTrainingArtifact
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -37,19 +39,26 @@ class TrainingParams:
     dataset: Path
 
 
-def _latest_dataset_path(config_id: int) -> Optional[Path]:
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^0-9a-zA-Z]+", "-", value.strip().lower()).strip("-")
+    return slug or "config"
+
+
+def _latest_dataset_path(config_id: int, slug: str) -> Optional[Path]:
+    candidate = TRAINING_ROOT / f"{slug}_dataset.npz"
+    if candidate.exists():
+        return candidate
     matches = sorted(TRAINING_ROOT.glob(f"dataset_cfg{config_id}_*.npz"))
     return matches[-1] if matches else None
 
 
-def _model_path(config_id: int) -> Path:
-    model_dir = MODEL_ROOT / f"config_{config_id}"
-    model_dir.mkdir(parents=True, exist_ok=True)
-    return model_dir / "temporal_gnn.pt"
+def _model_path(slug: str) -> Path:
+    MODEL_ROOT.mkdir(parents=True, exist_ok=True)
+    return MODEL_ROOT / f"{slug}_temporal_gnn.pt"
 
 
-def _run_training_process(config_id: int, params: TrainingParams) -> Dict[str, Any]:
-    log_path = params.dataset.parent / f"train_{Path(params.dataset).stem}.log"
+def _run_training_process(slug: str, params: TrainingParams) -> Dict[str, Any]:
+    log_path = MODEL_ROOT / f"{slug}_train.log"
 
     cmd = [
         sys.executable,
@@ -63,7 +72,7 @@ def _run_training_process(config_id: int, params: TrainingParams) -> Dict[str, A
         "--epochs",
         str(params.epochs),
         "--save-path",
-        str(_model_path(config_id)),
+        str(_model_path(slug)),
         "--dataset",
         str(params.dataset),
     ]
@@ -77,7 +86,7 @@ def _run_training_process(config_id: int, params: TrainingParams) -> Dict[str, A
     log_path.write_text(log_output)
 
     return {
-        "model_path": str(_model_path(config_id)),
+        "model_path": str(_model_path(slug)),
         "log": log_output,
         "log_path": str(log_path),
         "command": cmd,
@@ -101,6 +110,18 @@ def _resolve_config_id(config_id: Optional[int], config_name: str) -> int:
         return int(result)
 
 
+def _get_config(config_id: int) -> SupplyChainConfig:
+    if sync_engine is None:
+        raise RuntimeError("Synchronous database engine is not configured; cannot access the database.")
+
+    with SyncSession(sync_engine) as session:
+        config = session.get(SupplyChainConfig, config_id)
+        if not config:
+            raise RuntimeError(f"Supply chain configuration not found (id={config_id}).")
+        session.expunge(config)
+        return config
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config-id", type=int, default=None, help="Target supply chain configuration ID.")
@@ -121,14 +142,16 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     config_id = _resolve_config_id(args.config_id, args.config_name)
+    config_obj = _get_config(config_id)
+    slug = _slugify(config_obj.name)
 
-    dataset_path = Path(args.dataset) if args.dataset else _latest_dataset_path(config_id)
+    dataset_path = Path(args.dataset) if args.dataset else _latest_dataset_path(config_id, slug)
     if not dataset_path or not dataset_path.exists():
         raise RuntimeError(
             "No training dataset found. Generate a dataset before running GPU training."
         )
 
-    model_path = _model_path(config_id)
+    model_path = _model_path(slug)
     if model_path.exists() and not args.force:
         logger.info(
             "Model already exists at %s; skipping training (use --force to retrain).",
@@ -150,12 +173,27 @@ def main() -> None:
         dataset=dataset_path,
     )
 
-    result = _run_training_process(config_id, params)
+    result = _run_training_process(slug, params)
     result.update({
         "status": "trained",
         "config_id": config_id,
         "dataset": str(dataset_path),
     })
+    with SyncSession(sync_engine) as session:
+        session.add(
+            SupplyChainTrainingArtifact(
+                config_id=config_id,
+                dataset_name=dataset_path.name,
+                model_name=model_path.name,
+            )
+        )
+        config_in_db = session.get(SupplyChainConfig, config_id)
+        if config_in_db:
+            config_in_db.needs_training = False
+            config_in_db.training_status = "trained"
+            config_in_db.trained_model_path = str(model_path)
+            config_in_db.trained_at = datetime.utcnow()
+        session.commit()
     logger.info("Training complete. Model stored at %s", result.get("model_path"))
     print(json.dumps(result))
 

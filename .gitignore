@@ -37,6 +37,7 @@ logs/
 # Generated/train runs
 backend/runs/
 backend/checkpoints/
+backend/training_jobs/
 
 # Editor
 .vscode/

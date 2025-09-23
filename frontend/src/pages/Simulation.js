@@ -472,11 +472,11 @@ const Simulation = () => {
                       Model Selection
                     </Typography>
                     <FormControl fullWidth margin="normal">
-                      <InputLabel>LLM Model</InputLabel>
+                      <InputLabel>Daybreak LLM Model</InputLabel>
                       <Select
                         value={config.llmModel}
                         onChange={handleSelectChange('llmModel')}
-                        label="LLM Model"
+                        label="Daybreak LLM Model"
                       >
                         {llmModelOptions.map((option) => (
                           <MenuItem key={option.value} value={option.value}>
@@ -577,7 +577,7 @@ const Simulation = () => {
                     <Typography variant="h6" gutterBottom>
                       Models
                     </Typography>
-                    <SummaryRow label="LLM model" value={llmModelLabel} />
+                    <SummaryRow label="Daybreak LLM model" value={llmModelLabel} />
                     <SummaryRow label="RL model" value={formatBoolean(config.useRlModel)} />
                   </Paper>
                 </Grid>

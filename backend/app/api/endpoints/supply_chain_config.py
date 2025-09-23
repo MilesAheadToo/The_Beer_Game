@@ -2,29 +2,38 @@ import hashlib
 import json
 import subprocess
 import sys
+import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, status, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Body, BackgroundTasks
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 
 from app import crud, models, schemas
 from app.api import deps
 from app.core.config import settings
+from app.db.session import SessionLocal
 from app.services.supply_chain_config_service import SupplyChainConfigService
-from app.models.supply_chain_config import NodeType, SupplyChainConfig
+from app.models.supply_chain_config import NodeType, SupplyChainConfig, SupplyChainTrainingArtifact
 from app.models.user import UserTypeEnum
 from app.schemas.game import GameCreate
 from app.rl.data_generator import generate_sim_training_windows
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 BACKEND_ROOT = Path(__file__).resolve().parents[3]
 TRAINING_ROOT = BACKEND_ROOT / "training_jobs"
 MODEL_ROOT = BACKEND_ROOT / "checkpoints" / "supply_chain_configs"
+
+
+def _slugify(value: str) -> str:
+    slug = re.sub(r"[^0-9a-zA-Z]+", "-", value.strip().lower()).strip("-")
+    return slug or "config"
 
 
 class ConfigTrainingRequest(BaseModel):
@@ -213,6 +222,23 @@ def _mark_config_requires_training(
     return config
 
 
+def _create_training_artifact(
+    db: Session,
+    config_id: int,
+    dataset_path: Path,
+    model_path: Path,
+) -> SupplyChainTrainingArtifact:
+    artifact = SupplyChainTrainingArtifact(
+        config_id=config_id,
+        dataset_name=dataset_path.name,
+        model_name=model_path.name,
+    )
+    db.add(artifact)
+    db.commit()
+    db.refresh(artifact)
+    return artifact
+
+
 def _set_training_outcome(
     db: Session,
     config: SupplyChainConfig,
@@ -235,29 +261,30 @@ def _set_training_outcome(
 
 
 def _generate_training_dataset(
-    config_id: int,
+    config: SupplyChainConfig,
     params: ConfigTrainingRequest,
 ) -> Dict[str, Any]:
     TRAINING_ROOT.mkdir(parents=True, exist_ok=True)
+    slug = _slugify(config.name)
+    dataset_filename = f"{slug}_dataset.npz"
+    dataset_path = TRAINING_ROOT / dataset_filename
 
     X, A, P, Y = generate_sim_training_windows(
         num_runs=int(params.num_runs),
         T=int(params.T),
         window=int(params.window),
         horizon=int(params.horizon),
-        supply_chain_config_id=config_id,
+        supply_chain_config_id=config.id,
         db_url=settings.SQLALCHEMY_DATABASE_URI or None,
         use_simpy=params.use_simpy,
         sim_alpha=float(params.sim_alpha) if params.sim_alpha is not None else 0.3,
         sim_wip_k=float(params.sim_wip_k) if params.sim_wip_k is not None else 1.0,
     )
-
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-    dataset_path = TRAINING_ROOT / f"dataset_cfg{config_id}_{timestamp}.npz"
     np.savez(dataset_path, X=X, A=A, P=P, Y=Y)
 
     return {
         "path": str(dataset_path),
+        "filename": dataset_filename,
         "samples": int(X.shape[0]),
         "window": int(params.window),
         "horizon": int(params.horizon),
@@ -265,16 +292,16 @@ def _generate_training_dataset(
 
 
 def _run_training_process(
-    config_id: int,
+    config: SupplyChainConfig,
     dataset_path: Path,
     params: ConfigTrainingRequest,
 ) -> Dict[str, Any]:
     MODEL_ROOT.mkdir(parents=True, exist_ok=True)
-    model_dir = MODEL_ROOT / f"config_{config_id}"
-    model_dir.mkdir(parents=True, exist_ok=True)
+    slug = _slugify(config.name)
 
-    model_path = model_dir / "temporal_gnn.pt"
-    log_path = model_dir / f"train_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.log"
+    model_filename = f"{slug}_temporal_gnn.pt"
+    model_path = MODEL_ROOT / model_filename
+    log_path = MODEL_ROOT / f"{slug}_train.log"
     script_path = BACKEND_ROOT / "scripts" / "training" / "train_gnn.py"
 
     cmd = [
@@ -316,6 +343,88 @@ def _run_training_process(
         "log_path": str(log_path),
         "command": cmd,
     }
+
+
+def _enqueue_training(
+    background_tasks: Optional[BackgroundTasks],
+    config_id: int,
+    params: Optional[ConfigTrainingRequest] = None,
+) -> None:
+    payload = (params or ConfigTrainingRequest()).dict()
+    if background_tasks is None:
+        _train_config_task(config_id, payload)
+    else:
+        background_tasks.add_task(_train_config_task, config_id, payload)
+
+
+def _train_config_task(config_id: int, params_data: Dict[str, Any]) -> None:
+    """Run dataset generation and training for a configuration in the background."""
+    db = SessionLocal()
+    try:
+        params = ConfigTrainingRequest(**params_data)
+        config = crud.supply_chain_config.get(db, id=config_id)
+        if not config:
+            logger.warning("Config %s no longer exists; skipping training", config_id)
+            return
+
+        try:
+            dataset_info = _generate_training_dataset(config, params)
+        except Exception:
+            logger.exception("Dataset generation failed for config %s", config_id)
+            fresh = crud.supply_chain_config.get(db, id=config_id)
+            if fresh:
+                _set_training_outcome(
+                    db,
+                    fresh,
+                    status_label="failed",
+                    needs_training=True,
+                    trained_at=fresh.trained_at,
+                    model_path=fresh.trained_model_path,
+                    config_hash=fresh.last_trained_config_hash,
+                )
+            return
+
+        config = _set_training_outcome(
+            db,
+            config,
+            status_label="in_progress",
+            needs_training=False,
+            trained_at=None,
+            model_path=config.trained_model_path,
+            config_hash=config.last_trained_config_hash,
+        )
+
+        try:
+            dataset_path = Path(dataset_info["path"])
+            training_info = _run_training_process(config, dataset_path, params)
+            config_hash = _compute_config_hash(db, config_id)
+            config = _set_training_outcome(
+                db,
+                config,
+                status_label="trained",
+                needs_training=False,
+                trained_at=datetime.utcnow(),
+                model_path=training_info["model_path"],
+                config_hash=config_hash,
+            )
+            _create_training_artifact(db, config_id, dataset_path, Path(training_info["model_path"]))
+        except Exception:
+            logger.exception("Training process failed for config %s", config_id)
+            fresh = crud.supply_chain_config.get(db, id=config_id)
+            if fresh:
+                _set_training_outcome(
+                    db,
+                    fresh,
+                    status_label="failed",
+                    needs_training=True,
+                    trained_at=fresh.trained_at,
+                    model_path=fresh.trained_model_path,
+                    config_hash=fresh.last_trained_config_hash,
+                )
+    finally:
+        db.close()
+
+# --- Configuration Endpoints ---
 # --- Configuration Endpoints ---
 
 @router.get("/", response_model=List[schemas.SupplyChainConfig])
@@ -381,6 +490,7 @@ def create_config(
     db: Session = Depends(deps.get_db),
     config_in: schemas.SupplyChainConfigCreate,
     current_user: models.User = Depends(deps.get_current_active_user),
+    background_tasks: BackgroundTasks,
 ):
     """Create a new supply chain configuration."""
     admin_group_id = _get_user_admin_group_id(db, current_user)
@@ -418,7 +528,9 @@ def create_config(
         db.refresh(cfg)
     except Exception:
         pass
-    return _mark_config_requires_training(db, cfg)
+    cfg = _mark_config_requires_training(db, cfg)
+    _enqueue_training(background_tasks, cfg.id)
+    return cfg
 
 @router.get("/{config_id}", response_model=schemas.SupplyChainConfig)
 def read_config(
@@ -438,6 +550,7 @@ def update_config(
     config_id: int,
     config_in: schemas.SupplyChainConfigUpdate,
     current_user: models.User = Depends(deps.get_current_active_user),
+    background_tasks: BackgroundTasks,
 ):
     """Update a configuration."""
     config = get_config_or_404(db, config_id)
@@ -470,7 +583,9 @@ def update_config(
     changed_keys = set(update_data.keys())
     if not changed_keys or changed_keys <= {"is_active"}:
         return updated
-    return _mark_config_requires_training(db, updated)
+    updated = _mark_config_requires_training(db, updated)
+    _enqueue_training(background_tasks, updated.id)
+    return updated
 
 
 @router.post("/{config_id}/train", response_model=ConfigTrainingResponse)
@@ -491,7 +606,7 @@ def train_supply_chain_config(
             detail="Training is already running for this configuration.",
         )
 
-    dataset_info = _generate_training_dataset(config_id, params)
+    dataset_info = _generate_training_dataset(config, params)
 
     # Mark as in progress before launching the trainer
     _set_training_outcome(
@@ -505,9 +620,10 @@ def train_supply_chain_config(
     )
 
     try:
+        dataset_path = Path(dataset_info["path"])
         training_info = _run_training_process(
-            config_id,
-            Path(dataset_info["path"]),
+            config,
+            dataset_path,
             params,
         )
         config_hash = _compute_config_hash(db, config_id)
@@ -520,6 +636,7 @@ def train_supply_chain_config(
             model_path=training_info["model_path"],
             config_hash=config_hash,
         )
+        _create_training_artifact(db, config.id, dataset_path, Path(training_info["model_path"]))
     except Exception as exc:  # noqa: BLE001 - surface training failure to client
         _set_training_outcome(
             db,

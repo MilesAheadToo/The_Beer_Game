@@ -153,7 +153,7 @@ const CreateGameFromConfig = () => {
       {modelStatus && !modelStatus.is_trained && (
         <Alert severity="error" sx={{ mb: 2 }}>
           <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
-          The Daybreak agent has not yet been trained, so it cannot be used until training completes. You may still select Basic (heuristics) or LLM agents.
+          The Daybreak agent has not yet been trained, so it cannot be used until training completes. You may still select Basic (heuristics) or Daybreak LLM agents.
         </Alert>
       )}
       <Card>

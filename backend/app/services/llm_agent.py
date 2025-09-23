@@ -5,14 +5,14 @@ from enum import Enum
 import json
 
 class LLMStrategy(Enum):
-    """Different LLM prompting strategies for the Beer Game."""
+    """Different Daybreak LLM prompting strategies for the Beer Game."""
     CONSERVATIVE = "conservative"
     BALANCED = "balanced"
     AGGRESSIVE = "aggressive"
     ADAPTIVE = "adaptive"
 
 class LLMAgent:
-    """LLM-based agent for the Beer Game that uses OpenAI's API."""
+    """Daybreak LLM-based agent for the Beer Game that uses OpenAI's API."""
 
     def __init__(
         self,
@@ -85,7 +85,7 @@ class LLMAgent:
         self.conversation_history.append({"role": role, "content": content})
 
     def _query_llm(self, user_content: str) -> Optional[Dict[str, Any]]:
-        """Send a message to the LLM and parse the JSON response."""
+        """Send a message to the Daybreak LLM and parse the JSON response."""
 
         # Keep only the system prompt to avoid runaway conversations
         self.conversation_history = self.conversation_history[:1]
@@ -105,7 +105,7 @@ class LLMAgent:
         try:
             return json.loads(response_content)
         except (json.JSONDecodeError, ValueError) as exc:
-            print(f"Error parsing LLM response: {exc}")
+            print(f"Error parsing Daybreak LLM response: {exc}")
             print(f"Response was: {response_content}")
             return None
 
@@ -131,7 +131,7 @@ class LLMAgent:
             if response_json:
                 order_quantity = max(0, int(response_json.get("order_quantity", 0)))
                 reasoning = response_json.get("reasoning", "No reasoning provided")
-                print(f"LLM Agent ({self.role}, {self.strategy.value}) order: {order_quantity}")
+                print(f"Daybreak LLM agent ({self.role}, {self.strategy.value}) order: {order_quantity}")
                 print(f"Reasoning: {reasoning}")
                 return order_quantity
             return self._fallback_strategy(current_inventory, backorders, current_demand)
@@ -161,7 +161,7 @@ class LLMAgent:
                 order_quantity = max(0, int(response_json.get("order_quantity", 0)))
                 reasoning = response_json.get("reasoning", "No reasoning provided")
 
-                print(f"LLM Agent ({self.role}, {self.strategy.value}) order: {order_quantity}")
+                print(f"Daybreak LLM agent ({self.role}, {self.strategy.value}) order: {order_quantity}")
                 print(f"Reasoning: {reasoning}")
 
                 return order_quantity
@@ -177,7 +177,7 @@ class LLMAgent:
         backorders: int,
         current_demand: Optional[int] = None
     ) -> int:
-        """Fallback strategy if LLM call fails."""
+        """Fallback strategy if the Daybreak LLM call fails."""
         if current_demand is None:
             current_demand = 8  # Default average demand
             
