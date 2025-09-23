@@ -10,6 +10,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Dict, Any
 
+import sys
+
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+TRAINING_ROOT = BACKEND_ROOT / "training_jobs"
+
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.append(str(BACKEND_ROOT))
+
 import numpy as np
 from sqlalchemy import select
 from sqlalchemy.orm import Session as SyncSession
@@ -23,8 +31,6 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 DEFAULT_CONFIG_NAME = "Default TBG"
-BACKEND_ROOT = Path(__file__).resolve().parents[2]
-TRAINING_ROOT = BACKEND_ROOT / "training_jobs"
 
 
 @dataclass

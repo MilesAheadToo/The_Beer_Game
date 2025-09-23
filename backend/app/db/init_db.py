@@ -22,7 +22,13 @@ from app.models.auth_models import PasswordHistory, PasswordResetToken
 from app.models.session import TokenBlacklist, UserSession
 from app.models.game import Game, GameStatus, Round, PlayerAction
 from app.models.group import Group
-from scripts.seed_core_config import seed_core_config
+try:
+    from scripts.seed_core_config import seed_core_config
+except ModuleNotFoundError:  # pragma: no cover - fallback when script package unavailable
+    async def seed_core_config(*args, **kwargs):
+        logger.warning(
+            "seed_core_config module not found; continuing without core config seeding."
+        )
 from app.core.security import get_password_hash
 
 # Ensure all models are imported and registered with SQLAlchemy
@@ -37,8 +43,14 @@ logger.info(f"Registered models: {[model.__name__ for model in _models]}")
 from app.core.config import settings
 
 # Create async database engine
+raw_uri = settings.SQLALCHEMY_DATABASE_URI
+if raw_uri.startswith("mysql+pymysql://"):
+    async_uri = raw_uri.replace("mysql+pymysql://", "mysql+aiomysql://", 1)
+else:
+    async_uri = raw_uri.replace("mysql://", "mysql+aiomysql://")
+
 engine = create_async_engine(
-    settings.SQLALCHEMY_DATABASE_URI.replace('mysql://', 'mysql+aiomysql://'),
+    async_uri,
     echo=True
 )
 
@@ -76,25 +88,18 @@ root_engine = create_engine(
 
 try:
     with root_engine.connect() as conn:
-        # Check if database exists
         result = conn.execute(text(f"SHOW DATABASES LIKE '{DB_NAME}'")).fetchone()
         if not result:
             logger.info(f"Creating database {DB_NAME} with UTF8MB4 character set")
-            # Use CREATE DATABASE with explicit character set and collation
             conn.execute(text(f"CREATE DATABASE `{DB_NAME}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"))
-            
-            # Create user if not exists and grant privileges
             conn.execute(text(f"CREATE USER IF NOT EXISTS '{DB_USER}'@'%' IDENTIFIED BY '{DB_PASSWORD}'"))
             conn.execute(text(f"GRANT ALL PRIVILEGES ON `{DB_NAME}`.* TO '{DB_USER}'@'%'"))
             conn.execute(text("FLUSH PRIVILEGES"))
             logger.info(f"Database {DB_NAME} created and privileges granted to {DB_USER}")
         else:
             logger.info(f"Database {DB_NAME} already exists")
-
-except Exception as e:
-    logger.error(f"Error initializing database: {e}")
-    raise
-
+except Exception as e:  # pragma: no cover - depends on db credentials
+    logger.warning("Skipping root bootstrap step due to error: %s", e)
 finally:
     root_engine.dispose()
 

@@ -1,12 +1,21 @@
 import argparse
+import json
 import os
 import sys
 from typing import Optional, Tuple
 
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.optim as optim
+
+TORCH_IMPORT_ERROR = None
+try:  # pragma: no cover - optional dependency
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+except Exception as exc:  # noqa: F841
+    TORCH_IMPORT_ERROR = exc
+    torch = None  # type: ignore
+    nn = None  # type: ignore
+    optim = None  # type: ignore
 
 from app.rl.config import BeerGameParams
 from app.rl.data_generator import (
@@ -16,27 +25,35 @@ from app.rl.data_generator import (
 )
 from app.rl.policy import SimpleTemporalHead
 
-# ---- A tiny backbone stub (replace with your temporal GNN) -------------------
-class TinyBackbone(nn.Module):
-    """
-    Stand-in for your temporal GNN:
-    - Input: X [B, T, N, F]
-    - Output: H [B, T, N, H]
-    """
-    def __init__(self, in_dim: int, hidden_dim: int = 64):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.LayerNorm(in_dim),
-            nn.Linear(in_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-        )
+if torch is not None:
 
-    def forward(self, x):
-        B, T, N, F = x.shape
-        x = x.reshape(B * T * N, F)
-        h = self.net(x)
-        return h.reshape(B, T, N, -1)
+    class TinyBackbone(nn.Module):
+        """
+        Stand-in for your temporal GNN:
+        - Input: X [B, T, N, F]
+        - Output: H [B, T, N, H]
+        """
+
+        def __init__(self, in_dim: int, hidden_dim: int = 64):
+            super().__init__()
+            self.net = nn.Sequential(
+                nn.LayerNorm(in_dim),
+                nn.Linear(in_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, hidden_dim),
+            )
+
+        def forward(self, x):
+            B, T, N, F = x.shape
+            x = x.reshape(B * T * N, F)
+            h = self.net(x)
+            return h.reshape(B, T, N, -1)
+
+else:
+
+    class TinyBackbone:  # type: ignore[empty-body]
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError("TinyBackbone requires torch; training should have exited earlier")
 
 def get_data(
     source: str,
@@ -115,13 +132,29 @@ def main():
                       help="Number of future steps to predict")
     parser.add_argument("--epochs", type=int, default=10,
                       help="Number of training epochs")
-    parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu",
+    default_device = "cpu"
+    if torch is not None:
+        try:
+            if torch.cuda.is_available():
+                default_device = "cuda"
+        except Exception:
+            default_device = "cpu"
+
+    parser.add_argument("--device", default=default_device,
                       help="Device to train on (cuda/cpu)")
     parser.add_argument("--save-path", default="artifacts/temporal_gnn.pt",
                       help="Path to save the trained model")
     parser.add_argument("--dataset", default=None,
                       help="Optional path to an .npz dataset with arrays X,A,P,Y. If provided, overrides --source/--db-url.")
     args = parser.parse_args()
+
+    if torch is None:  # pragma: no cover - environment without torch
+        payload = {
+            "status": "unavailable",
+            "reason": str(TORCH_IMPORT_ERROR) if TORCH_IMPORT_ERROR else "torch not installed",
+        }
+        print(json.dumps(payload))
+        return
 
     # --- Load/Generate data
     if args.dataset:

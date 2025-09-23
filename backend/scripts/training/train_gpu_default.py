@@ -13,6 +13,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 
+BACKEND_ROOT = Path(__file__).resolve().parents[2]
+TRAINING_ROOT = BACKEND_ROOT / "training_jobs"
+MODEL_ROOT = BACKEND_ROOT / "checkpoints" / "supply_chain_configs"
+TRAIN_SCRIPT = BACKEND_ROOT / "scripts" / "training" / "train_gnn.py"
+
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.append(str(BACKEND_ROOT))
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session as SyncSession
 
@@ -24,10 +32,6 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
 DEFAULT_CONFIG_NAME = "Default TBG"
-BACKEND_ROOT = Path(__file__).resolve().parents[2]
-TRAINING_ROOT = BACKEND_ROOT / "training_jobs"
-MODEL_ROOT = BACKEND_ROOT / "checkpoints" / "supply_chain_configs"
-TRAIN_SCRIPT = BACKEND_ROOT / "scripts" / "training" / "train_gnn.py"
 
 
 @dataclass
@@ -84,13 +88,22 @@ def _run_training_process(slug: str, params: TrainingParams) -> Dict[str, Any]:
     stderr = completed.stderr or ""
     log_output = stdout + ("\n" + stderr if stderr else "")
     log_path.write_text(log_output)
+    status_payload: Dict[str, Any] | None = None
+    if stdout.strip():
+        try:
+            status_payload = json.loads(stdout.strip().splitlines()[-1])
+        except json.JSONDecodeError:
+            status_payload = None
 
-    return {
+    result: Dict[str, Any] = {
         "model_path": str(_model_path(slug)),
         "log": log_output,
         "log_path": str(log_path),
         "command": cmd,
     }
+    if status_payload:
+        result.update(status_payload)
+    return result
 
 
 def _resolve_config_id(config_id: Optional[int], config_name: str) -> int:
@@ -174,27 +187,33 @@ def main() -> None:
     )
 
     result = _run_training_process(slug, params)
-    result.update({
-        "status": "trained",
-        "config_id": config_id,
-        "dataset": str(dataset_path),
-    })
-    with SyncSession(sync_engine) as session:
-        session.add(
-            SupplyChainTrainingArtifact(
-                config_id=config_id,
-                dataset_name=dataset_path.name,
-                model_name=model_path.name,
+    status = result.get("status") or "trained"
+    result.setdefault("status", status)
+    result.setdefault("config_id", config_id)
+    result.setdefault("dataset", str(dataset_path))
+
+    if status == "trained":
+        with SyncSession(sync_engine) as session:
+            session.add(
+                SupplyChainTrainingArtifact(
+                    config_id=config_id,
+                    dataset_name=dataset_path.name,
+                    model_name=model_path.name,
+                )
             )
+            config_in_db = session.get(SupplyChainConfig, config_id)
+            if config_in_db:
+                config_in_db.needs_training = False
+                config_in_db.training_status = "trained"
+                config_in_db.trained_model_path = str(model_path)
+                config_in_db.trained_at = datetime.utcnow()
+            session.commit()
+        logger.info("Training complete. Model stored at %s", result.get("model_path"))
+    else:
+        logger.warning(
+            "Training script reported status '%s'; skipping artifact registration.",
+            status,
         )
-        config_in_db = session.get(SupplyChainConfig, config_id)
-        if config_in_db:
-            config_in_db.needs_training = False
-            config_in_db.training_status = "trained"
-            config_in_db.trained_model_path = str(model_path)
-            config_in_db.trained_at = datetime.utcnow()
-        session.commit()
-    logger.info("Training complete. Model stored at %s", result.get("model_path"))
     print(json.dumps(result))
 
 
