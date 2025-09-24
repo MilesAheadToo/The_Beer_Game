@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -52,6 +53,40 @@ def _normalize_pipeline(raw: Any) -> List[int]:
     return []
 
 
+def _pad_sequence(values: List[int], length: int) -> List[int]:
+    normalized = [int(x) for x in values[:length]]
+    if len(normalized) < length:
+        normalized.extend([0] * (length - len(normalized)))
+    return normalized
+
+
+def _compute_volatility_signal(history: List[int]) -> Dict[str, Any]:
+    if not history:
+        return {"sigma": 0.0, "trend": "flat"}
+
+    if len(history) == 1:
+        return {"sigma": 0.0, "trend": "flat"}
+
+    mean = sum(history) / len(history)
+    variance = sum((value - mean) ** 2 for value in history) / (len(history) - 1)
+    sigma = math.sqrt(max(variance, 0.0))
+
+    trend = "flat"
+    if history[-1] > history[-2]:
+        trend = "up"
+    elif history[-1] < history[-2]:
+        trend = "down"
+
+    if len(history) >= 3:
+        recent = history[-3:]
+        if recent[0] <= recent[1] <= recent[2] and recent[2] > recent[1]:
+            trend = "up"
+        elif recent[0] >= recent[1] >= recent[2] and recent[2] < recent[1]:
+            trend = "down"
+
+    return {"sigma": round(sigma, 4), "trend": trend}
+
+
 def build_llm_decision_payload(
     db: Session,
     game: Game,
@@ -77,19 +112,25 @@ def build_llm_decision_payload(
     holding_cost = float(sim_params.get("holding_cost_per_unit", sim_params.get("holding_cost", 0.5) or 0.5))
     backorder_cost = float(sim_params.get("backorder_cost_per_unit", sim_params.get("backorder_cost", 0.5) or 0.5))
 
+    daybreak_cfg = _coerce_dict(config_raw.get("daybreak_llm", {}))
+    daybreak_toggles = _coerce_dict(daybreak_cfg.get("toggles", {}))
+
     toggles = {
-        "share_demand_history": bool(
-            config_raw.get("enable_information_sharing")
+        "customer_demand_history_sharing": bool(
+            daybreak_toggles.get("customer_demand_history_sharing")
+            or config_raw.get("enable_information_sharing")
             or sim_params.get("enable_information_sharing")
             or config_raw.get("historical_weeks_to_share")
         ),
-        "share_volatility_signal": bool(
-            config_raw.get("enable_demand_volatility_signals")
+        "volatility_signal_sharing": bool(
+            daybreak_toggles.get("volatility_signal_sharing")
+            or config_raw.get("enable_demand_volatility_signals")
             or sim_params.get("enable_demand_volatility_signals")
             or config_raw.get("volatility_analysis_window")
         ),
-        "share_downstream_inventory": bool(
-            config_raw.get("enable_downstream_visibility")
+        "downstream_inventory_visibility": bool(
+            daybreak_toggles.get("downstream_inventory_visibility")
+            or config_raw.get("enable_downstream_visibility")
             or sim_params.get("enable_downstream_visibility")
             or config_raw.get("pipeline_signals", {}).get("enabled")
         ),
@@ -107,31 +148,6 @@ def build_llm_decision_payload(
         or config_raw.get("volatility_analysis_window")
         or 14
     )
-
-    config_section = {
-        "total_weeks": total_weeks,
-        "lead_times": {
-            "order": order_lead,
-            "shipping": ship_lead,
-            "production": prod_lead,
-        },
-        "costs": {
-            "holding_cost_per_unit": holding_cost,
-            "backorder_cost_per_unit": backorder_cost,
-        },
-        "initial_inventory": int(sim_params.get("initial_inventory", 12)),
-        "demand_pattern": {
-            "type": demand_pattern.get("type", "classic"),
-            "change_week": int(demand_params.get("change_week", demand_params.get("demand_change_week", 20))),
-            "initial_demand": int(demand_params.get("initial_demand", 4)),
-            "new_demand": int(
-                demand_params.get("new_demand", demand_params.get("final_demand", demand_params.get("target_demand", 4)))
-            ),
-        },
-        "toggles": toggles,
-        "visible_history_weeks": visible_history_weeks,
-        "volatility_window": volatility_window,
-    }
 
     engine_state = _coerce_dict(config_raw.get("engine_state", {}))
 
@@ -198,6 +214,7 @@ def build_llm_decision_payload(
     }
 
     roles_section: Dict[str, Dict[str, Any]] = {}
+    role_key_to_raw: Dict[str, str] = {}
     for player, inventory in players_with_inventory:
         if not player or not getattr(player, "role", None):
             continue
@@ -276,15 +293,80 @@ def build_llm_decision_payload(
             "incoming_order": incoming_order,
             "history": history_section,
         }
+        role_key_to_raw[role_key] = role_name_raw
 
     action_role_key = ROLE_NAME_MAP.get(action_role.lower(), action_role.lower())
 
+    role_state = roles_section.get(action_role_key, {})
+    raw_role = role_key_to_raw.get(action_role_key, action_role.lower())
+    engine_entry = _coerce_dict(engine_state.get(raw_role, {}))
+
+    incoming_order = int(engine_entry.get("incoming_orders", role_state.get("incoming_order", 0)) or 0)
+    on_hand = int(role_state.get("inventory", 0))
+    backlog = int(role_state.get("backlog", 0))
+    received_shipment = int(engine_entry.get("last_arrival", 0) or 0)
+
+    pipeline_orders = engine_entry.get("info_queue")
+    if isinstance(pipeline_orders, list):
+        pipeline_orders = [int(x) for x in pipeline_orders]
+    else:
+        pipeline_orders = []
+    pipeline_orders = _pad_sequence(pipeline_orders, order_lead)
+
+    inbound_pipeline_raw = engine_entry.get("ship_queue")
+    if isinstance(inbound_pipeline_raw, list):
+        inbound_pipeline_values = _normalize_pipeline(inbound_pipeline_raw)
+    else:
+        inbound_pipeline_values = _normalize_pipeline(role_state.get("pipeline", []))
+    inbound_pipeline = _pad_sequence(inbound_pipeline_values, ship_lead)
+
+    optional_section: Dict[str, Any] = {}
+
+    retailer_history_records = history_by_role.get("retailer", [])
+    retailer_demand_history = [entry["customer_demand"] or 0 for entry in retailer_history_records if entry.get("customer_demand") is not None]
+    if retailer_demand_history and visible_history_weeks:
+        retailer_demand_history = retailer_demand_history[-visible_history_weeks:]
+
+    if toggles["customer_demand_history_sharing"] and retailer_demand_history:
+        optional_section["shared_demand_history"] = retailer_demand_history
+
+    if toggles["volatility_signal_sharing"] and retailer_demand_history:
+        window = retailer_demand_history[-volatility_window:] if volatility_window else retailer_demand_history
+        optional_section["shared_volatility_signal"] = _compute_volatility_signal(window)
+
+    if toggles["downstream_inventory_visibility"]:
+        downstream_role = downstream_role_map.get(raw_role)
+        if downstream_role:
+            downstream_key = ROLE_NAME_MAP.get(downstream_role, downstream_role)
+            downstream_state = roles_section.get(downstream_key)
+            if downstream_state:
+                optional_section["visible_downstream"] = {
+                    "on_hand": int(downstream_state.get("inventory", 0)),
+                    "backlog": int(downstream_state.get("backlog", 0)),
+                }
+
+    local_optional = role_state.get("history", {})
+    if local_optional:
+        optional_section.setdefault("local_history", local_optional)
+
     return {
+        "role": action_role_key,
         "week": int(round_number),
-        "config": config_section,
-        "roles": roles_section,
-        "action_request": {
-            "role": action_role_key,
-            "trigger_decision": True,
+        "toggles": toggles,
+        "parameters": {
+            "holding_cost": holding_cost,
+            "backlog_cost": backorder_cost,
+            "L_order": order_lead,
+            "L_ship": ship_lead,
+            "L_prod": prod_lead,
+        },
+        "local_state": {
+            "on_hand": on_hand,
+            "backlog": backlog,
+            "incoming_orders_this_week": incoming_order,
+            "received_shipment_this_week": received_shipment,
+            "pipeline_orders_upstream": pipeline_orders,
+            "pipeline_shipments_inbound": inbound_pipeline,
+            "optional": optional_section,
         },
     }
