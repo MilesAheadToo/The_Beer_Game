@@ -1,20 +1,20 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate, useSearchParams, Link, useParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { 
-  Box, 
-  Button, 
-  FormControl, 
-  FormLabel, 
-  Input, 
-  Select, 
-  VStack, 
-  HStack, 
-  Text, 
-  NumberInput, 
-  NumberInputField, 
-  NumberInputStepper, 
-  NumberIncrementStepper, 
+import {
+  Box,
+  Button,
+  FormControl,
+  FormLabel,
+  Input,
+  Select,
+  VStack,
+  HStack,
+  Text,
+  NumberInput,
+  NumberInputField,
+  NumberInputStepper,
+  NumberIncrementStepper,
   NumberDecrementStepper,
   useToast,
   Card,
@@ -37,10 +37,19 @@ import {
   RadioGroup,
   Radio,
   Spinner,
-  Checkbox
+  Checkbox,
+  Table,
+  Thead,
+  Tbody,
+  Tr,
+  Th,
+  Td,
+  Tag,
+  Wrap,
+  WrapItem
 } from '@chakra-ui/react';
 import PageLayout from '../components/PageLayout';
-import { getAllConfigs } from '../services/supplyChainConfigService';
+import { getAllConfigs, getSupplyChainConfigById } from '../services/supplyChainConfigService';
 import { getUserType as resolveUserType } from '../utils/authUtils';
 import PricingConfigForm from '../components/PricingConfigForm';
 import { api, mixedGameApi } from '../services/api';
@@ -170,49 +179,6 @@ const DEFAULT_SYSTEM_CONFIG = {
   max_starting_inventory: 100,
 };
 
-const DEFAULT_NODE_POLICIES = {
-  retailer: {
-    policy_type: 'base_stock',
-    base_stock_level: 50,
-    reorder_point: 20,
-    order_up_to: 100,
-    smoothing_alpha: 0.3,
-    smoothing_beta: 0.1,
-    smoothing_gamma: 0.2,
-    forecast_horizon: 4,
-  },
-  wholesaler: {
-    policy_type: 'base_stock',
-    base_stock_level: 100,
-    reorder_point: 40,
-    order_up_to: 200,
-    smoothing_alpha: 0.3,
-    smoothing_beta: 0.1,
-    smoothing_gamma: 0.2,
-    forecast_horizon: 4,
-  },
-  distributor: {
-    policy_type: 'base_stock',
-    base_stock_level: 150,
-    reorder_point: 60,
-    order_up_to: 300,
-    smoothing_alpha: 0.3,
-    smoothing_beta: 0.1,
-    smoothing_gamma: 0.2,
-    forecast_horizon: 4,
-  },
-  manufacturer: {
-    policy_type: 'base_stock',
-    base_stock_level: 200,
-    reorder_point: 80,
-    order_up_to: 400,
-    smoothing_alpha: 0.3,
-    smoothing_beta: 0.1,
-    smoothing_gamma: 0.2,
-    forecast_horizon: 4,
-  },
-};
-
 const DEFAULT_POLICY = {
   info_delay: 2,
   ship_delay: 2,
@@ -272,9 +238,7 @@ const CreateMixedGame = () => {
   const [demandChangeWeek, setDemandChangeWeek] = useState(6);
   const [finalDemand, setFinalDemand] = useState(8);
   const [pricingConfig, setPricingConfig] = useState(() => ({ ...DEFAULT_PRICING_CONFIG }));
-  // Missing local state for system configuration ranges and per-node policies
-  // Node policies for each role in the supply chain
-  const [nodePolicies, setNodePolicies] = useState(() => JSON.parse(JSON.stringify(DEFAULT_NODE_POLICIES)));
+  const [nodePolicies, setNodePolicies] = useState({});
   // Policy/Simulation settings (bounded)
   const [policy, setPolicy] = useState(() => ({ ...DEFAULT_POLICY }));
   const [daybreakLlmConfig, setDaybreakLlmConfig] = useState(() => ({
@@ -289,20 +253,15 @@ const CreateMixedGame = () => {
   const { ranges: systemRanges } = useSystemConfig();
   const [availableUsers, setAvailableUsers] = useState([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
-  
-  const [players, setPlayers] = useState(
-    playerRoles.map(role => ({
-      role: role.value,
-      playerType: 'ai', // Default to AI for all roles initially
-      strategy: 'NAIVE',
-      canSeeDemand: role.value === 'retailer',
-      userId: role.value === 'retailer' && user ? user.id : null,
-      llmModel: 'gpt-4o-mini',
-      daybreakOverridePct: 5,
-    }))
-  );
+
+  const [players, setPlayers] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [configs, setConfigs] = useState([]);
+  const [activeConfigId, setActiveConfigId] = useState(null);
+  const [activeSupplyChainConfig, setActiveSupplyChainConfig] = useState(null);
+  const [loadingSupplyChain, setLoadingSupplyChain] = useState(true);
+  const [supplyChainError, setSupplyChainError] = useState(null);
+  const [selectedNodeType, setSelectedNodeType] = useState(null);
   const navigate = useNavigate();
   const toast = useToast();
   const [initializing, setInitializing] = useState(isEditing);
@@ -321,6 +280,200 @@ const CreateMixedGame = () => {
   }, [daybreakLlmConfig]);
 
   const showDaybreakSharingCard = usesDaybreakStrategist || hasDaybreakOverrides;
+
+  const normalizeNodeName = useCallback((value) => String(value || '').trim().toLowerCase(), []);
+  const normalizeNodeType = useCallback((value) => String(value || '').trim().toLowerCase(), []);
+
+  const playableTypeToRole = {
+    retailer: 'retailer',
+    wholesaler: 'wholesaler',
+    distributor: 'distributor',
+    manufacturer: 'manufacturer',
+  };
+
+  const nodeTypeLabels = {
+    market_supply: 'Market Supply',
+    manufacturer: 'Manufacturer',
+    distributor: 'Distributor',
+    wholesaler: 'Wholesaler',
+    retailer: 'Retailer',
+    market_demand: 'Market Demand',
+  };
+
+  const computeRangeMidpoint = useCallback((range, fallback = 0) => {
+    if (!range || (range.min == null && range.max == null)) {
+      return fallback;
+    }
+    const min = Number(range.min ?? range.max ?? fallback);
+    const max = Number(range.max ?? range.min ?? fallback);
+    if (!Number.isFinite(min) && !Number.isFinite(max)) {
+      return fallback;
+    }
+    if (!Number.isFinite(min)) return max;
+    if (!Number.isFinite(max)) return min;
+    return (min + max) / 2;
+  }, []);
+
+  const clampToRange = useCallback((value, range) => {
+    if (!Number.isFinite(value)) return value;
+    if (!range) return value;
+    let result = value;
+    if (range.min != null) {
+      const min = Number(range.min);
+      if (Number.isFinite(min)) {
+        result = Math.max(result, min);
+      }
+    }
+    if (range.max != null) {
+      const max = Number(range.max);
+      if (Number.isFinite(max)) {
+        result = Math.min(result, max);
+      }
+    }
+    return result;
+  }, []);
+
+  const buildDefaultNodePolicy = useCallback(
+    (node, config) => {
+      const key = normalizeNodeName(node?.name);
+      if (!key) {
+        return null;
+      }
+      const nodeType = normalizeNodeType(node?.type);
+      const itemConfig = node?.item_configs && node.item_configs.length > 0 ? node.item_configs[0] : null;
+      const inboundLanes = (config?.lanes || []).filter((lane) => lane?.downstream_node_id === node.id);
+      const leadRanges = inboundLanes.map((lane) => lane?.lead_time_days || {});
+      const leadMin = leadRanges.reduce((acc, range) => {
+        const value = Number(range?.min);
+        if (!Number.isFinite(value)) return acc;
+        if (acc == null || value < acc) return value;
+        return acc;
+      }, null);
+      const leadMax = leadRanges.reduce((acc, range) => {
+        const value = Number(range?.max);
+        if (!Number.isFinite(value)) return acc;
+        if (acc == null || value > acc) return value;
+        return acc;
+      }, null);
+      const defaultInit = itemConfig?.initial_inventory_range
+        ? computeRangeMidpoint(itemConfig.initial_inventory_range, 12)
+        : 12;
+      const shipDelay = leadMin != null && leadMax != null
+        ? Math.round((leadMin + leadMax) / 2)
+        : leadMin != null
+          ? leadMin
+          : leadMax != null
+            ? leadMax
+            : 0;
+
+      const isMarketNode = ['market_supply', 'market_demand'].includes(nodeType);
+      return {
+        info_delay: isMarketNode ? 0 : 1,
+        ship_delay: isMarketNode ? 0 : shipDelay,
+        init_inventory: isMarketNode ? 0 : Math.round(defaultInit),
+        min_order_qty: isMarketNode ? 0 : 0,
+        variable_cost: 0,
+      };
+    },
+    [computeRangeMidpoint, normalizeNodeName, normalizeNodeType]
+  );
+
+  const normalizeLoadedPolicies = useCallback((rawPolicies = {}) => {
+    const normalised = {};
+    Object.entries(rawPolicies || {}).forEach(([name, value]) => {
+      if (!value) {
+        return;
+      }
+      const key = normalizeNodeName(name);
+      normalised[key] = {
+        info_delay: Number.isFinite(Number(value.info_delay)) ? Number(value.info_delay) : 0,
+        ship_delay: Number.isFinite(Number(value.ship_delay)) ? Number(value.ship_delay) : 0,
+        init_inventory: Number.isFinite(Number(value.init_inventory)) ? Number(value.init_inventory) : 0,
+        min_order_qty: Number.isFinite(Number(value.min_order_qty)) ? Number(value.min_order_qty) : 0,
+        variable_cost: Number.isFinite(Number(value.variable_cost)) ? Number(value.variable_cost) : 0,
+      };
+    });
+    return normalised;
+  }, [normalizeNodeName]);
+
+  const formatDemandPatternSummary = useCallback((pattern, params) => {
+    if (!pattern) {
+      return '—';
+    }
+    const type = String(pattern.type || params?.type || 'unknown').toLowerCase();
+    const payload = params || pattern.params || {};
+    switch (type) {
+      case 'constant':
+        return `Constant at ${payload.value ?? payload.mean ?? payload.demand ?? '?'}`;
+      case 'random':
+        return `Random between ${payload.min ?? '?'} and ${payload.max ?? '?'}`;
+      case 'seasonal':
+        return `Seasonal base ${payload.value ?? '?'} (period ${payload?.seasonality?.period ?? '?'} weeks)`;
+      case 'trending':
+        return `Trending base ${payload.value ?? '?'} (trend ${payload.trend ?? 0})`;
+      case 'classic':
+        return `Classic: starts ${payload.initial_demand ?? '?'}, week ${payload.change_week ?? '?'}, final ${payload.final_demand ?? payload.new_demand ?? '?'}`;
+      default:
+        return type.replace(/_/g, ' ');
+    }
+  }, []);
+
+  const formatLeadTimeRange = useCallback((range) => {
+    if (!range) {
+      return '—';
+    }
+    const min = Number(range.min);
+    const max = Number(range.max);
+    if (Number.isFinite(min) && Number.isFinite(max)) {
+      if (min === max) {
+        return `${min} week${min === 1 ? '' : 's'}`;
+      }
+      return `${min}–${max} weeks`;
+    }
+    if (Number.isFinite(min)) {
+      return `${min}+ weeks`;
+    }
+    if (Number.isFinite(max)) {
+      return `≤ ${max} weeks`;
+    }
+    return '—';
+  }, []);
+
+  const getPolicyValue = useCallback(
+    (nodeKey, field, fallback = 0) => {
+      const policy = nodePolicies[nodeKey];
+      if (policy && policy[field] != null) {
+        return policy[field];
+      }
+      const defaultPolicy = buildDefaultNodePolicy(
+        (activeSupplyChainConfig?.nodes || []).find((node) => normalizeNodeName(node?.name) === nodeKey),
+        activeSupplyChainConfig
+      );
+      if (defaultPolicy && defaultPolicy[field] != null) {
+        return defaultPolicy[field];
+      }
+      return fallback;
+    },
+    [activeSupplyChainConfig, buildDefaultNodePolicy, nodePolicies, normalizeNodeName]
+  );
+
+  const describeRange = useCallback((range, unit = '') => {
+    if (!range) {
+      return null;
+    }
+    const min = range.min != null ? Number(range.min) : null;
+    const max = range.max != null ? Number(range.max) : null;
+    if (Number.isFinite(min) && Number.isFinite(max)) {
+      return `${min}${unit ? ` ${unit}` : ''} – ${max}${unit ? ` ${unit}` : ''}`;
+    }
+    if (Number.isFinite(min)) {
+      return `≥ ${min}${unit ? ` ${unit}` : ''}`;
+    }
+    if (Number.isFinite(max)) {
+      return `≤ ${max}${unit ? ` ${unit}` : ''}`;
+    }
+    return null;
+  }, []);
 
   // Fetch available users
   useEffect(() => {
@@ -356,6 +509,53 @@ const CreateMixedGame = () => {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (!Array.isArray(configs)) {
+      return;
+    }
+    const groupIdRaw = user?.group_id;
+    const groupId = Number.isFinite(Number(groupIdRaw)) ? Number(groupIdRaw) : null;
+    const candidates = configs.filter((config) => {
+      if (groupId == null) return true;
+      return Number(config?.group_id) === groupId;
+    });
+    const chosen = candidates.find((config) => Boolean(config?.is_active)) || candidates[0] || configs[0] || null;
+    setActiveConfigId(chosen ? chosen.id : null);
+  }, [configs, user]);
+
+  useEffect(() => {
+    let ignore = false;
+    const loadActiveConfig = async () => {
+      if (!activeConfigId) {
+        setActiveSupplyChainConfig(null);
+        setLoadingSupplyChain(false);
+        return;
+      }
+      try {
+        setLoadingSupplyChain(true);
+        setSupplyChainError(null);
+        const detailed = await getSupplyChainConfigById(activeConfigId);
+        if (!ignore) {
+          setActiveSupplyChainConfig(detailed || null);
+        }
+      } catch (error) {
+        if (!ignore) {
+          console.error('Failed to load supply chain configuration', error);
+          setSupplyChainError('Unable to load supply chain configuration.');
+          setActiveSupplyChainConfig(null);
+        }
+      } finally {
+        if (!ignore) {
+          setLoadingSupplyChain(false);
+        }
+      }
+    };
+    loadActiveConfig();
+    return () => {
+      ignore = true;
+    };
+  }, [activeConfigId]);
 
   // Load Daybreak agent model status
   useEffect(() => {
@@ -432,13 +632,7 @@ const CreateMixedGame = () => {
           },
         });
 
-        const mergedPolicies = JSON.parse(JSON.stringify(DEFAULT_NODE_POLICIES));
-        Object.entries(config.node_policies || {}).forEach(([roleKey, policyValue]) => {
-          if (mergedPolicies[roleKey]) {
-            mergedPolicies[roleKey] = { ...mergedPolicies[roleKey], ...policyValue };
-          }
-        });
-        setNodePolicies(mergedPolicies);
+        setNodePolicies(normalizeLoadedPolicies(config.node_policies));
 
         setSystemConfig({ ...DEFAULT_SYSTEM_CONFIG, ...(config.system_config || {}) });
         setPolicy({ ...DEFAULT_POLICY, ...(config.global_policy || {}) });
@@ -459,22 +653,11 @@ const CreateMixedGame = () => {
 
         const overrides = config.daybreak_overrides || {};
         const statePlayers = Array.isArray(state?.players) ? state.players : [];
-        const mappedPlayers = playerRoles.map(({ value: roleValue }) => {
-          const record = statePlayers.find(
-            (p) => String(p.role || '').toLowerCase() === roleValue
-          );
-          if (!record) {
-            return {
-              role: roleValue,
-              playerType: 'ai',
-              strategy: 'NAIVE',
-              canSeeDemand: roleValue === 'retailer',
-              userId: roleValue === 'retailer' && user ? user.id : null,
-              llmModel: 'gpt-4o-mini',
-              daybreakOverridePct: undefined,
-            };
+        const mappedPlayers = statePlayers.reduce((acc, record) => {
+          const roleValue = String(record.role || '').toLowerCase();
+          if (!roleValue) {
+            return acc;
           }
-
           const isAi = Boolean(record.is_ai);
           const rawStrategy = record.ai_strategy
             ? String(record.ai_strategy).toUpperCase()
@@ -483,8 +666,7 @@ const CreateMixedGame = () => {
             overrides?.[roleValue] ??
             overrides?.[roleValue.toLowerCase()] ??
             overrides?.[roleValue.toUpperCase()];
-
-          return {
+          acc[roleValue] = {
             role: roleValue,
             playerType: isAi ? 'ai' : 'human',
             strategy: isAi ? rawStrategy : 'NAIVE',
@@ -496,8 +678,24 @@ const CreateMixedGame = () => {
                 ? clampOverridePercent(Number(overrideDecimal) * 100)
                 : undefined,
           };
+          return acc;
+        }, {});
+        const orderedPlayers = playerRoles.map(({ value: roleValue }) => {
+          const player = mappedPlayers[roleValue];
+          if (player) {
+            return player;
+          }
+          return {
+            role: roleValue,
+            playerType: 'ai',
+            strategy: 'NAIVE',
+            canSeeDemand: roleValue === 'retailer',
+            userId: roleValue === 'retailer' && user ? user.id : null,
+            llmModel: 'gpt-4o-mini',
+            daybreakOverridePct: undefined,
+          };
         });
-        setPlayers(mappedPlayers);
+        setPlayers(orderedPlayers);
       } catch (error) {
         console.error('Failed to load game configuration', error);
         toast({
@@ -520,7 +718,7 @@ const CreateMixedGame = () => {
     return () => {
       cancelled = true;
     };
-  }, [isEditing, gameId, toast, navigate, user]);
+  }, [isEditing, gameId, toast, navigate, user, normalizeLoadedPolicies]);
 
   // Optional prefill via query params for node policies (JSON-encoded)
   useEffect(() => {
@@ -528,7 +726,7 @@ const CreateMixedGame = () => {
     if (np) {
       try {
         const parsed = JSON.parse(np);
-        if (parsed && typeof parsed === 'object') setNodePolicies(parsed);
+        if (parsed && typeof parsed === 'object') setNodePolicies(normalizeLoadedPolicies(parsed));
       } catch {}
     }
     const sc = searchParams.get('system_config');
@@ -575,6 +773,211 @@ const CreateMixedGame = () => {
   }, [systemRanges, isEditing, initializing]);
 
 
+  const nodesByType = useMemo(() => {
+    if (!activeSupplyChainConfig?.nodes) {
+      return {};
+    }
+    return activeSupplyChainConfig.nodes.reduce((acc, node) => {
+      const type = normalizeNodeType(node?.type);
+      if (!type) {
+        return acc;
+      }
+      if (!acc[type]) {
+        acc[type] = [];
+      }
+      acc[type].push(node);
+      return acc;
+    }, {});
+  }, [activeSupplyChainConfig, normalizeNodeType]);
+
+  const nodeTypeOptions = useMemo(() => {
+    const types = Object.keys(nodesByType);
+    const order = ['market_supply', 'manufacturer', 'distributor', 'wholesaler', 'retailer', 'market_demand'];
+    return order.filter((type) => types.includes(type));
+  }, [nodesByType]);
+
+  const playableNodes = useMemo(() => {
+    const order = ['retailer', 'wholesaler', 'distributor', 'manufacturer'];
+    return order
+      .map((type) => {
+        const nodes = nodesByType[type] || [];
+        return nodes.length > 0 ? nodes[0] : null;
+      })
+      .filter(Boolean);
+  }, [nodesByType]);
+
+  useEffect(() => {
+    if (!activeSupplyChainConfig) {
+      return;
+    }
+    setNodePolicies((prev) => {
+      const updated = { ...prev };
+      (activeSupplyChainConfig.nodes || []).forEach((node) => {
+        const key = normalizeNodeName(node?.name);
+        if (!key) {
+          return;
+        }
+        if (!updated[key]) {
+          const defaults = buildDefaultNodePolicy(node, activeSupplyChainConfig);
+          if (defaults) {
+            updated[key] = defaults;
+          }
+        }
+      });
+      return updated;
+    });
+  }, [activeSupplyChainConfig, buildDefaultNodePolicy, normalizeNodeName]);
+
+  useEffect(() => {
+    if (!activeSupplyChainConfig) {
+      return;
+    }
+    const availableTypes = Object.keys(nodesByType);
+    if (availableTypes.length === 0) {
+      setSelectedNodeType(null);
+      return;
+    }
+    if (!selectedNodeType || !availableTypes.includes(selectedNodeType)) {
+      const ordered = ['market_supply', 'manufacturer', 'distributor', 'wholesaler', 'retailer', 'market_demand'];
+      const nextType = ordered.find((type) => availableTypes.includes(type)) || availableTypes[0];
+      setSelectedNodeType(nextType);
+    }
+  }, [activeSupplyChainConfig, nodesByType, selectedNodeType]);
+
+  useEffect(() => {
+    if (!activeSupplyChainConfig) {
+      return;
+    }
+    setPlayers((prevPlayers) => {
+      const existingByRole = new Map(prevPlayers.map((player) => [player.role, player]));
+      const defaults = playableNodes.map((node) => {
+        const nodeType = normalizeNodeType(node?.type);
+        const roleKey = playableTypeToRole[nodeType];
+        if (!roleKey) {
+          return null;
+        }
+        const base = {
+          role: roleKey,
+          playerType: 'ai',
+          strategy: 'NAIVE',
+          canSeeDemand: roleKey === 'retailer',
+          userId: roleKey === 'retailer' && user ? user.id : null,
+          llmModel: 'gpt-4o-mini',
+          daybreakOverridePct: 5,
+          displayName: node?.name || roleKey,
+          nodeId: node?.id,
+          nodeType,
+        };
+        const existing = existingByRole.get(roleKey);
+        return existing ? { ...base, ...existing, displayName: node?.name || existing.displayName } : base;
+      }).filter(Boolean);
+      return defaults;
+    });
+  }, [activeSupplyChainConfig, playableNodes, normalizeNodeType, playableTypeToRole, user]);
+
+  const nodesById = useMemo(() => {
+    if (!activeSupplyChainConfig?.nodes) {
+      return new Map();
+    }
+    return new Map(activeSupplyChainConfig.nodes.map((node) => [node.id, node]));
+  }, [activeSupplyChainConfig]);
+
+  const itemsById = useMemo(() => {
+    if (!activeSupplyChainConfig?.items) {
+      return new Map();
+    }
+    return new Map(activeSupplyChainConfig.items.map((item) => [item.id, item]));
+  }, [activeSupplyChainConfig]);
+
+  const nodePolicyBounds = useMemo(() => {
+    if (!activeSupplyChainConfig) {
+      return {};
+    }
+    const bounds = {};
+    (activeSupplyChainConfig.nodes || []).forEach((node) => {
+      const key = normalizeNodeName(node?.name);
+      if (!key) {
+        return;
+      }
+      const itemConfig = node?.item_configs && node.item_configs.length > 0 ? node.item_configs[0] : null;
+      const inboundLanes = (activeSupplyChainConfig.lanes || []).filter((lane) => lane?.downstream_node_id === node.id);
+      const leadRange = inboundLanes.reduce(
+        (acc, lane) => {
+          const range = lane?.lead_time_days || {};
+          const min = Number(range.min);
+          const max = Number(range.max);
+          return {
+            min: Number.isFinite(min) ? (acc.min == null ? min : Math.min(acc.min, min)) : acc.min,
+            max: Number.isFinite(max) ? (acc.max == null ? max : Math.max(acc.max, max)) : acc.max,
+          };
+        },
+        { min: null, max: null }
+      );
+      bounds[key] = {
+        init_inventory: itemConfig?.initial_inventory_range,
+        min_order_qty: itemConfig?.inventory_target_range,
+        ship_delay: leadRange,
+        info_delay: { min: 0, max: 12 },
+        variable_cost: itemConfig?.selling_price_range
+          ? { min: 0, max: Number(itemConfig.selling_price_range.max) }
+          : { min: 0, max: 100 },
+      };
+    });
+    return bounds;
+  }, [activeSupplyChainConfig, normalizeNodeName]);
+
+  const marketDemandRows = useMemo(() => {
+    const demands = activeSupplyChainConfig?.market_demands || [];
+    const lanes = activeSupplyChainConfig?.lanes || [];
+    if (!demands.length) {
+      return [];
+    }
+    const laneByUpstream = lanes.reduce((acc, lane) => {
+      const upstream = lane?.upstream_node_id;
+      const downstreamNode = nodesById.get(lane?.downstream_node_id);
+      if (!upstream || !downstreamNode) {
+        return acc;
+      }
+      const downstreamType = normalizeNodeType(downstreamNode.type);
+      if (downstreamType !== 'market_demand') {
+        return acc;
+      }
+      acc[upstream] = { lane, marketNode: downstreamNode };
+      return acc;
+    }, {});
+    return demands.map((demand) => {
+      const item = itemsById.get(demand.item_id);
+      const retailer = nodesById.get(demand.retailer_id);
+      const laneInfo = retailer ? laneByUpstream[retailer.id] : null;
+      const pattern = demand.demand_pattern || {};
+      const params = pattern.params || pattern;
+      return {
+        id: demand.id,
+        itemName: item?.name || `Item ${demand.item_id}`,
+        pattern,
+        params,
+        retailerName: retailer?.name || 'Unknown',
+        marketNodeName: laneInfo?.marketNode?.name || 'Market Demand',
+        laneLeadTime: laneInfo?.lane?.lead_time_days || null,
+      };
+    });
+  }, [activeSupplyChainConfig, itemsById, nodesById, normalizeNodeType]);
+
+  const marketSupplyRows = useMemo(() => {
+    if (!activeSupplyChainConfig) {
+      return [];
+    }
+    const lanes = activeSupplyChainConfig.lanes || [];
+    return (nodesByType.market_supply || []).map((node) => {
+      const outbound = lanes.filter((lane) => lane?.upstream_node_id === node.id);
+      return {
+        node,
+        outbound,
+      };
+    });
+  }, [activeSupplyChainConfig, nodesByType]);
+
+
   const handleDaybreakToggleChange = (key) => (event) => {
     const checked = event.target.checked;
     setDaybreakLlmConfig((prev) => ({
@@ -582,6 +985,31 @@ const CreateMixedGame = () => {
       toggles: { ...prev.toggles, [key]: checked },
     }));
   };
+
+  const handleNodePolicyNumberChange = useCallback(
+    (nodeKey, field) => (valueString, valueNumber) => {
+      const rawValue = Number.isFinite(valueNumber) ? valueNumber : parseFloat(valueString);
+      setNodePolicies((prev) => {
+        const prevPolicy = prev[nodeKey] || {};
+        const bounds = nodePolicyBounds[nodeKey]?.[field];
+        const defaultPolicy = prevPolicy.init_inventory != null ? prevPolicy : buildDefaultNodePolicy(
+          (activeSupplyChainConfig?.nodes || []).find((node) => normalizeNodeName(node?.name) === nodeKey),
+          activeSupplyChainConfig
+        ) || {};
+        let nextValue = Number.isFinite(rawValue) ? rawValue : prevPolicy[field] ?? defaultPolicy[field] ?? 0;
+        nextValue = Number.isFinite(nextValue) ? clampToRange(nextValue, bounds) : nextValue;
+        return {
+          ...prev,
+          [nodeKey]: {
+            ...defaultPolicy,
+            ...prevPolicy,
+            [field]: Number.isFinite(nextValue) ? nextValue : prevPolicy[field] ?? defaultPolicy[field] ?? 0,
+          },
+        };
+      });
+    },
+    [activeSupplyChainConfig, buildDefaultNodePolicy, clampToRange, nodePolicyBounds, normalizeNodeName]
+  );
 
   const handlePlayerTypeChange = (index, type) => {
     setPlayers((prevPlayers) =>
@@ -683,6 +1111,46 @@ const CreateMixedGame = () => {
     setIsLoading(true);
     
     try {
+      const nodePolicyPayload = (() => {
+        if (activeSupplyChainConfig?.nodes) {
+          const payload = {};
+          activeSupplyChainConfig.nodes.forEach((node) => {
+            const key = normalizeNodeName(node?.name);
+            if (!key) {
+              return;
+            }
+            const base = buildDefaultNodePolicy(node, activeSupplyChainConfig) || {};
+            const stored = nodePolicies[key] || {};
+            const merged = { ...base, ...stored };
+            const roleKey = playableTypeToRole[normalizeNodeType(node?.type)];
+            const pricing = roleKey ? pricingConfig[roleKey] : null;
+            payload[key] = {
+              info_delay: Number.isFinite(Number(merged.info_delay)) ? Number(merged.info_delay) : 0,
+              ship_delay: Number.isFinite(Number(merged.ship_delay)) ? Number(merged.ship_delay) : 0,
+              init_inventory: Number.isFinite(Number(merged.init_inventory)) ? Number(merged.init_inventory) : 0,
+              min_order_qty: Number.isFinite(Number(merged.min_order_qty)) ? Number(merged.min_order_qty) : 0,
+              variable_cost: Number.isFinite(Number(merged.variable_cost)) ? Number(merged.variable_cost) : 0,
+              price: pricing ? Number(pricing.selling_price) : 0,
+              standard_cost: pricing ? Number(pricing.standard_cost) : 0,
+            };
+          });
+          return payload;
+        }
+        const fallback = {};
+        Object.entries(nodePolicies || {}).forEach(([key, value]) => {
+          fallback[key] = {
+            info_delay: Number.isFinite(Number(value.info_delay)) ? Number(value.info_delay) : 0,
+            ship_delay: Number.isFinite(Number(value.ship_delay)) ? Number(value.ship_delay) : 0,
+            init_inventory: Number.isFinite(Number(value.init_inventory)) ? Number(value.init_inventory) : 0,
+            min_order_qty: Number.isFinite(Number(value.min_order_qty)) ? Number(value.min_order_qty) : 0,
+            variable_cost: Number.isFinite(Number(value.variable_cost)) ? Number(value.variable_cost) : 0,
+            price: 0,
+            standard_cost: 0,
+          };
+        });
+        return fallback;
+      })();
+
       const gameData = {
         name: gameName,
         max_rounds: maxRounds,
@@ -699,9 +1167,10 @@ const CreateMixedGame = () => {
               }
             : {}
         },
-        node_policies: nodePolicies,
+        node_policies: nodePolicyPayload,
         system_config: systemConfig,
         global_policy: policy,
+        supply_chain_config_id: activeSupplyChainConfig?.id || null,
         pricing_config: {
           retailer: {
             selling_price: parseFloat(pricingConfig.retailer.selling_price),
@@ -1058,6 +1527,251 @@ const CreateMixedGame = () => {
                   </CardBody>
                 </Card>
 
+                <Card variant="outline" bg={cardBg} borderColor={borderColor} w="100%" className="card-surface pad-6">
+                  <CardHeader pb={2}>
+                    <Heading size="md" fontFamily="inherit">Supply Chain Network</Heading>
+                    <Text color="gray.500" fontSize="sm">
+                      Configure node-level parameters using the active supply chain configuration.
+                    </Text>
+                  </CardHeader>
+                  <CardBody pt={0}>
+                    {loadingSupplyChain ? (
+                      <Box py={10} display="flex" justifyContent="center">
+                        <Spinner size="lg" />
+                      </Box>
+                    ) : supplyChainError ? (
+                      <Alert status="error" borderRadius="md">
+                        <AlertIcon />
+                        <Box>
+                          <AlertTitle fontSize="sm">Unable to load supply chain</AlertTitle>
+                          <AlertDescription fontSize="sm">{supplyChainError}</AlertDescription>
+                        </Box>
+                      </Alert>
+                    ) : !activeSupplyChainConfig ? (
+                      <Text color="gray.500" fontSize="sm">
+                        No supply chain configuration is linked to this group yet.
+                      </Text>
+                    ) : (
+                      <VStack align="stretch" spacing={5}>
+                        <FormControl>
+                          <StyledFormLabel>Node Type</StyledFormLabel>
+                          {nodeTypeOptions.length > 0 ? (
+                            <Wrap spacing={2}>
+                              {nodeTypeOptions.map((type) => (
+                                <WrapItem key={type}>
+                                  <Button
+                                    size="sm"
+                                    variant={selectedNodeType === type ? 'solid' : 'outline'}
+                                    colorScheme="blue"
+                                    onClick={() => setSelectedNodeType(type)}
+                                  >
+                                    {nodeTypeLabels[type] || type}
+                                  </Button>
+                                </WrapItem>
+                              ))}
+                            </Wrap>
+                          ) : (
+                            <Text color="gray.500" fontSize="sm">No nodes available in this configuration.</Text>
+                          )}
+                        </FormControl>
+
+                        {selectedNodeType ? (
+                          (() => {
+                            const nodes = nodesByType[selectedNodeType] || [];
+                            if (selectedNodeType === 'market_demand') {
+                              if (marketDemandRows.length === 0) {
+                                return (
+                                  <Text color="gray.500" fontSize="sm">
+                                    No market demand records are defined for this configuration.
+                                  </Text>
+                                );
+                              }
+                              return (
+                                <Box overflowX="auto">
+                                  <Table size="sm" variant="simple">
+                                    <Thead>
+                                      <Tr>
+                                        <Th>Item</Th>
+                                        <Th>Demand Pattern</Th>
+                                        <Th>Supplied By</Th>
+                                        <Th>Lane Lead Time</Th>
+                                      </Tr>
+                                    </Thead>
+                                    <Tbody>
+                                      {marketDemandRows.map((row) => (
+                                        <Tr key={row.id}>
+                                          <Td>{row.itemName}</Td>
+                                          <Td>{formatDemandPatternSummary(row.pattern, row.params)}</Td>
+                                          <Td>{row.retailerName} → {row.marketNodeName}</Td>
+                                          <Td>{formatLeadTimeRange(row.laneLeadTime)}</Td>
+                                        </Tr>
+                                      ))}
+                                    </Tbody>
+                                  </Table>
+                                  <HelperText mt={2}>Demand patterns are defined in the linked supply chain configuration.</HelperText>
+                                </Box>
+                              );
+                            }
+
+                            if (selectedNodeType === 'market_supply') {
+                              if (marketSupplyRows.length === 0) {
+                                return (
+                                  <Text color="gray.500" fontSize="sm">
+                                    No market supply nodes are present in this configuration.
+                                  </Text>
+                                );
+                              }
+                              return (
+                                <VStack align="stretch" spacing={4}>
+                                  {marketSupplyRows.map(({ node, outbound }) => (
+                                    <Box key={node.id} p={4} borderWidth="1px" borderRadius="md" borderColor={borderColor}>
+                                      <Text fontWeight="semibold">{node.name}</Text>
+                                      {outbound.length === 0 ? (
+                                        <HelperText>No outbound lanes configured.</HelperText>
+                                      ) : (
+                                        <VStack align="stretch" spacing={1} mt={2}>
+                                          {outbound.map((lane) => {
+                                            const downstream = nodesById.get(lane.downstream_node_id);
+                                            return (
+                                              <Text key={lane.id} fontSize="sm">
+                                                Supplies <strong>{downstream?.name || lane.downstream_node_id}</strong> • Lead time {formatLeadTimeRange(lane.lead_time_days)}
+                                              </Text>
+                                            );
+                                          })}
+                                        </VStack>
+                                      )}
+                                      <HelperText>Market supply nodes provide infinite supply with the configured lead times.</HelperText>
+                                    </Box>
+                                  ))}
+                                </VStack>
+                              );
+                            }
+
+                            if (nodes.length === 0) {
+                              return <Text color="gray.500" fontSize="sm">No nodes of this type are defined.</Text>;
+                            }
+
+                            return (
+                              <VStack align="stretch" spacing={4}>
+                                {nodes.map((node) => {
+                                  const nodeKey = normalizeNodeName(node?.name);
+                                  const bounds = nodePolicyBounds[nodeKey] || {};
+                                  return (
+                                    <Box key={node.id} p={4} borderWidth="1px" borderRadius="md" borderColor={borderColor}>
+                                      <Text fontWeight="semibold" mb={2}>{node.name}</Text>
+                                      <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={4}>
+                                        <FormControl>
+                                          <StyledFormLabel>Information Delay (weeks)</StyledFormLabel>
+                                          <NumberInput
+                                            min={bounds.info_delay?.min ?? 0}
+                                            max={bounds.info_delay?.max ?? 12}
+                                            step={1}
+                                            value={getPolicyValue(nodeKey, 'info_delay')}
+                                            onChange={handleNodePolicyNumberChange(nodeKey, 'info_delay')}
+                                          >
+                                            <NumberInputField />
+                                            <NumberInputStepper>
+                                              <NumberIncrementStepper />
+                                              <NumberDecrementStepper />
+                                            </NumberInputStepper>
+                                          </NumberInput>
+                                          {describeRange(bounds.info_delay, 'weeks') && (
+                                            <HelperText>Allowed: {describeRange(bounds.info_delay, 'weeks')}</HelperText>
+                                          )}
+                                        </FormControl>
+                                        <FormControl>
+                                          <StyledFormLabel>Shipment Delay (weeks)</StyledFormLabel>
+                                          <NumberInput
+                                            min={bounds.ship_delay?.min ?? 0}
+                                            max={bounds.ship_delay?.max ?? 12}
+                                            step={1}
+                                            value={getPolicyValue(nodeKey, 'ship_delay')}
+                                            onChange={handleNodePolicyNumberChange(nodeKey, 'ship_delay')}
+                                          >
+                                            <NumberInputField />
+                                            <NumberInputStepper>
+                                              <NumberIncrementStepper />
+                                              <NumberDecrementStepper />
+                                            </NumberInputStepper>
+                                          </NumberInput>
+                                          {describeRange(bounds.ship_delay, 'weeks') && (
+                                            <HelperText>Allowed: {describeRange(bounds.ship_delay, 'weeks')}</HelperText>
+                                          )}
+                                        </FormControl>
+                                        <FormControl>
+                                          <StyledFormLabel>Initial Inventory</StyledFormLabel>
+                                          <NumberInput
+                                            min={bounds.init_inventory?.min ?? 0}
+                                            max={bounds.init_inventory?.max ?? 9999}
+                                            step={1}
+                                            value={getPolicyValue(nodeKey, 'init_inventory')}
+                                            onChange={handleNodePolicyNumberChange(nodeKey, 'init_inventory')}
+                                          >
+                                            <NumberInputField />
+                                            <NumberInputStepper>
+                                              <NumberIncrementStepper />
+                                              <NumberDecrementStepper />
+                                            </NumberInputStepper>
+                                          </NumberInput>
+                                          {describeRange(bounds.init_inventory, 'units') && (
+                                            <HelperText>Allowed: {describeRange(bounds.init_inventory, 'units')}</HelperText>
+                                          )}
+                                        </FormControl>
+                                        <FormControl>
+                                          <StyledFormLabel>Minimum Order Quantity</StyledFormLabel>
+                                          <NumberInput
+                                            min={bounds.min_order_qty?.min ?? 0}
+                                            max={bounds.min_order_qty?.max ?? 9999}
+                                            step={1}
+                                            value={getPolicyValue(nodeKey, 'min_order_qty')}
+                                            onChange={handleNodePolicyNumberChange(nodeKey, 'min_order_qty')}
+                                          >
+                                            <NumberInputField />
+                                            <NumberInputStepper>
+                                              <NumberIncrementStepper />
+                                              <NumberDecrementStepper />
+                                            </NumberInputStepper>
+                                          </NumberInput>
+                                          {describeRange(bounds.min_order_qty, 'units') && (
+                                            <HelperText>Allowed: {describeRange(bounds.min_order_qty, 'units')}</HelperText>
+                                          )}
+                                        </FormControl>
+                                        <FormControl>
+                                          <StyledFormLabel>Variable Cost</StyledFormLabel>
+                                          <NumberInput
+                                            min={bounds.variable_cost?.min ?? 0}
+                                            max={bounds.variable_cost?.max ?? 1000}
+                                            step={0.1}
+                                            precision={2}
+                                            value={getPolicyValue(nodeKey, 'variable_cost')}
+                                            onChange={handleNodePolicyNumberChange(nodeKey, 'variable_cost')}
+                                          >
+                                            <NumberInputField />
+                                            <NumberInputStepper>
+                                              <NumberIncrementStepper />
+                                              <NumberDecrementStepper />
+                                            </NumberInputStepper>
+                                          </NumberInput>
+                                          {describeRange(bounds.variable_cost, 'cost') && (
+                                            <HelperText>Suggested range: {describeRange(bounds.variable_cost)}</HelperText>
+                                          )}
+                                        </FormControl>
+                                      </Grid>
+                                      <HelperText mt={2}>Selling prices are configured on the Pricing tab.</HelperText>
+                                    </Box>
+                                  );
+                                })}
+                              </VStack>
+                            );
+                          })()
+                        ) : (
+                          <Text color="gray.500" fontSize="sm">Select a node type to view details.</Text>
+                        )}
+                      </VStack>
+                    )}
+                  </CardBody>
+                </Card>
+
               {showDaybreakSharingCard && (
                 <Card variant="outline" bg={cardBg} borderColor={borderColor} w="100%" className="card-surface pad-6">
                   <CardHeader pb={2}>
@@ -1164,24 +1878,31 @@ const CreateMixedGame = () => {
                   >
                     <VStack align="stretch" spacing={4}>
                       <HStack justify="space-between" align="flex-start">
-                        <HStack spacing={3} align="center">
-                          <Text fontSize="lg" fontWeight="semibold" textTransform="capitalize">
-                            {player.role}
-                          </Text>
-                          {player.role === 'retailer' && (
-                            <Badge colorScheme="blue" variant="subtle" borderRadius="full" px={2}>
-                              Required
+                        <VStack align="flex-start" spacing={0}>
+                          <HStack spacing={3} align="center">
+                            <Text fontSize="lg" fontWeight="semibold">
+                              {player.displayName || player.role}
+                            </Text>
+                            {player.role === 'retailer' && (
+                              <Badge colorScheme="blue" variant="subtle" borderRadius="full" px={2}>
+                                Required
+                              </Badge>
+                            )}
+                          </HStack>
+                          <HStack spacing={2} align="center">
+                            <Tag size="sm" colorScheme="gray" variant="subtle">
+                              Role: {player.role}
+                            </Tag>
+                            <Badge
+                              colorScheme={player.playerType === 'human' ? 'green' : 'purple'}
+                              variant="subtle"
+                              borderRadius="full"
+                              px={2}
+                            >
+                              {badgeLabel}
                             </Badge>
-                          )}
-                          <Badge
-                            colorScheme={player.playerType === 'human' ? 'green' : 'purple'}
-                            variant="subtle"
-                            borderRadius="full"
-                            px={2}
-                          >
-                            {badgeLabel}
-                          </Badge>
-                        </HStack>
+                          </HStack>
+                        </VStack>
                       </HStack>
 
                       <FormControl>
