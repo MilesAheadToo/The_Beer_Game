@@ -26,6 +26,7 @@ logs/
 .env.prod
 .env.*
 !.env.example
+!.env.dev.template
 
 # Bundles/archives
 *.zip
