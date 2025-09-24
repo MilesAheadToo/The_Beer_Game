@@ -829,92 +829,169 @@ class MixedGameService:
             Player.game_id == game.id,
             Player.is_ai == True
         ).all()
-        
+
+        if not players:
+            return
+
+        cfg = game.config or {}
+        node_policies = cfg.get("node_policies", {})
+        lane_views = self._build_lane_views(node_policies, cfg)
+        node_types_map = lane_views.get("node_types", {})
+        shipments_map = lane_views.get("shipments_map", {})
+        node_sequence = lane_views.get("node_sequence") or lane_views.get("all_nodes", [])
+
+        # Pre-fetch previous round orders for context sharing
+        previous_round = self.db.query(GameRound).filter(
+            GameRound.game_id == game.id,
+            GameRound.round_number == game_round.round_number - 1
+        ).first()
+        previous_orders = [
+            pr.order_placed for pr in previous_round.player_rounds
+        ] if previous_round else []
+
+        # Group players by their associated node/role key
+        node_to_players: Dict[str, List[Player]] = defaultdict(list)
         for player in players:
-            # Get the AI agent for this player
-            agent_type = AgentType(player.role.lower())
-            strategy_value = player.ai_strategy or "naive"
-            try:
-                strategy_enum = AgentStrategyEnum(strategy_value.lower())
-            except ValueError:
-                if strategy_value.lower().startswith("llm"):
-                    strategy_enum = AgentStrategyEnum.LLM
-                else:
-                    strategy_enum = AgentStrategyEnum.NAIVE
-
-            override_pct = None
-            if strategy_enum == AgentStrategyEnum.DAYBREAK_DTCE_CENTRAL:
-                overrides = (game.config or {}).get("daybreak_overrides", {})
-                role_key = player.role.value if hasattr(player.role, "value") else str(player.role).lower()
-                override_pct = overrides.get(role_key)
-
-            self.agent_manager.set_agent_strategy(
-                agent_type,
-                strategy_enum,
-                llm_model=player.llm_model,
-                override_pct=override_pct,
+            role_token = MixedGameService._normalise_key(
+                getattr(player.role, "value", player.role)
             )
-            agent = self.agent_manager.get_agent(agent_type)
+            node_to_players[role_token].append(player)
 
-            # Get player's current state
-            inventory = self.db.query(PlayerInventory).filter(
-                PlayerInventory.player_id == player.id
-            ).first()
-            
-            # Get previous round's data for the agent
-            previous_round = self.db.query(GameRound).filter(
-                GameRound.game_id == game.id,
-                GameRound.round_number == game_round.round_number - 1
-            ).first()
-            
-            incoming_shipments = []
-            if hasattr(inventory, "incoming_shipments") and inventory.incoming_shipments:
-                incoming_shipments = inventory.incoming_shipments
-                if not isinstance(incoming_shipments, list):
-                    incoming_shipments = []
+        # Evaluate nodes from downstream to upstream so downstream orders are
+        # available as demand input for upstream agents.
+        processing_nodes: List[str] = []
+        for node in reversed(node_sequence):
+            if node in node_to_players and node not in processing_nodes:
+                processing_nodes.append(node)
+        for node in node_to_players.keys():
+            if node not in processing_nodes:
+                processing_nodes.append(node)
 
-            local_state = {
-                "inventory": getattr(inventory, "current_stock", getattr(inventory, "current_inventory", 0)),
-                "backlog": getattr(inventory, "backorders", getattr(inventory, "current_backlog", 0)),
-                "incoming_shipments": incoming_shipments,
-            }
+        node_orders: Dict[str, int] = {}
+        orders_by_role: Dict[str, int] = {}
 
-            # Make decision based on agent's strategy
-            llm_payload = None
-            if strategy_enum == AgentStrategyEnum.LLM:
-                llm_payload = build_llm_decision_payload(
-                    self.db,
-                    game,
-                    round_number=game_round.round_number,
-                    action_role=player.role.value if hasattr(player.role, "value") else str(player.role).lower(),
+        for node_key in processing_nodes:
+            node_players = node_to_players.get(node_key, [])
+            if not node_players:
+                continue
+
+            node_type = node_types_map.get(node_key, "")
+            if node_type == "market_demand":
+                # Demand sinks do not generate orders themselves.
+                continue
+
+            downstream_nodes = shipments_map.get(node_key, [])
+            downstream_orders: Dict[str, int] = {}
+            for downstream in downstream_nodes:
+                downstream_key = MixedGameService._normalise_key(downstream)
+                downstream_orders[downstream_key] = node_orders.get(downstream_key, 0)
+
+            demand_from_downstream = sum(downstream_orders.values())
+            if node_type == "retailer":
+                current_demand_value = int(game_round.customer_demand or 0)
+            else:
+                current_demand_value = int(demand_from_downstream)
+            if current_demand_value < 0:
+                current_demand_value = 0
+
+            accumulated_node_order = 0
+
+            for player in node_players:
+                role_token = MixedGameService._normalise_key(
+                    getattr(player.role, "value", player.role)
+                )
+                agent_type = AgentType(role_token)
+
+                strategy_value = (player.ai_strategy or "naive").lower()
+                try:
+                    strategy_enum = AgentStrategyEnum(strategy_value)
+                except ValueError:
+                    if strategy_value.startswith("llm"):
+                        strategy_enum = AgentStrategyEnum.LLM
+                    else:
+                        strategy_enum = AgentStrategyEnum.NAIVE
+
+                override_pct = None
+                if strategy_enum == AgentStrategyEnum.DAYBREAK_DTCE_CENTRAL:
+                    overrides = (cfg or {}).get("daybreak_overrides", {})
+                    override_pct = overrides.get(role_token)
+
+                self.agent_manager.set_agent_strategy(
+                    agent_type,
+                    strategy_enum,
+                    llm_model=player.llm_model,
+                    override_pct=override_pct,
+                )
+                agent = self.agent_manager.get_agent(agent_type)
+
+                inventory = self.db.query(PlayerInventory).filter(
+                    PlayerInventory.player_id == player.id
+                ).first()
+
+                incoming_shipments = []
+                if inventory and getattr(inventory, "incoming_shipments", None):
+                    incoming_shipments = inventory.incoming_shipments
+                    if not isinstance(incoming_shipments, list):
+                        incoming_shipments = []
+
+                local_state = {
+                    "inventory": getattr(
+                        inventory,
+                        "current_stock",
+                        getattr(inventory, "current_inventory", 0) if inventory else 0,
+                    ),
+                    "backlog": getattr(
+                        inventory,
+                        "backorders",
+                        getattr(inventory, "current_backlog", 0) if inventory else 0,
+                    ),
+                    "incoming_shipments": incoming_shipments,
+                }
+
+                llm_payload = None
+                if strategy_enum == AgentStrategyEnum.LLM:
+                    llm_payload = build_llm_decision_payload(
+                        self.db,
+                        game,
+                        round_number=game_round.round_number,
+                        action_role=role_token,
+                    )
+
+                upstream_context = {
+                    "previous_orders": previous_orders,
+                    "previous_orders_by_role": dict(orders_by_role),
+                    "downstream_orders": dict(downstream_orders),
+                }
+                if llm_payload is not None:
+                    upstream_context["llm_payload"] = llm_payload
+
+                order_quantity = agent.make_decision(
+                    current_round=game_round.round_number,
+                    current_demand=current_demand_value,
+                    upstream_data=upstream_context,
+                    local_state=local_state,
                 )
 
-            upstream_context = {
-                'previous_orders': [pr.order_placed for pr in previous_round.player_rounds] if previous_round else [],
-            }
-            if llm_payload is not None:
-                upstream_context['llm_payload'] = llm_payload
+                inventory_stock = getattr(inventory, "current_stock", 0) if inventory else 0
+                inventory_backorders = getattr(inventory, "backorders", 0) if inventory else 0
 
-            order_quantity = agent.make_decision(
-                current_round=game_round.round_number,
-                current_demand=game_round.customer_demand if player.can_see_demand else None,
-                upstream_data=upstream_context,
-                local_state=local_state,
-            )
+                player_round = PlayerRound(
+                    player_id=player.id,
+                    round_id=game_round.id,
+                    order_placed=order_quantity,
+                    order_received=0,
+                    inventory_before=inventory_stock,
+                    inventory_after=inventory_stock,
+                    backorders_before=inventory_backorders,
+                    backorders_after=inventory_backorders,
+                    comment=agent.get_last_explanation_comment(),
+                )
+                self.db.add(player_round)
 
-            # Create player round record
-            player_round = PlayerRound(
-                player_id=player.id,
-                round_id=game_round.id,
-                order_placed=order_quantity,
-                order_received=0,  # Will be updated when upstream ships
-                inventory_before=inventory.current_stock,
-                inventory_after=inventory.current_stock,  # Will be updated after processing
-                backorders_before=inventory.backorders,
-                backorders_after=inventory.backorders,  # Will be updated after processing
-                comment=agent.get_last_explanation_comment(),
-            )
-            self.db.add(player_round)
+                accumulated_node_order += order_quantity
+
+            node_orders[node_key] = accumulated_node_order
+            orders_by_role[node_key] = accumulated_node_order
     
     def complete_round(self, game_round: GameRound) -> None:
         """Complete the current round, updating player inventories and costs."""
@@ -945,7 +1022,9 @@ class MixedGameService:
             inventory.current_stock = pr.inventory_after
             inventory.backorders = pr.backorders_after
         
-        game_round.ended_at = datetime.utcnow()
+        timestamp = datetime.utcnow()
+        game_round.ended_at = timestamp
+        game_round.completed_at = timestamp
         self.db.commit()
     
     def get_current_round(self, game_id: int) -> Optional[GameRound]:

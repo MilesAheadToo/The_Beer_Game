@@ -47,6 +47,7 @@ from app.models.supply_chain import (
 from app.models.user import User, UserTypeEnum
 from app.core.security import verify_password
 from app.services.agents import AgentManager, AgentType, AgentStrategy as AgentStrategyEnum
+from app.services.mixed_game_service import MixedGameService
 
 # ------------------------------------------------------------------------------
 # Config
@@ -1015,18 +1016,11 @@ PROGRESSION_UNSUPERVISED = "unsupervised"
 
 ROLES_IN_ORDER = ["retailer", "wholesaler", "distributor", "manufacturer"]
 
-DOWNSTREAM_ROLE = {
-    "manufacturer": "distributor",
-    "distributor": "wholesaler",
-    "wholesaler": "retailer",
-    "retailer": None,
-}
-
-UPSTREAM_ROLE = {
-    "retailer": "wholesaler",
-    "wholesaler": "distributor",
-    "distributor": "manufacturer",
-    "manufacturer": None,
+ROLE_TO_AGENT_TYPE = {
+    "retailer": AgentType.RETAILER,
+    "wholesaler": AgentType.WHOLESALER,
+    "distributor": AgentType.DISTRIBUTOR,
+    "manufacturer": AgentType.MANUFACTURER,
 }
 
 _AUTO_ADVANCE_TASKS: Dict[int, asyncio.Task] = {}
@@ -1085,14 +1079,6 @@ def _get_progression_mode(game: DbGame) -> str:
     return mode
 
 
-def _advance_queue(queue: List[int]) -> int:
-    if not queue:
-        return 0
-    head = queue.pop(0)
-    queue.append(0)
-    return int(head)
-
-
 def _ensure_round(db: Session, game: DbGame, round_number: Optional[int] = None) -> Round:
     number = round_number or (game.current_round or 1)
     existing = (
@@ -1107,7 +1093,7 @@ def _ensure_round(db: Session, game: DbGame, round_number: Optional[int] = None)
         round_number=number,
         status="in_progress",
         started_at=datetime.utcnow(),
-        config=json.dumps({}),
+        config={},
     )
     db.add(round_record)
     db.flush()
@@ -1179,63 +1165,31 @@ def _compute_customer_demand(game: DbGame, round_number: int) -> int:
 
 
 def _ensure_simulation_state(config: Dict[str, Any]) -> Dict[str, Any]:
-    params = _simulation_parameters(config)
-    initial_inventory = int(params.get("initial_inventory", 12))
-    ship_lt = max(1, int(params.get("shipping_lead_time", params.get("ship2", 2))))
-    order_lt = max(1, int(params.get("order_lead_time", params.get("order_lead", 1))))
-    prod_lt = max(0, int(params.get("production_lead_time", params.get("prod2", 2))))
+    node_policies = config.get("node_policies", {})
+    lane_views = MixedGameService._build_lane_views(node_policies, config)
+    all_nodes = lane_views.get("all_nodes") or [MixedGameService._normalise_key(name) for name in node_policies.keys()]
+
+    engine = config.setdefault("engine_state", {})
+    for node in all_nodes:
+        MixedGameService._ensure_engine_node(engine, node_policies, node)
 
     state = config.setdefault("simulation_state", {})
-    if state.get("_version") != 2:
-        state = {
-            "_version": 2,
-            "inventory": {role: initial_inventory for role in ROLES_IN_ORDER},
-            "backlog": {role: 0 for role in ROLES_IN_ORDER},
-            "ship_pipeline": {role: [0] * ship_lt for role in ROLES_IN_ORDER},
-            "order_pipeline": {role: [0] * order_lt for role in ROLES_IN_ORDER},
-            "production_pipeline": [0] * max(1, prod_lt),
-            "last_orders": {role: 0 for role in ROLES_IN_ORDER},
-        }
-        config["simulation_state"] = state
+    state.setdefault("inventory", {})
+    state.setdefault("backlog", {})
+    state.setdefault("last_orders", {})
+    state.setdefault("incoming_shipments", {})
+    state.setdefault("pending_orders", {})
 
-    inventory = state.setdefault("inventory", {})
-    backlog = state.setdefault("backlog", {})
-    ship_pipeline = state.setdefault("ship_pipeline", {})
-    order_pipeline = state.setdefault("order_pipeline", {})
-    production_pipeline = state.setdefault("production_pipeline", [0] * max(1, prod_lt))
-    last_orders = state.setdefault("last_orders", {role: 0 for role in ROLES_IN_ORDER})
-
-    for role in ROLES_IN_ORDER:
-        inventory.setdefault(role, initial_inventory)
-        backlog.setdefault(role, 0)
-
-        ship_queue = ship_pipeline.setdefault(role, [0] * ship_lt)
-        if len(ship_queue) != ship_lt:
-            if len(ship_queue) < ship_lt:
-                ship_queue.extend([0] * (ship_lt - len(ship_queue)))
-            else:
-                ship_pipeline[role] = ship_queue[-ship_lt:]
-
-        order_queue = order_pipeline.setdefault(role, [0] * order_lt)
-        if len(order_queue) != order_lt:
-            if len(order_queue) < order_lt:
-                order_queue.extend([0] * (order_lt - len(order_queue)))
-            else:
-                order_pipeline[role] = order_queue[-order_lt:]
-
-        last_orders.setdefault(role, 0)
-
-    if len(production_pipeline) != max(1, prod_lt):
-        if len(production_pipeline) < max(1, prod_lt):
-            production_pipeline.extend([0] * (max(1, prod_lt) - len(production_pipeline)))
-        else:
-            state["production_pipeline"] = production_pipeline[-max(1, prod_lt):]
+    # Remove legacy pipeline keys that are no longer used
+    state.pop("ship_pipeline", None)
+    state.pop("order_pipeline", None)
+    state.pop("production_pipeline", None)
 
     if "initial_state" not in config:
         config["initial_state"] = {
             role: {
-                "inventory": int(inventory.get(role, initial_inventory)),
-                "backlog": int(backlog.get(role, 0)),
+                "inventory": int(engine.get(role, {}).get("inventory", 0)),
+                "backlog": int(engine.get(role, {}).get("backlog", 0)),
             }
             for role in ROLES_IN_ORDER
         }
@@ -1299,154 +1253,322 @@ def _finalize_round_if_ready(
         actions_by_role[role_key] = action
 
     state = _ensure_simulation_state(config)
-    inventory = state["inventory"]
-    backlog = state["backlog"]
-    ship_pipeline = state["ship_pipeline"]
-    order_pipeline = state["order_pipeline"]
-    production_pipeline = state["production_pipeline"]
-    last_orders = state["last_orders"]
+    node_policies = config.get("node_policies", {})
+    global_policy = config.get("global_policy", {})
+    lane_views = MixedGameService._build_lane_views(node_policies, config)
+    node_types_map = lane_views.get("node_types", {})
+    all_nodes = lane_views.get("all_nodes") or [MixedGameService._normalise_key(name) for name in node_policies.keys()]
 
-    # Advance manufacturer production pipeline (orders already in transit to supplier)
-    order_to_production = _advance_queue(order_pipeline["manufacturer"])
-    if production_pipeline:
-        production_pipeline[-1] += order_to_production
-    produced_today = _advance_queue(production_pipeline)
-    inventory["manufacturer"] += produced_today
+    engine = config.setdefault("engine_state", {})
+    for node in all_nodes:
+        MixedGameService._ensure_engine_node(engine, node_policies, node)
 
-    arrivals = {}
-    role_stats: Dict[str, Dict[str, Any]] = {}
+    market_demand_nodes_config = {n for n in lane_views.get("market_nodes", []) if n in engine}
+    market_demand_nodes_types = {node for node, node_type in node_types_map.items() if node_type == "market_demand"}
+    market_demand_nodes = market_demand_nodes_config or market_demand_nodes_types
+    if not market_demand_nodes and all_nodes:
+        market_demand_nodes = {all_nodes[-1]}
 
-    for role in ROLES_IN_ORDER:
-        arrivals[role] = _advance_queue(ship_pipeline[role])
-        inventory[role] += arrivals[role]
+    pre_inventory = {node: engine[node].get("inventory", 0) for node in all_nodes}
+    pre_backlog = {node: engine[node].get("backlog", 0) for node in all_nodes}
+    pre_costs = {
+        node: {
+            "holding_cost": engine[node].get("holding_cost", 0.0),
+            "backorder_cost": engine[node].get("backorder_cost", 0.0),
+        }
+        for node in all_nodes
+    }
+    previous_orders_by_node = {node: engine[node].get("last_order", 0) for node in all_nodes}
 
-    # Determine inbound demand for each role
-    inbound_demand = {"retailer": external_demand}
-    for role in ROLES_IN_ORDER[1:]:
-        downstream = DOWNSTREAM_ROLE[role]
-        inbound_demand[role] = _advance_queue(order_pipeline[downstream])
+    pending_demand = defaultdict(int)
+    for node in market_demand_nodes:
+        if node in engine:
+            pending_demand[node] += int(external_demand)
 
-    sim_params = _simulation_parameters(config)
-    holding_cost_rate = float(sim_params.get("holding_cost_per_unit", sim_params.get("holding_cost", 0.5)))
-    backlog_cost_rate = float(sim_params.get("backorder_cost_per_unit", sim_params.get("backorder_cost", 5.0)))
+    for lane in lane_views.get("lanes", []):
+        upstream = lane["from"]
+        downstream = lane["to"]
+        if upstream not in engine or downstream not in engine:
+            continue
+        downstream_type = node_types_map.get(downstream, "")
+        downstream_state = engine.get(downstream, {})
+        if downstream_type == "market_demand":
+            downstream_order = pending_demand.get(downstream, downstream_state.get("last_order", 0))
+        else:
+            downstream_order = downstream_state.get("last_order", 0)
+        try:
+            downstream_value = int(downstream_order or 0)
+        except (TypeError, ValueError):
+            downstream_value = 0
+        pending_demand[upstream] += downstream_value
 
-    for role in ROLES_IN_ORDER:
-        inv_before = float(inventory.get(role, 0))
-        backlog_before = float(backlog.get(role, 0))
-        demand_here = float(inbound_demand.get(role, 0))
+    incoming_orders_map = {}
+    for node in all_nodes:
+        state_node = engine[node]
+        policy = node_policies.get(node, {})
+        info_delay = max(0, int(policy.get("info_delay", 0)))
+        new_demand = int(pending_demand.get(node, 0))
+        if info_delay <= 0:
+            incoming = new_demand
+        else:
+            queue = state_node.setdefault("info_queue", [0] * info_delay)
+            queue.append(new_demand)
+            incoming = queue.pop(0) if queue else 0
+        state_node["incoming_orders"] = incoming
+        incoming_orders_map[node] = incoming
 
-        total_demand = backlog_before + demand_here
-        shipped = min(inv_before, total_demand)
-        inv_after = inv_before - shipped
-        backlog_after = total_demand - shipped
+    hold_cost = float(global_policy.get("holding_cost", 0.5))
+    back_cost = float(global_policy.get("backlog_cost", 1.0))
 
-        inventory[role] = inv_after
-        backlog[role] = backlog_after
+    demand_totals = {node: engine[node]["backlog"] + incoming_orders_map.get(node, 0) for node in all_nodes}
+    inventory_available = {node: engine[node]["inventory"] for node in all_nodes}
 
-        downstream = DOWNSTREAM_ROLE[role]
-        if downstream:
-            ship_pipeline[downstream][-1] += shipped
+    shipments_inbound = defaultdict(int)
+    shipments_planned = defaultdict(int)
+    node_sequence = lane_views.get("node_sequence") or all_nodes
+    lanes_by_upstream = lane_views.get("lanes_by_upstream", {})
 
-        order_info = orders_by_role.get(role)
-        player = players_by_role.get(role)
-        action_obj = actions_by_role.get(role)
-
-        is_ai = bool(player and player.is_ai)
-        if is_ai and role not in configured_agents:
-            try:
-                agent_manager.set_agent_strategy(
-                    _agent_type_for_role(role),
-                    _strategy_for_player(player),
-                    llm_model=player.llm_model,
-                    override_pct=overrides.get(role),
-                )
-            except ValueError:
-                pass
-            configured_agents.add(role)
-
-        order_qty: float
-        if is_ai:
-            try:
-                agent = agent_manager.get_agent(_agent_type_for_role(role))
-            except ValueError:
-                agent = None
-            if agent:
-                agent.can_see_demand = bool(player.can_see_demand or role == "retailer" or full_visibility)
-                local_state = {
-                    "inventory": inv_before,
-                    "backlog": backlog_before,
-                    "incoming_shipments": list(ship_pipeline[role]),
-                    "pipeline_on_order": sum(ship_pipeline[role]),
-                }
-                previous_qty = last_orders.get(role, 0)
-                upstream_data = {"previous_orders": [previous_qty]}
+    for upstream in node_sequence:
+        upstream_type = node_types_map.get(upstream, "")
+        for lane in lanes_by_upstream.get(upstream, []):
+            downstream = lane["to"]
+            if downstream not in demand_totals:
+                continue
+            remaining_demand = max(0, demand_totals[downstream] - shipments_inbound[downstream])
+            if remaining_demand <= 0:
+                continue
+            capacity = lane.get("capacity")
+            if capacity is not None:
                 try:
-                    order_calc = agent.make_decision(
-                        current_round=round_record.round_number,
-                        current_demand=demand_here if agent.can_see_demand else None,
-                        upstream_data=upstream_data,
-                        local_state=local_state,
-                    )
-                except Exception:
-                    order_calc = previous_qty
-                order_qty = max(0.0, float(order_calc))
+                    remaining_demand = min(remaining_demand, int(capacity))
+                except (TypeError, ValueError):
+                    pass
+            if upstream_type == "market_supply":
+                ship_qty = remaining_demand
             else:
-                order_qty = float(order_info.get("quantity", 0)) if order_info else 0.0
-        else:
-            order_qty = float(order_info.get("quantity", 0)) if order_info else 0.0
+                available = inventory_available.get(upstream, 0)
+                if available <= 0:
+                    continue
+                ship_qty = min(available, remaining_demand)
+            if ship_qty <= 0:
+                continue
+            if upstream_type != "market_supply":
+                inventory_available[upstream] -= ship_qty
+            shipments_inbound[downstream] += ship_qty
+            shipments_planned[upstream] += ship_qty
 
-        if order_info is None:
-            player_id = player.id if player else None
-            order_info = {
-                "player_id": player_id,
-                "quantity": int(round(order_qty)),
-                "comment": None,
-                "submitted_at": timestamp.isoformat() + "Z",
-            }
-            orders_by_role[role] = order_info
-        else:
-            order_info["quantity"] = int(round(order_qty))
+    for node, remaining in inventory_available.items():
+        engine[node]["inventory"] = remaining
 
-        if action_obj is None and player and player.is_ai:
+    arrivals_map = {}
+    for node in all_nodes:
+        state_node = engine[node]
+        policy = node_policies.get(node, {})
+        ship_delay = max(0, int(policy.get("ship_delay", 0)))
+        planned = int(shipments_inbound.get(node, 0))
+        if ship_delay <= 0:
+            arriving = planned
+        else:
+            queue = state_node.setdefault("ship_queue", [0] * ship_delay)
+            queue.append(planned)
+            arriving = queue.pop(0) if queue else 0
+        state_node["incoming_shipments"] = arriving
+        state_node["last_shipment_planned"] = int(shipments_planned.get(node, 0))
+        arrivals_map[node] = arriving
+
+    for node in all_nodes:
+        node_type = node_types_map.get(node, "")
+        state_node = engine[node]
+        arriving = arrivals_map.get(node, 0)
+        if node_type == "market_supply":
+            state_node["inventory"] = 0
+            state_node["backlog"] = 0
+            state_node["last_arrival"] = arriving
+            state_node["holding_cost"] = 0.0
+            state_node["backorder_cost"] = 0.0
+            state_node["total_cost"] = 0.0
+            continue
+        available_inventory = max(0, state_node.get("inventory", 0)) + arriving
+        demand_here = demand_totals.get(node, 0)
+        shipped = min(available_inventory, demand_here)
+        state_node["inventory"] = available_inventory - shipped
+        state_node["backlog"] = max(0, demand_here - shipped)
+        state_node["last_arrival"] = arriving
+        if node_type == "market_demand":
+            state_node["holding_cost"] = 0.0
+            state_node["backorder_cost"] = state_node["backlog"] * back_cost
+            state_node["total_cost"] = state_node["backorder_cost"]
+        else:
+            state_node["holding_cost"] = state_node.get("holding_cost", 0.0) + state_node["inventory"] * hold_cost
+            state_node["backorder_cost"] = state_node.get("backorder_cost", 0.0) + state_node["backlog"] * back_cost
+            state_node["total_cost"] = state_node["holding_cost"] + state_node["backorder_cost"]
+
+    shipments_map = lane_views.get("shipments_map", {})
+    node_orders_new = {}
+    orders_timestamp_iso = timestamp.isoformat() + "Z"
+
+    processing_nodes = []
+    for node in reversed(node_sequence):
+        if node not in processing_nodes:
+            processing_nodes.append(node)
+    for node in all_nodes:
+        if node not in processing_nodes:
+            processing_nodes.append(node)
+
+    for node_key in processing_nodes:
+        player = players_by_role.get(node_key)
+        node_type = node_types_map.get(node_key, "")
+        if not player or node_type in {"market_demand", "market_supply"}:
+            continue
+        agent_type = ROLE_TO_AGENT_TYPE.get(node_key)
+        if not agent_type:
+            continue
+        if node_key not in configured_agents:
+            strategy_value = (player.ai_strategy or "naive").lower()
+            try:
+                strategy_enum = AgentStrategyEnum(strategy_value)
+            except ValueError:
+                if strategy_value.startswith("llm"):
+                    strategy_enum = AgentStrategyEnum.LLM
+                else:
+                    strategy_enum = AgentStrategyEnum.NAIVE
+            override_pct = overrides.get(node_key)
+            agent_manager.set_agent_strategy(
+                agent_type,
+                strategy_enum,
+                llm_model=player.llm_model,
+                override_pct=override_pct,
+            )
+            configured_agents.add(node_key)
+        agent = agent_manager.get_agent(agent_type)
+        downstream_nodes = shipments_map.get(node_key, [])
+        downstream_orders_latest = {
+            MixedGameService._normalise_key(down): node_orders_new.get(down, 0)
+            for down in downstream_nodes
+        }
+        previous_downstream_orders = {
+            MixedGameService._normalise_key(down): previous_orders_by_node.get(down, 0)
+            for down in downstream_nodes
+        }
+        previous_orders_seq = list(previous_downstream_orders.values())
+        node_state = engine[node_key]
+        local_state = {
+            "inventory": int(node_state.get("inventory", 0)),
+            "backlog": int(node_state.get("backlog", 0)),
+            "incoming_shipments": int(arrivals_map.get(node_key, 0)),
+        }
+        if full_visibility:
+            local_state["downstream_orders"] = list(downstream_orders_latest.values())
+        observed_demand = int(incoming_orders_map.get(node_key, 0))
+        if node_key in market_demand_nodes:
+            current_demand_value = int(external_demand)
+        elif player.can_see_demand or full_visibility:
+            current_demand_value = observed_demand
+        else:
+            current_demand_value = None
+        upstream_context = {
+            "previous_orders": previous_orders_seq,
+            "previous_orders_by_role": previous_downstream_orders,
+            "downstream_orders": downstream_orders_latest,
+        }
+        order_qty = agent.make_decision(
+            current_round=round_number,
+            current_demand=current_demand_value,
+            upstream_data=upstream_context,
+            local_state=local_state,
+        )
+        order_qty = max(0, int(round(order_qty)))
+        node_orders_new[node_key] = order_qty
+        node_state["last_order"] = order_qty
+        node_state["on_order"] = max(
+            0,
+            node_state.get("on_order", 0) + order_qty - node_state.get("incoming_shipments", 0),
+        )
+        entry = orders_by_role.get(node_key, {
+            "player_id": player.id,
+            "quantity": order_qty,
+            "comment": None,
+            "submitted_at": orders_timestamp_iso,
+        })
+        entry["player_id"] = player.id
+        entry["quantity"] = order_qty
+        entry.setdefault("submitted_at", orders_timestamp_iso)
+        orders_by_role[node_key] = entry
+        action_obj = actions_by_role.get(node_key)
+        if action_obj is None:
             action_obj = PlayerAction(
                 game_id=game.id,
                 round_id=round_record.id,
                 player_id=player.id,
                 action_type="order",
-                quantity=int(round(order_qty)),
+                quantity=order_qty,
                 created_at=timestamp,
             )
             db.add(action_obj)
-            actions_by_role[role] = action_obj
-        elif action_obj is not None:
-            action_obj.quantity = int(round(order_qty))
+        else:
+            action_obj.quantity = order_qty
+            action_obj.created_at = timestamp
+        actions_by_role[node_key] = action_obj
 
-        order_pipeline[role][-1] += order_qty
-        last_orders[role] = int(round(order_qty))
+    for role in ROLES_IN_ORDER:
+        orders_by_role.setdefault(
+            role,
+            {
+                "player_id": players_by_role.get(role).id if players_by_role.get(role) else None,
+                "quantity": engine.get(role, {}).get("last_order", 0),
+                "comment": None,
+                "submitted_at": orders_timestamp_iso,
+            },
+        )
 
-        holding_cost = holding_cost_rate * max(inv_after, 0)
-        backlog_cost = backlog_cost_rate * max(backlog_after, 0)
-
+    role_stats = {}
+    for role in ROLES_IN_ORDER:
+        node_state = engine.get(role, {})
+        before_inv = pre_inventory.get(role, 0)
+        before_backlog = pre_backlog.get(role, 0)
+        inv_after = node_state.get("inventory", 0)
+        backlog_after = node_state.get("backlog", 0)
+        order_qty = node_state.get("last_order", 0)
+        shipped_qty = shipments_planned.get(role, 0)
+        arrivals_qty = arrivals_map.get(role, 0)
+        demand_here = incoming_orders_map.get(role, 0)
+        holding_cost_delta = float(node_state.get("holding_cost", 0.0) - pre_costs.get(role, {}).get("holding_cost", 0.0))
+        backlog_cost_delta = float(node_state.get("backorder_cost", 0.0) - pre_costs.get(role, {}).get("backorder_cost", 0.0))
+        total_cost_delta = holding_cost_delta + backlog_cost_delta
         role_stats[role] = {
-            "inventory_before": inv_before,
+            "inventory_before": before_inv,
             "inventory_after": inv_after,
-            "backlog_before": backlog_before,
+            "backlog_before": before_backlog,
             "backlog_after": backlog_after,
             "demand": demand_here,
-            "shipped": shipped,
+            "shipped": shipped_qty,
+            "arrivals": arrivals_qty,
             "order": order_qty,
-            "holding_cost": round(holding_cost, 2),
-            "backlog_cost": round(backlog_cost, 2),
+            "holding_cost": round(holding_cost_delta, 2),
+            "backlog_cost": round(backlog_cost_delta, 2),
+            "total_cost": round(total_cost_delta, 2),
         }
 
-    state["inventory"] = {role: int(round(inventory[role])) for role in ROLES_IN_ORDER}
-    state["backlog"] = {role: int(round(backlog[role])) for role in ROLES_IN_ORDER}
+    state_inventory = state.setdefault("inventory", {})
+    state_backlog = state.setdefault("backlog", {})
+    state_last_orders = state.setdefault("last_orders", {})
+    state_incoming = state.setdefault("incoming_shipments", {})
+    state_pending_orders = state.setdefault("pending_orders", {})
+    for role in ROLES_IN_ORDER:
+        state_inventory[role] = int(role_stats[role]["inventory_after"])
+        state_backlog[role] = int(role_stats[role]["backlog_after"])
+        state_last_orders[role] = int(role_stats[role]["order"])
+        state_incoming[role] = int(role_stats[role]["arrivals"])
+        state_pending_orders[role] = int(role_stats[role]["demand"])
+
+    if pending is not None:
+        pending.clear()
 
     history_entry = {
         "round": round_number,
         "timestamp": timestamp.isoformat() + "Z",
         "demand": external_demand,
-        "orders": {role: dict(order_data) for role, order_data in orders_by_role.items()},
+        "orders": {role: dict(orders_by_role.get(role, {})) for role in ROLES_IN_ORDER},
         "inventory_positions": {role: role_stats[role]["inventory_after"] for role in ROLES_IN_ORDER},
         "backlogs": {role: role_stats[role]["backlog_after"] for role in ROLES_IN_ORDER},
         "node_states": {
@@ -1455,10 +1577,10 @@ def _finalize_round_if_ready(
                 "inventory_after": role_stats[role]["inventory_after"],
                 "backlog_before": role_stats[role]["backlog_before"],
                 "backlog_after": role_stats[role]["backlog_after"],
-                "incoming_order": inbound_demand.get(role, 0),
-                "arrivals": arrivals.get(role, 0),
+                "incoming_order": role_stats[role]["demand"],
+                "arrivals": role_stats[role]["arrivals"],
                 "shipped": role_stats[role]["shipped"],
-                "last_order": last_orders.get(role, 0),
+                "last_order": role_stats[role]["order"],
             }
             for role in ROLES_IN_ORDER
         },
@@ -1466,14 +1588,11 @@ def _finalize_round_if_ready(
             role: {
                 "holding_cost": role_stats[role]["holding_cost"],
                 "backlog_cost": role_stats[role]["backlog_cost"],
-                "total_cost": round(role_stats[role]["holding_cost"] + role_stats[role]["backlog_cost"], 2),
+                "total_cost": role_stats[role]["total_cost"],
             }
             for role in ROLES_IN_ORDER
         },
-        "total_cost": round(
-            sum(role_stats[role]["holding_cost"] + role_stats[role]["backlog_cost"] for role in ROLES_IN_ORDER),
-            2,
-        ),
+        "total_cost": round(sum(role_stats[role]["total_cost"] for role in ROLES_IN_ORDER), 2),
     }
 
     config.setdefault("history", []).append(history_entry)
@@ -1481,13 +1600,11 @@ def _finalize_round_if_ready(
 
     round_record.status = "completed"
     round_record.completed_at = timestamp
-    round_record.config = json.dumps(
-        {
-            "orders": orders_by_role,
-            "demand": external_demand,
-            "node_states": history_entry.get("node_states", {}),
-        }
-    )
+    round_record.config = {
+        "orders": {role: dict(orders_by_role.get(role, {})) for role in ROLES_IN_ORDER},
+        "demand": external_demand,
+        "node_states": history_entry.get("node_states", {}),
+    }
 
     if game.max_rounds and round_number >= game.max_rounds:
         game.status = DbGameStatus.FINISHED
@@ -1648,10 +1765,13 @@ def _replay_history_from_rounds(db: Session, game: DbGame) -> List[Dict[str, Any
     for record in records:
         payload: Dict[str, Any] = {}
         if record.config:
-            try:
-                payload = json.loads(record.config)
-            except json.JSONDecodeError:
-                payload = {}
+            if isinstance(record.config, dict):
+                payload = dict(record.config)
+            else:
+                try:
+                    payload = json.loads(record.config)
+                except json.JSONDecodeError:
+                    payload = {}
 
         history.append(
             {

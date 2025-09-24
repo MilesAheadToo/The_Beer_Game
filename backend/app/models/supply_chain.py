@@ -47,7 +47,9 @@ class GameRound(Base):
     customer_demand = Column(Integer, nullable=False)
     is_completed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
     completed_at = Column(DateTime, nullable=True)
+    ended_at = Column(DateTime, nullable=True)
 
     game = relationship("Game", back_populates="supply_chain_rounds")
     player_rounds = relationship("PlayerRound", back_populates="game_round")
