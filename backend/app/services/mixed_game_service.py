@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 import random
 import json
+from collections import defaultdict, deque
 
 from types import SimpleNamespace
 from sqlalchemy import inspect
@@ -64,6 +65,130 @@ class MixedGameService:
             except json.JSONDecodeError:
                 return {}
         return {}
+
+    @staticmethod
+    def _normalise_key(value: Any) -> str:
+        return str(value).strip().lower()
+
+    @staticmethod
+    def _validate_lanes(node_policies: Dict[str, Any], lanes: List[Dict[str, Any]]) -> None:
+        if not lanes:
+            return
+        known_nodes = {MixedGameService._normalise_key(name) for name in node_policies.keys()}
+        missing: List[str] = []
+        for lane in lanes:
+            upstream = MixedGameService._normalise_key(lane.get("from") or lane.get("upstream"))
+            downstream = MixedGameService._normalise_key(lane.get("to") or lane.get("downstream"))
+            if upstream not in known_nodes:
+                missing.append(upstream)
+            if downstream not in known_nodes:
+                missing.append(downstream)
+        if missing:
+            unique_missing = sorted(set(missing))
+            raise ValueError(
+                "Lane configuration references unknown nodes: "
+                + ", ".join(unique_missing)
+            )
+
+    @staticmethod
+    def _topological_order(shipments_map: Dict[str, List[str]], nodes: Sequence[str]) -> List[str]:
+        indegree: Dict[str, int] = {node: 0 for node in nodes}
+        for upstream, downstreams in shipments_map.items():
+            for downstream in downstreams:
+                indegree.setdefault(downstream, 0)
+                indegree[downstream] += 1
+                indegree.setdefault(upstream, 0)
+        queue: deque[str] = deque(sorted([node for node, deg in indegree.items() if deg == 0]))
+        order: List[str] = []
+        while queue:
+            node = queue.popleft()
+            order.append(node)
+            for neighbour in shipments_map.get(node, []):
+                indegree[neighbour] -= 1
+                if indegree[neighbour] == 0:
+                    queue.append(neighbour)
+        if len(order) != len(indegree):
+            # Cycle detected – fall back to existing node order to avoid crashing.
+            return list(nodes)
+        return order
+
+    @staticmethod
+    def _build_lane_views(node_policies: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+        lanes = cfg.get("lanes") or []
+        node_keys = [MixedGameService._normalise_key(k) for k in node_policies.keys()]
+        if not lanes and len(node_keys) >= 2:
+            # Fall back to a linear chain using node policy ordering
+            fallback: List[Dict[str, Any]] = []
+            for idx in range(len(node_keys) - 1, 0, -1):
+                upstream = node_keys[idx]
+                downstream = node_keys[idx - 1]
+                fallback.append({"from": upstream, "to": downstream})
+            lanes = fallback
+
+        shipments_map: Dict[str, List[str]] = defaultdict(list)
+        orders_map: Dict[str, List[str]] = defaultdict(list)
+        lane_records: List[Dict[str, Any]] = []
+        lanes_by_upstream: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        all_nodes = set(node_keys)
+        for lane in lanes:
+            upstream_raw = lane.get("from") or lane.get("upstream")
+            downstream_raw = lane.get("to") or lane.get("downstream")
+            if upstream_raw is None or downstream_raw is None:
+                continue
+            upstream = MixedGameService._normalise_key(upstream_raw)
+            downstream = MixedGameService._normalise_key(downstream_raw)
+            lane_record = {
+                "from": upstream,
+                "to": downstream,
+                "capacity": lane.get("capacity"),
+                "lead_time_days": lane.get("lead_time_days"),
+            }
+            shipments_map[upstream].append(downstream)
+            orders_map[downstream].append(upstream)
+            lane_records.append(lane_record)
+            lanes_by_upstream[upstream].append(lane_record)
+            all_nodes.add(upstream)
+            all_nodes.add(downstream)
+
+        market_nodes = [MixedGameService._normalise_key(n) for n in cfg.get("market_demand_nodes", []) if n]
+        if not market_nodes and lane_records:
+            downstream_only = {record["to"] for record in lane_records}
+            upstream_nodes = {record["from"] for record in lane_records}
+            inferred = sorted(downstream_only - upstream_nodes)
+            if inferred:
+                market_nodes = inferred
+
+        node_sequence = MixedGameService._topological_order(shipments_map, sorted(all_nodes)) if all_nodes else []
+        return {
+            "lanes": lane_records,
+            "shipments_map": shipments_map,
+            "orders_map": orders_map,
+            "market_nodes": market_nodes,
+            "all_nodes": sorted(all_nodes),
+            "node_sequence": node_sequence,
+            "lanes_by_upstream": lanes_by_upstream,
+        }
+
+    @staticmethod
+    def _ensure_engine_node(engine: Dict[str, Dict[str, Any]], node_policies: Dict[str, Any], node: str) -> Dict[str, Any]:
+        policy = node_policies.get(node, {})
+        info_delay = max(0, int(policy.get("info_delay", 0)))
+        ship_delay = max(0, int(policy.get("ship_delay", 0)))
+        state = engine.setdefault(node, {})
+        state.setdefault("inventory", int(policy.get("init_inventory", 12)))
+        state.setdefault("backlog", 0)
+        state.setdefault("on_order", 0)
+        state.setdefault("info_queue", [0] * info_delay if info_delay > 0 else [])
+        state.setdefault("ship_queue", [0] * ship_delay if ship_delay > 0 else [])
+        state.setdefault("last_order", 0)
+        state.setdefault("holding_cost", 0.0)
+        state.setdefault("backorder_cost", 0.0)
+        state.setdefault("total_cost", 0.0)
+        state.setdefault("incoming_orders", 0)
+        state.setdefault("incoming_shipments", 0)
+        state.setdefault("last_shipment_planned", 0)
+        state.setdefault("last_arrival", 0)
+        return state
 
     @staticmethod
     def _resolve_user_type(user: Optional[User]) -> Optional[UserTypeEnum]:
@@ -406,24 +531,27 @@ class MixedGameService:
         
         # Initialize simple engine state if not present
         cfg = game.config or {}
-        node_policies = cfg.get('node_policies', {})
-        roles = ['retailer','wholesaler','distributor','manufacturer']
-        # allow different naming in node_policies
-        if not node_policies:
-            node_policies = {r: {"info_delay": 2, "ship_delay": 2, "init_inventory": 12, "min_order_qty": 0} for r in roles}
-        engine = {
-            r: {
-                "inventory": int(node_policies.get(r, {}).get("init_inventory", 12)),
-                "backlog": 0,
-                "on_order": 0,
-                "info_queue": [0] * int(node_policies.get(r, {}).get("info_delay", 2)),
-                "ship_queue": [0] * int(node_policies.get(r, {}).get("ship_delay", 2)),
-                "last_order": 0,
-                "holding_cost": 0.0,
-                "backorder_cost": 0.0,
-                "total_cost": 0.0,
-            } for r in node_policies.keys()
+        raw_policies = cfg.get('node_policies', {})
+        if not raw_policies:
+            fallback_roles = ['retailer', 'wholesaler', 'distributor', 'manufacturer']
+            raw_policies = {
+                role: {"info_delay": 2, "ship_delay": 2, "init_inventory": 12, "min_order_qty": 0}
+                for role in fallback_roles
+            }
+        node_policies = {
+            self._normalise_key(name): dict(policy)
+            for name, policy in raw_policies.items()
         }
+        cfg['node_policies'] = node_policies
+
+        lanes = cfg.get('lanes') or []
+        self._validate_lanes(node_policies, lanes)
+
+        engine: Dict[str, Dict[str, Any]] = {}
+        lane_views = self._build_lane_views(node_policies, cfg)
+        for node in lane_views['all_nodes']:
+            self._ensure_engine_node(engine, node_policies, node)
+
         cfg['engine_state'] = engine
         game.config = cfg
         
@@ -488,81 +616,148 @@ class MixedGameService:
             self.db.commit()
             return None
         
-        # Get demand for this round (retailer)
-        demand = self.calculate_demand(game, game.current_round)
-        
-        # Create new round
+        # Determine demand for the round (market nodes)
+        demand_value = self.calculate_demand(game, game.current_round)
+
+        # Create new round record
         round = GameRound(
             game_id=game.id,
             round_number=game.current_round,
-            customer_demand=demand,
-            started_at=datetime.utcnow()
+            customer_demand=demand_value,
+            started_at=datetime.utcnow(),
         )
         self.db.add(round)
         self.db.flush()
-        
-        # Simple engine step using node_policies and global_policy costs
+
         cfg = game.config or {}
         engine = cfg.get('engine_state', {})
         node_policies = cfg.get('node_policies', {})
         global_policy = cfg.get('global_policy', {})
+        lane_views = self._build_lane_views(node_policies, cfg)
+        all_nodes = lane_views['all_nodes'] or list(node_policies.keys())
+        market_nodes_config = lane_views['market_nodes']
+        # Ensure engine entries exist for all nodes referenced by lanes
+        for node in all_nodes:
+            self._ensure_engine_node(engine, node_policies, node)
+
+        market_nodes = [n for n in (market_nodes_config or []) if n in engine]
+        if not market_nodes and all_nodes:
+            market_nodes = [all_nodes[-1]]
+
+        pending_demand: Dict[str, int] = defaultdict(int)
+        for node in market_nodes:
+            pending_demand[node] += int(demand_value)
+
+        # Orders flow upstream based on lanes
+        for lane in lane_views['lanes']:
+            upstream = lane['from']
+            downstream = lane['to']
+            if upstream not in engine or downstream not in engine:
+                continue
+            pending_demand[upstream] += int(engine[downstream].get('last_order', 0))
+
+        incoming_orders_map: Dict[str, int] = {}
+        for node in all_nodes:
+            state = engine[node]
+            policy = node_policies.get(node, {})
+            info_delay = max(0, int(policy.get('info_delay', 0)))
+            new_demand = int(pending_demand.get(node, 0))
+            if info_delay <= 0:
+                incoming = new_demand
+            else:
+                queue = state.setdefault('info_queue', [0] * info_delay)
+                queue.append(new_demand)
+                incoming = queue.pop(0) if queue else 0
+            state['incoming_orders'] = incoming
+            incoming_orders_map[node] = incoming
+
         hold_cost = float(global_policy.get('holding_cost', 0.5))
         back_cost = float(global_policy.get('backlog_cost', 1.0))
-        # roles chain inferred from node_policies order
-        chain = list(node_policies.keys())
-        if not chain:
-            chain = ['retailer','wholesaler','distributor','manufacturer']
-        # 1) incoming orders at retailer
-        if 'retailer' in engine:
-            engine['retailer']['info_queue'].append(int(demand))
-        # 2) propagate orders upstream
-        for i in range(1, len(chain)):
-            dn = chain[i-1]; up = chain[i]
-            qty = engine[dn]['last_order'] if dn in engine else 0
-            engine[up]['info_queue'].append(int(qty))
-        # 3) process info delays
-        for r in chain:
-            if r not in engine: continue
-            q = engine[r]['info_queue'].pop(0) if engine[r]['info_queue'] else 0
-            engine[r]['incoming_orders'] = q
-        # 4) ship downstream (limited by inventory + ship capacity via ship_queue length)
-        for i in range(len(chain)-2, -1, -1):
-            up = chain[i+1]; dn = chain[i]
-            if up not in engine or dn not in engine: continue
-            demand_here = engine[dn]['incoming_orders'] + engine[dn]['backlog']
-            ship_cap = None  # could read from node_policies
-            can_ship = min(engine[up]['inventory'], demand_here)
-            if ship_cap is not None:
-                can_ship = min(can_ship, ship_cap)
-            engine[dn]['ship_queue'].append(int(can_ship))
-            engine[up]['last_shipment_planned'] = int(can_ship)
-        # 5) process ship delays (arrivals)
-        for r in chain:
-            if r not in engine: continue
-            arriving = engine[r]['ship_queue'].pop(0) if engine[r]['ship_queue'] else 0
-            inv = engine[r]['inventory'] + arriving
-            demand_here = engine[r]['incoming_orders'] + engine[r]['backlog']
-            shipped = min(inv, demand_here)
-            engine[r]['inventory'] = inv - shipped
-            engine[r]['backlog'] = max(0, demand_here - shipped)
-            engine[r]['last_arrival'] = int(arriving)
-            # costs
-            engine[r]['holding_cost'] += engine[r]['inventory'] * hold_cost
-            engine[r]['backorder_cost'] += engine[r]['backlog'] * back_cost
-            engine[r]['total_cost'] = engine[r]['holding_cost'] + engine[r]['backorder_cost']
-        # 6) place orders based on simple heuristics (base-stock)
-        for r in chain:
-            if r not in engine: continue
-            st = engine[r]
-            pol = node_policies.get(r, {})
-            target = int(pol.get('init_inventory', 12) + 2 * pol.get('ship_delay', 2))
-            desired = target + st['backlog'] - st['inventory'] - st['on_order']
-            order = max(0, int(desired))
-            moq = int(pol.get('min_order_qty', 0))
+
+        demand_totals = {
+            node: engine[node]['backlog'] + incoming_orders_map.get(node, 0)
+            for node in all_nodes
+        }
+
+        inventory_available = {
+            node: engine[node]['inventory']
+            for node in all_nodes
+        }
+
+        shipments_inbound: Dict[str, int] = defaultdict(int)
+        shipments_planned: Dict[str, int] = defaultdict(int)
+        node_sequence = lane_views['node_sequence'] or all_nodes
+        lanes_by_upstream = lane_views.get('lanes_by_upstream', {})
+
+        for upstream in node_sequence:
+            for lane in lanes_by_upstream.get(upstream, []):
+                downstream = lane['to']
+                if downstream not in demand_totals:
+                    continue
+                remaining_demand = max(0, demand_totals[downstream] - shipments_inbound[downstream])
+                if remaining_demand <= 0:
+                    continue
+                available = inventory_available.get(upstream, 0)
+                if available <= 0:
+                    continue
+                ship_qty = min(available, remaining_demand)
+                capacity = lane.get('capacity')
+                if capacity is not None:
+                    try:
+                        ship_qty = min(ship_qty, int(capacity))
+                    except (TypeError, ValueError):
+                        pass
+                if ship_qty <= 0:
+                    continue
+                inventory_available[upstream] -= ship_qty
+                shipments_inbound[downstream] += ship_qty
+                shipments_planned[upstream] += ship_qty
+
+        for node, remaining in inventory_available.items():
+            if node in engine:
+                engine[node]['inventory'] = remaining
+
+        arrivals_map: Dict[str, int] = {}
+        for node in all_nodes:
+            state = engine[node]
+            policy = node_policies.get(node, {})
+            ship_delay = max(0, int(policy.get('ship_delay', 0)))
+            planned = int(shipments_inbound.get(node, 0))
+            if ship_delay <= 0:
+                arriving = planned
+            else:
+                queue = state.setdefault('ship_queue', [0] * ship_delay)
+                queue.append(planned)
+                arriving = queue.pop(0) if queue else 0
+            state['incoming_shipments'] = arriving
+            state['last_shipment_planned'] = int(shipments_planned.get(node, 0))
+            arrivals_map[node] = arriving
+
+        for node in all_nodes:
+            state = engine[node]
+            arriving = arrivals_map.get(node, 0)
+            available_inventory = max(0, state.get('inventory', 0)) + arriving
+            demand_here = demand_totals.get(node, 0)
+            shipped = min(available_inventory, demand_here)
+            state['inventory'] = available_inventory - shipped
+            state['backlog'] = max(0, demand_here - shipped)
+            state['last_arrival'] = arriving
+            state['holding_cost'] += state['inventory'] * hold_cost
+            state['backorder_cost'] += state['backlog'] * back_cost
+            state['total_cost'] = state['holding_cost'] + state['backorder_cost']
+
+        for node in all_nodes:
+            state = engine[node]
+            policy = node_policies.get(node, {})
+            target_inventory = int(policy.get('init_inventory', 12) + 2 * policy.get('ship_delay', 2))
+            desired = target_inventory + state['backlog'] - state['inventory'] - state['on_order']
+            order_qty = max(0, int(desired))
+            moq = int(policy.get('min_order_qty', 0) or 0)
             if moq:
-                order = ((order + moq - 1) // moq) * moq
-            st['last_order'] = order
-            st['on_order'] = max(0, st['on_order'] + order - st.get('incoming_shipments', 0))
+                order_qty = ((order_qty + moq - 1) // moq) * moq
+            state['last_order'] = order_qty
+            state['on_order'] = max(0, state['on_order'] + order_qty - state.get('incoming_shipments', 0))
+
         cfg['engine_state'] = engine
         game.config = cfg
 
