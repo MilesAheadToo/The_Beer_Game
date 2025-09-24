@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Any, Sequence
+from typing import List, Dict, Optional, Any, Sequence, Set
 from datetime import datetime, timedelta
 from enum import Enum
 import random
@@ -185,6 +185,17 @@ class MixedGameService:
         state.setdefault("backlog", 0)
         state.setdefault("on_order", 0)
         state.setdefault("info_queue", [0] * info_delay if info_delay > 0 else [])
+        if info_delay > 0:
+            detail_queue = state.setdefault(
+                "info_detail_queue",
+                [{} for _ in range(info_delay)],
+            )
+            if len(detail_queue) < info_delay:
+                detail_queue.extend({} for _ in range(info_delay - len(detail_queue)))
+            elif len(detail_queue) > info_delay:
+                state["info_detail_queue"] = detail_queue[-info_delay:]
+        else:
+            state.setdefault("info_detail_queue", [])
         state.setdefault("ship_queue", [0] * ship_delay if ship_delay > 0 else [])
         state.setdefault("last_order", 0)
         state.setdefault("holding_cost", 0.0)
@@ -194,6 +205,7 @@ class MixedGameService:
         state.setdefault("incoming_shipments", 0)
         state.setdefault("last_shipment_planned", 0)
         state.setdefault("last_arrival", 0)
+        state.setdefault("backlog_breakdown", {})
         return state
 
     @staticmethod
@@ -668,129 +680,240 @@ class MixedGameService:
             node for node, node_type in node_types_map.items() if node_type == 'market_supply'
         }
 
-        pending_demand: Dict[str, int] = defaultdict(int)
-        for node in market_demand_nodes:
-            if node in engine:
-                pending_demand[node] += int(demand_value)
-
-        # Orders flow upstream based on lanes (excluding pure demand sinks)
-        for lane in lane_views['lanes']:
-            upstream = lane['from']
-            downstream = lane['to']
-            if upstream not in engine or downstream not in engine:
-                continue
-            downstream_type = node_types_map.get(downstream, '')
-            if downstream_type == 'market_demand':
-                continue
-            pending_demand[upstream] += int(engine[downstream].get('last_order', 0))
-
-        incoming_orders_map: Dict[str, int] = {}
-        for node in all_nodes:
-            state = engine[node]
-            policy = node_policies.get(node, {})
-            info_delay = max(0, int(policy.get('info_delay', 0)))
-            new_demand = int(pending_demand.get(node, 0))
-            if info_delay <= 0:
-                incoming = new_demand
-            else:
-                queue = state.setdefault('info_queue', [0] * info_delay)
-                queue.append(new_demand)
-                incoming = queue.pop(0) if queue else 0
-            state['incoming_orders'] = incoming
-            incoming_orders_map[node] = incoming
-
         hold_cost = float(global_policy.get('holding_cost', 0.5))
         back_cost = float(global_policy.get('backlog_cost', 1.0))
 
-        demand_totals = {
-            node: engine[node]['backlog'] + incoming_orders_map.get(node, 0)
-            for node in all_nodes
-        }
+        demand_inputs: Dict[str, int] = defaultdict(int)
+        demand_detail_inputs: Dict[str, Dict[str, int]] = {}
 
-        inventory_available = {
-            node: engine[node]['inventory']
-            for node in all_nodes
-        }
-
-        shipments_inbound: Dict[str, int] = defaultdict(int)
-        shipments_planned: Dict[str, int] = defaultdict(int)
-        node_sequence = lane_views['node_sequence'] or all_nodes
-        lanes_by_upstream = lane_views.get('lanes_by_upstream', {})
-
-        for upstream in node_sequence:
-            upstream_type = node_types_map.get(upstream, '')
-            for lane in lanes_by_upstream.get(upstream, []):
-                downstream = lane['to']
-                if downstream not in demand_totals:
-                    continue
-                remaining_demand = max(0, demand_totals[downstream] - shipments_inbound[downstream])
-                if remaining_demand <= 0:
-                    continue
-                capacity = lane.get('capacity')
-                if capacity is not None:
-                    try:
-                        remaining_demand = min(remaining_demand, int(capacity))
-                    except (TypeError, ValueError):
-                        pass
-
-                if upstream_type == 'market_supply':
-                    ship_qty = remaining_demand
-                else:
-                    available = inventory_available.get(upstream, 0)
-                    if available <= 0:
-                        continue
-                    ship_qty = min(available, remaining_demand)
-
-                if ship_qty <= 0:
-                    continue
-
-                if upstream_type != 'market_supply':
-                    inventory_available[upstream] -= ship_qty
-                shipments_inbound[downstream] += ship_qty
-                shipments_planned[upstream] += ship_qty
-
-        for node, remaining in inventory_available.items():
+        for node in market_demand_nodes:
             if node in engine:
-                engine[node]['inventory'] = remaining
+                demand_inputs[node] += int(demand_value)
+
+        shipments_map = lane_views.get('shipments_map', {})
+        orders_map = lane_views.get('orders_map', {})
+        lanes_by_upstream = lane_views.get('lanes_by_upstream', {})
+        node_sequence = lane_views['node_sequence'] or all_nodes
+
+        processing_order: List[str] = []
+        seen_nodes: Set[str] = set()
+        for node in reversed(node_sequence):
+            if node in engine and node not in seen_nodes:
+                processing_order.append(node)
+                seen_nodes.add(node)
+        for node in reversed(all_nodes):
+            if node in engine and node not in seen_nodes:
+                processing_order.append(node)
+                seen_nodes.add(node)
 
         arrivals_map: Dict[str, int] = {}
         for node in all_nodes:
             state = engine[node]
             policy = node_policies.get(node, {})
-            ship_delay = max(0, int(policy.get('ship_delay', 0)))
-            planned = int(shipments_inbound.get(node, 0))
-            if ship_delay <= 0:
-                arriving = planned
+            info_delay = max(0, int(policy.get('info_delay', 0)))
+            if info_delay <= 0:
+                state['info_queue'] = []
+                state['info_detail_queue'] = []
             else:
-                queue = state.setdefault('ship_queue', [0] * ship_delay)
-                queue.append(planned)
-                arriving = queue.pop(0) if queue else 0
-            state['incoming_shipments'] = arriving
-            state['last_shipment_planned'] = int(shipments_planned.get(node, 0))
-            arrivals_map[node] = arriving
+                queue = state.get('info_queue')
+                if not isinstance(queue, list):
+                    queue = []
+                queue = [int(x) for x in queue]
+                if len(queue) < info_delay:
+                    queue = [0] * (info_delay - len(queue)) + queue
+                elif len(queue) > info_delay:
+                    queue = queue[-info_delay:]
+                state['info_queue'] = queue
 
-        for node in all_nodes:
-            node_type = node_types_map.get(node, '')
+                detail_queue = state.get('info_detail_queue')
+                cleaned_detail: List[Dict[str, int]] = []
+                if isinstance(detail_queue, list):
+                    for entry in detail_queue:
+                        if isinstance(entry, dict):
+                            cleaned_detail.append({str(k): int(v) for k, v in entry.items()})
+                        else:
+                            cleaned_detail.append({})
+                while len(cleaned_detail) < info_delay:
+                    cleaned_detail.insert(0, {})
+                if len(cleaned_detail) > info_delay:
+                    cleaned_detail = cleaned_detail[-info_delay:]
+                state['info_detail_queue'] = cleaned_detail
+
+            ship_delay = max(0, int(policy.get('ship_delay', 0)))
+            ship_queue = state.get('ship_queue')
+            if ship_delay <= 0:
+                state['ship_queue'] = []
+                arriving = 0
+            else:
+                if not isinstance(ship_queue, list):
+                    ship_queue = [0] * ship_delay
+                else:
+                    ship_queue = [int(x) for x in ship_queue]
+                if len(ship_queue) < ship_delay:
+                    ship_queue = [0] * (ship_delay - len(ship_queue)) + ship_queue
+                elif len(ship_queue) > ship_delay:
+                    ship_queue = ship_queue[-ship_delay:]
+                arriving = ship_queue.pop(0) if ship_queue else 0
+                state['ship_queue'] = ship_queue
+
+            arrivals_map[node] = int(arriving)
+            state['incoming_shipments'] = int(arriving)
+            state['last_arrival'] = int(arriving)
+
+            backlog_breakdown = state.get('backlog_breakdown')
+            if not isinstance(backlog_breakdown, dict):
+                backlog_breakdown = {}
+            else:
+                backlog_breakdown = {
+                    str(k): int(v)
+                    for k, v in backlog_breakdown.items()
+                    if int(v) > 0
+                }
+            state['backlog_breakdown'] = backlog_breakdown
+            state['backlog'] = int(state.get('backlog', 0))
+            state['inventory'] = int(state.get('inventory', 0))
+            state['on_order'] = int(state.get('on_order', 0))
+
+        shipments_inbound: Dict[str, int] = defaultdict(int)
+
+        for node in processing_order:
+            if node not in engine:
+                continue
+
             state = engine[node]
+            policy = node_policies.get(node, {})
+            node_type = node_types_map.get(node, '')
             arriving = arrivals_map.get(node, 0)
+            available_inventory = max(0, state.get('inventory', 0)) + arriving
+
+            info_delay = max(0, int(policy.get('info_delay', 0)))
+            incoming_raw = int(demand_inputs.get(node, 0))
+            incoming_detail_raw = demand_detail_inputs.get(node, {})
+            if info_delay > 0:
+                queue = state.get('info_queue', [])
+                queue.append(incoming_raw)
+                incoming_visible = queue.pop(0) if queue else 0
+                state['info_queue'] = queue
+
+                detail_queue = state.get('info_detail_queue', [])
+                detail_queue.append({str(k): int(v) for k, v in incoming_detail_raw.items() if int(v) > 0})
+                matured_detail = detail_queue.pop(0) if detail_queue else {}
+                state['info_detail_queue'] = detail_queue
+            else:
+                incoming_visible = incoming_raw
+                matured_detail = {
+                    str(k): int(v)
+                    for k, v in incoming_detail_raw.items()
+                    if int(v) > 0
+                }
+                state['info_queue'] = []
+                state['info_detail_queue'] = []
+
+            demand_inputs.pop(node, None)
+            demand_detail_inputs.pop(node, None)
+
+            incoming_visible = max(0, int(incoming_visible))
+            state['incoming_orders'] = incoming_visible
+
+            downstream_nodes = shipments_map.get(node, [])
+            backlog_breakdown = state.get('backlog_breakdown', {})
+            backlog_breakdown = {
+                str(k): int(v)
+                for k, v in backlog_breakdown.items()
+                if int(v) > 0
+            }
+            backlog_value = int(state.get('backlog', 0))
+            if sum(backlog_breakdown.values()) != backlog_value:
+                if backlog_value > 0 and downstream_nodes:
+                    equal_share_backlog = backlog_value // len(downstream_nodes)
+                    backlog_remainder = backlog_value % len(downstream_nodes)
+                    backlog_breakdown = {}
+                    for idx, downstream in enumerate(downstream_nodes):
+                        allocation = equal_share_backlog + (1 if idx < backlog_remainder else 0)
+                        if allocation > 0:
+                            backlog_breakdown[downstream] = allocation
+                else:
+                    backlog_breakdown = {}
+            state['backlog_breakdown'] = backlog_breakdown
+            backlog_total_prev = backlog_value
+            total_demand_value = backlog_total_prev + incoming_visible
+
+            demand_distribution: Dict[str, int] = {}
+            for downstream, amount in backlog_breakdown.items():
+                if amount > 0:
+                    demand_distribution[downstream] = demand_distribution.get(downstream, 0) + amount
+            for downstream, amount in matured_detail.items():
+                qty = int(amount)
+                if qty > 0:
+                    demand_distribution[downstream] = demand_distribution.get(downstream, 0) + qty
+            if downstream_nodes:
+                for downstream in downstream_nodes:
+                    demand_distribution.setdefault(downstream, 0)
+            distribution_sum = sum(demand_distribution.values())
+            difference = total_demand_value - distribution_sum
+            if difference > 0 and downstream_nodes:
+                equal_share = difference // len(downstream_nodes)
+                remainder = difference % len(downstream_nodes)
+                for idx, downstream in enumerate(downstream_nodes):
+                    add_amount = equal_share + (1 if idx < remainder else 0)
+                    if add_amount > 0:
+                        demand_distribution[downstream] = demand_distribution.get(downstream, 0) + add_amount
+                distribution_sum = sum(demand_distribution.values())
+
+            shipments_per_downstream: Dict[str, int] = {}
+            if node_type == 'market_demand' or not downstream_nodes:
+                ship_total = min(available_inventory, total_demand_value)
+                state['inventory'] = max(0, available_inventory - ship_total)
+                state['backlog'] = max(0, total_demand_value - ship_total)
+                state['backlog_breakdown'] = {}
+            elif node_type == 'market_supply':
+                for downstream in downstream_nodes:
+                    shipments_per_downstream[downstream] = demand_distribution.get(downstream, 0)
+                ship_total = sum(shipments_per_downstream.values())
+                state['inventory'] = 0
+                state['backlog'] = max(0, total_demand_value - ship_total)
+                state['backlog_breakdown'] = {}
+            else:
+                remaining_inventory = available_inventory
+                backlog_remaining: Dict[str, int] = {}
+                for lane in lanes_by_upstream.get(node, []):
+                    downstream = lane['to']
+                    need = demand_distribution.get(downstream, 0) - shipments_per_downstream.get(downstream, 0)
+                    if need <= 0:
+                        continue
+                    capacity = lane.get('capacity')
+                    if capacity is not None:
+                        try:
+                            need = min(need, int(capacity))
+                        except (TypeError, ValueError):
+                            pass
+                    ship_qty = min(remaining_inventory, max(0, need))
+                    if ship_qty <= 0:
+                        continue
+                    shipments_per_downstream[downstream] = shipments_per_downstream.get(downstream, 0) + ship_qty
+                    remaining_inventory -= ship_qty
+                    if remaining_inventory <= 0:
+                        break
+                ship_total = sum(shipments_per_downstream.values())
+                for downstream, demand_value in demand_distribution.items():
+                    sent = shipments_per_downstream.get(downstream, 0)
+                    remaining = max(0, demand_value - sent)
+                    if remaining > 0:
+                        backlog_remaining[downstream] = remaining
+                state['inventory'] = max(0, remaining_inventory)
+                state['backlog'] = sum(backlog_remaining.values())
+                state['backlog_breakdown'] = backlog_remaining
+
+            state['last_shipment_planned'] = int(ship_total)
+            for downstream, qty in shipments_per_downstream.items():
+                if qty > 0:
+                    shipments_inbound[downstream] += int(qty)
 
             if node_type == 'market_supply':
-                state['inventory'] = 0
-                state['backlog'] = 0
-                state['last_arrival'] = arriving
                 state['holding_cost'] = 0.0
                 state['backorder_cost'] = 0.0
                 state['total_cost'] = 0.0
-                continue
-
-            available_inventory = max(0, state.get('inventory', 0)) + arriving
-            demand_here = demand_totals.get(node, 0)
-            shipped = min(available_inventory, demand_here)
-            state['inventory'] = available_inventory - shipped
-            state['backlog'] = max(0, demand_here - shipped)
-            state['last_arrival'] = arriving
-
-            if node_type == 'market_demand':
+            elif node_type == 'market_demand':
                 state['holding_cost'] = 0.0
                 state['backorder_cost'] = state['backlog'] * back_cost
                 state['total_cost'] = state['backorder_cost']
@@ -799,23 +922,52 @@ class MixedGameService:
                 state['backorder_cost'] += state['backlog'] * back_cost
                 state['total_cost'] = state['holding_cost'] + state['backorder_cost']
 
-        for node in all_nodes:
-            node_type = node_types_map.get(node, '')
-            if node_type in {"market_demand", "market_supply"}:
-                engine[node]['last_order'] = 0
-                engine[node]['on_order'] = 0
-                continue
+            order_qty = 0
+            if node_type not in {'market_demand', 'market_supply'}:
+                target_inventory = int(policy.get('init_inventory', 12) + 2 * policy.get('ship_delay', 2))
+                desired = target_inventory + state['backlog'] - state['inventory'] - state.get('on_order', 0)
+                order_qty = max(0, int(desired))
+                moq = int(policy.get('min_order_qty', 0) or 0)
+                if moq:
+                    order_qty = ((order_qty + moq - 1) // moq) * moq
+                state['last_order'] = order_qty
+                on_order = int(state.get('on_order', 0))
+                on_order = on_order - arrivals_map.get(node, 0) + order_qty
+                state['on_order'] = max(0, on_order)
+            else:
+                state['last_order'] = 0
+                state['on_order'] = 0
 
+            if order_qty > 0:
+                upstream_nodes = orders_map.get(node, [])
+                if upstream_nodes:
+                    share = order_qty // len(upstream_nodes)
+                    remainder = order_qty % len(upstream_nodes)
+                    for idx, upstream in enumerate(upstream_nodes):
+                        allocation = share + (1 if idx < remainder else 0)
+                        if allocation <= 0:
+                            continue
+                        demand_inputs[upstream] += allocation
+                        detail_map = demand_detail_inputs.setdefault(upstream, {})
+                        detail_map[node] = detail_map.get(node, 0) + allocation
+
+        for node in all_nodes:
             state = engine[node]
             policy = node_policies.get(node, {})
-            target_inventory = int(policy.get('init_inventory', 12) + 2 * policy.get('ship_delay', 2))
-            desired = target_inventory + state['backlog'] - state['inventory'] - state['on_order']
-            order_qty = max(0, int(desired))
-            moq = int(policy.get('min_order_qty', 0) or 0)
-            if moq:
-                order_qty = ((order_qty + moq - 1) // moq) * moq
-            state['last_order'] = order_qty
-            state['on_order'] = max(0, state['on_order'] + order_qty - state.get('incoming_shipments', 0))
+            ship_delay = max(0, int(policy.get('ship_delay', 0)))
+            planned = int(shipments_inbound.get(node, 0))
+            if ship_delay > 0:
+                queue = state.get('ship_queue', [])
+                if not isinstance(queue, list):
+                    queue = []
+                while len(queue) < ship_delay - 1:
+                    queue.insert(0, 0)
+                queue.append(planned)
+                state['ship_queue'] = queue
+            elif planned > 0:
+                state['incoming_shipments'] = state.get('incoming_shipments', 0) + planned
+                state['last_arrival'] = state['incoming_shipments']
+                state['inventory'] = state.get('inventory', 0) + planned
 
         cfg['engine_state'] = engine
         game.config = cfg
