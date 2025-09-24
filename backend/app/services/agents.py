@@ -1,4 +1,5 @@
 from typing import List, Dict, Optional, Any, Tuple
+import json
 import random
 import statistics
 from enum import Enum
@@ -460,13 +461,46 @@ class BeerGameAgent:
         backlog_val = max(0.0, float(backlog or 0.0))
         inventory_val = max(0.0, float(inventory or 0.0))
 
-        # If we have no signal at all, fall back to previous order
-        if demand == 0.0 and backlog_val == 0.0 and inventory_val == 0.0:
-            return max(0, int(round(self.last_order)))
+        previous_order = max(0, int(round(self.last_order)))
+        no_signal = demand == 0.0 and backlog_val == 0.0 and inventory_val == 0.0
 
         shortfall = max(0.0, backlog_val + demand - inventory_val)
         target = max(demand, shortfall)
-        return max(0, int(round(target)))
+
+        if no_signal:
+            order_qty = previous_order
+        else:
+            order_qty = max(0, int(round(target)))
+
+        requested_ship = backlog_val + demand
+        if requested_ship > 0:
+            ship_plan = int(round(min(inventory_val, requested_ship)))
+        else:
+            ship_plan = int(round(min(inventory_val, float(previous_order))))
+
+        reasoning_payload = {
+            "order_upstream": int(order_qty),
+            "ship_to_downstream": max(0, ship_plan),
+            "rationale": {
+                "strategy": "naive_fill_rate",
+                "state": {
+                    "current_demand": demand,
+                    "backlog": backlog_val,
+                    "inventory": inventory_val,
+                    "previous_order": previous_order,
+                    "shortfall": shortfall,
+                    "target_order": max(0.0, float(target)),
+                    "used_previous_order": no_signal,
+                },
+            },
+        }
+
+        try:
+            self.last_explanation = json.dumps(reasoning_payload, separators=(",", ":"))
+        except (TypeError, ValueError):  # pragma: no cover - safety fallback
+            self.last_explanation = str(reasoning_payload)
+
+        return order_qty
     
     def _bullwhip_strategy(self, current_demand: Optional[int], upstream_data: Optional[Dict]) -> int:
         """Tend to over-order when demand increases."""
