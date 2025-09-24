@@ -1,10 +1,13 @@
 """Instruction payload for the Daybreak Beer Game Strategist assistant."""
 
 # The instruction block below is copied verbatim from the Daybreak Beer Game
-# Strategist documentation shared with the team. It encodes the guard-rails and
-# behavioural expectations for the custom GPT that powers the Beer Game agent.
+# Strategist documentation shared with the team.  It encodes all guard-rails
+# and behavioural expectations for the custom GPT that powers the Beer Game
+# agent.  The assistant API expects these instructions when the assistant is
+# created, so we expose them as a dedicated constant that can be imported by
+# any integration point (backend services, utilities, or ad-hoc scripts).
 
-DAYBREAK_STRATEGIST_INSTRUCTIONS = """
+DAYBREAK_STRATEGIST_INSTRUCTIONS = '''
 # Daybreak Beer Game Strategist — Ready-to-Paste Instructions
 
 Use this as the `instructions` for your Assistant when creating it via the OpenAI API. It encapsulates the rules, toggles, outputs, and safety rails so the model behaves like the Beer Game agent.
@@ -101,10 +104,124 @@ The user will provide a JSON state snapshot like:
 
 ---
 
-## Notes
+# Tiny Python Turn API
 
-* These instructions assume deterministic lead times; adapt wording if the environment introduces stochastic delays.
-* Persist your assistant or thread IDs if you plan to reuse the same Strategist session across multiple simulations.
-"""
+This helper lets you create the assistant once, then step the game week-by-week. It **does not** simulate the environment; it only structures calls and responses.
+
+````python
+# pip install openai
+import os
+from typing import Dict, Any
+from openai import OpenAI
 
 ASSISTANT_NAME = "Daybreak Beer Game Strategist"
+MODEL = "gpt-5-reasoning"  # choose any reasoning model available to your account
+
+INSTRUCTIONS = r"""
+[Paste the full instruction block above verbatim]
+"""
+
+class BeerGameAgent:
+    def __init__(self, api_key: str | None = None, assistant_id: str | None = None):
+        self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
+        self.assistant_id = assistant_id or self._create_assistant()
+        self.thread_id = None
+
+    def _create_assistant(self) -> str:
+        asst = self.client.beta.assistants.create(
+            name=ASSISTANT_NAME,
+            model=MODEL,
+            instructions=INSTRUCTIONS,
+        )
+        return asst.id
+
+    def start(self):
+        """Start a fresh conversation thread for a new game run."""
+        thread = self.client.beta.threads.create()
+        self.thread_id = thread.id
+        return self.thread_id
+
+    def decide(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """Send one turn's state and get the agent's JSON decision.
+        `state` must match the schema in the Instructions under 'Inputs You Will Receive Each Turn'.
+        Returns a dict with keys: order_upstream, ship_to_downstream, rationale.
+        """
+        assert self.thread_id, "Call start() before decide()."
+
+        # Post state as a fenced JSON block to help parsing
+        content = (
+            "Here is the current state as JSON. Respond ONLY with the required JSON object.\n\n"
+            "```json\n" + __import__("json").dumps(state) + "\n```"
+        )
+        self.client.beta.threads.messages.create(
+            thread_id=self.thread_id,
+            role="user",
+            content=content,
+        )
+        run = self.client.beta.threads.runs.create_and_poll(
+            thread_id=self.thread_id,
+            assistant_id=self.assistant_id,
+        )
+        # Fetch latest assistant message
+        msgs = self.client.beta.threads.messages.list(thread_id=self.thread_id, limit=1)
+        text = msgs.data[0].content[0].text.value
+
+        # Parse JSON safely (assistant promised strict JSON)
+        import json
+        try:
+            decision = json.loads(text)
+        except json.JSONDecodeError:
+            # Attempt to extract JSON object heuristically
+            import re
+            match = re.search(r"\{[\s\S]*\}", text)
+            if not match:
+                raise ValueError(f"Assistant did not return JSON: {text}")
+            decision = json.loads(match.group(0))
+        # Basic validation
+        for key in ("order_upstream", "ship_to_downstream", "rationale"):
+            if key not in decision:
+                raise ValueError(f"Missing key '{key}' in decision: {decision}")
+        return decision
+
+# --- Example usage ---
+if __name__ == "__main__":
+    agent = BeerGameAgent()
+    agent.start()
+
+    # Example: Retailer, week 1, no sharing
+    state = {
+        "role": "retailer",
+        "week": 1,
+        "toggles": {
+            "customer_demand_history_sharing": False,
+            "volatility_signal_sharing": False,
+            "downstream_inventory_visibility": False
+        },
+        "parameters": {
+            "holding_cost": 0.5,
+            "backlog_cost": 0.5,
+            "L_order": 2,
+            "L_ship": 2,
+            "L_prod": 4
+        },
+        "local_state": {
+            "on_hand": 12,
+            "backlog": 0,
+            "incoming_orders_this_week": 4,          # customer demand at retailer
+            "received_shipment_this_week": 0,
+            "pipeline_orders_upstream": [0, 0],     # length L_order
+            "pipeline_shipments_inbound": [0, 0],   # length L_ship
+            "optional": {}
+        }
+    }
+
+    decision = agent.decide(state)
+    print(decision)
+````
+
+## Notes
+
+* This helper **does not** maintain or update the environment. Use your sim to advance pipelines, resolve shipments, update backlogs/inventory, then call `decide()` again next week with the new snapshot.
+* To reuse the same assistant across runs, persist `assistant_id` and pass it back into `BeerGameAgent(api_key, assistant_id=...)`. Persisting the thread is optional; start a new one for new games.
+* If you later enable tools (e.g., code interpreter) or attach files, add them at assistant creation.
+'''
