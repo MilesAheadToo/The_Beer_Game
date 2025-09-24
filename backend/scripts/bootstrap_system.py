@@ -15,6 +15,10 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.append(str(BACKEND_ROOT))
 
+REPO_ROOT = BACKEND_ROOT.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.append(str(REPO_ROOT))
+
 from sqlalchemy.orm import sessionmaker
 
 from app.db.init_db import init_db

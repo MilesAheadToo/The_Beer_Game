@@ -20,6 +20,10 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 if str(BACKEND_ROOT) not in sys.path:
     sys.path.append(str(BACKEND_ROOT))
 
+REPO_ROOT = BACKEND_ROOT.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.append(str(REPO_ROOT))
+
 SCRIPTS_ROOT = Path(__file__).resolve().parent
 TRAINING_SCRIPTS_DIR = SCRIPTS_ROOT / "training"
 

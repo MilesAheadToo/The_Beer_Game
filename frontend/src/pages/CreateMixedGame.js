@@ -37,8 +37,7 @@ import {
   RadioGroup,
   Radio,
   Spinner,
-  Checkbox,
-  Spinner
+  Checkbox
 
 } from '@chakra-ui/react';
 import PageLayout from '../components/PageLayout';
