@@ -42,6 +42,15 @@ import PricingConfigForm from '../components/PricingConfigForm';
 import { api, mixedGameApi } from '../services/api';
 import { getModelStatus } from '../services/modelService';
 import { useSystemConfig } from '../contexts/SystemConfigContext.jsx';
+import {
+  PRIMARY_FONT,
+  CARD_BG_LIGHT,
+  CARD_BG_DARK,
+  BORDER_LIGHT,
+  BORDER_DARK,
+  TIMELINE_BG_LIGHT,
+  TIMELINE_BG_DARK,
+} from '../theme/constants';
 
 const playerRoles = [
   { value: 'retailer', label: 'Retailer' },
@@ -118,10 +127,6 @@ const strategyDescriptions = {
   DAYBREAK_DTCE_CENTRAL: daybreakStrategyDescriptions.DAYBREAK_DTCE_CENTRAL,
   DAYBREAK_DTCE_GLOBAL: daybreakStrategyDescriptions.DAYBREAK_DTCE_GLOBAL,
 };
-
-const PRIMARY_FONT = "'Trebuchet MS', 'TrebuchetMS', 'Lucida Sans Unicode', 'Lucida Grande', sans-serif";
-const cardBgLight = 'green.50';
-const cardBgDark = 'green.900';
 
 const StyledFormLabel = (props) => (
   <FormLabel fontWeight="semibold" fontSize="md" {...props} />
@@ -372,8 +377,8 @@ const CreateMixedGame = () => {
   const [nodePolicies, setNodePolicies] = useState(() => JSON.parse(JSON.stringify(DEFAULT_NODE_POLICIES)));
   // Policy/Simulation settings (bounded)
   const [policy, setPolicy] = useState(() => ({ ...DEFAULT_POLICY }));
-  const cardBg = useColorModeValue(cardBgLight, cardBgDark);
-  const borderColor = useColorModeValue('green.200', 'green.700');
+  const cardBg = useColorModeValue(CARD_BG_LIGHT, CARD_BG_DARK);
+  const borderColor = useColorModeValue(BORDER_LIGHT, BORDER_DARK);
   const { user } = useAuth();
   const [modelStatus, setModelStatus] = useState(null);
   const { ranges: systemRanges } = useSystemConfig();
