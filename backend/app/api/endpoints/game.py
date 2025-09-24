@@ -4,7 +4,9 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from app.db.session import get_db
-from app.models.supply_chain import Game as GameModel, Player, GameRound, PlayerRound
+from app.models.game import Game as GameModel
+from app.models.player import Player
+from app.models.supply_chain import GameRound, PlayerRound
 from app.schemas.game import (
     GameCreate, GameUpdate,
     PlayerCreate, PlayerUpdate, Player as PlayerSchema,

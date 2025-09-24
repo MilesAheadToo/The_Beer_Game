@@ -8,6 +8,26 @@ from .game import (
 from .agent_config import AgentConfig, AgentConfigCreate, AgentConfigUpdate, AgentConfigInDBBase as AgentConfigInDB
 from .dashboard import DashboardResponse, PlayerMetrics, TimeSeriesPoint
 from .group import Group, GroupCreate, GroupUpdate
+from .supply_chain_config import (
+    SupplyChainConfig,
+    SupplyChainConfigCreate,
+    SupplyChainConfigUpdate,
+    Item,
+    ItemCreate,
+    ItemUpdate,
+    Node,
+    NodeCreate,
+    NodeUpdate,
+    Lane,
+    LaneCreate,
+    LaneUpdate,
+    ItemNodeConfig,
+    ItemNodeConfigCreate,
+    ItemNodeConfigUpdate,
+    MarketDemand,
+    MarketDemandCreate,
+    MarketDemandUpdate,
+)
 
 # Re-export all schemas
 __all__ = [
@@ -28,4 +48,12 @@ __all__ = [
 
     # Group
     'Group', 'GroupCreate', 'GroupUpdate',
+
+    # Supply chain config
+    'SupplyChainConfig', 'SupplyChainConfigCreate', 'SupplyChainConfigUpdate',
+    'Item', 'ItemCreate', 'ItemUpdate',
+    'Node', 'NodeCreate', 'NodeUpdate',
+    'Lane', 'LaneCreate', 'LaneUpdate',
+    'ItemNodeConfig', 'ItemNodeConfigCreate', 'ItemNodeConfigUpdate',
+    'MarketDemand', 'MarketDemandCreate', 'MarketDemandUpdate',
 ]

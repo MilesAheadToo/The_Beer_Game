@@ -10,7 +10,9 @@ from pydantic import BaseModel
 import json
 
 from app.db.session import get_db
-from app.models.supply_chain import Game, Player, GameRound, PlayerRound
+from app.models.game import Game
+from app.models.player import Player
+from app.models.supply_chain import GameRound, PlayerRound
 from app.schemas.game import PlayerRound as PlayerRoundSchema
 
 router = APIRouter()

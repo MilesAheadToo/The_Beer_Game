@@ -121,7 +121,8 @@ async def handle_order_message(game_id: int, client_id: str, user: Optional[User
     """Handle order messages from clients"""
     from ..services.mixed_game_service import MixedGameService
     from sqlalchemy import select
-    from ..models.supply_chain import Game, Player
+    from ..models.game import Game
+    from ..models.player import Player
     
     try:
         game_service = MixedGameService(db)

@@ -31,6 +31,7 @@ from sqlalchemy.future import select
 from app.models.user import User, UserTypeEnum
 from app.models.group import Group
 from app.repositories.users import get_user_by_email
+from app.middleware.csrf import set_csrf_cookie
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

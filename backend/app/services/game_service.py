@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import BackgroundTasks, Depends
-from app.db.session import get_db
+from app.db.session import get_db, SessionLocal
 
 class BackgroundTaskManager:
     _instance = None
@@ -46,7 +46,9 @@ class BackgroundTaskManager:
         finally:
             self._tasks.pop(game_id, None)
 from app.schemas.game import GameCreate, PlayerCreate, GameState, PlayerState
-from app.models.supply_chain import PlayerRole, Game, Player, GameRound, PlayerRound, PlayerInventory
+from app.models.player import Player, PlayerRole
+from app.models.game import Game, GameStatus
+from app.models.supply_chain import GameRound, PlayerRound, PlayerInventory
 from app.core.demand_patterns import (
     get_demand_pattern,
     DemandPatternType,

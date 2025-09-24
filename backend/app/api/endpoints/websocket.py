@@ -6,7 +6,8 @@ import asyncio
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.models.supply_chain import Game, Player
+from app.models.game import Game
+from app.models.player import Player
 from app.schemas.game import GameState
 from app.services.game_service import GameService
 

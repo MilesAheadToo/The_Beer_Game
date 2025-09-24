@@ -3,10 +3,9 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, select
 
-from app.models.supply_chain import (
-    Game, Player, PlayerInventory, Order, GameRound, PlayerRound, 
-    GameStatus, PlayerRole
-)
+from app.models.game import Game, GameStatus
+from app.models.player import Player, PlayerRole
+from app.models.supply_chain import PlayerInventory, Order, GameRound, PlayerRound
 from app.db.session import SessionLocal, get_db
 from app.schemas.game import GameCreate, PlayerCreate, GameState, PlayerState, DemandPattern
 from app.services.agents import AgentManager, AgentType, AgentStrategy

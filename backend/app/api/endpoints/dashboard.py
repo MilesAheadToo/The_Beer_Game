@@ -4,9 +4,9 @@ from datetime import datetime
 
 from ... import models, schemas
 from ...crud import crud_dashboard as crud
-from ...database import get_db
+from ...db.session import get_db
 from ...core.security import get_current_active_user
-from ...models.supply_chain import Player as SupplyChainPlayer
+from ...models.player import Player as SupplyChainPlayer
 
 # Router for dashboard endpoints
 dashboard_router = APIRouter()

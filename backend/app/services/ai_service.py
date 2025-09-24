@@ -2,7 +2,8 @@ import random
 from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
-from app.models.supply_chain import Player, PlayerRole, PlayerInventory, GameRound, PlayerRound
+from app.models.player import Player, PlayerRole
+from app.models.supply_chain import PlayerInventory, GameRound, PlayerRound
 from app.schemas.game import PlayerState, GameState
 
 class AIService:

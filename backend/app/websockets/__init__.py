@@ -6,7 +6,8 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from ..models.supply_chain import Game, GameStatus, Player
+from ..models.game import Game, GameStatus
+from ..models.player import Player
 from ..services.mixed_game_service import MixedGameService
 from ..db.session import get_db
 

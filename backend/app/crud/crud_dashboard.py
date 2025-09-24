@@ -1,13 +1,9 @@
 from sqlalchemy.orm import Session
 from typing import Dict, Any, List, Optional
 
-from ..models.supply_chain import (
-    Game,
-    GameStatus,
-    Player,
-    PlayerRound,
-    GameRound,
-)
+from ..models.game import Game, GameStatus
+from ..models.player import Player
+from ..models.supply_chain import PlayerRound, GameRound
 
 
 def _active_statuses() -> List[GameStatus]:
