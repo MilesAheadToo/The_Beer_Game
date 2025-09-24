@@ -63,6 +63,8 @@ services:
       - DB_WAIT_TIMEOUT=30
       - DB_CONNECTION_TIMEOUT=30
       - PYTHONPATH=/app
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - DAYBREAK_LLM_MODEL=${DAYBREAK_LLM_MODEL:-gpt-4o-mini}
       # Backward-compat fallbacks for older envs
       - MYSQL_SERVER=${MYSQL_SERVER:-db}
       - MYSQL_PORT=${MYSQL_PORT:-3306}

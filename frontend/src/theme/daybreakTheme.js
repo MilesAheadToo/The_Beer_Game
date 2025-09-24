@@ -1,10 +1,11 @@
 import { createTheme } from "@mui/material/styles";
 
-const PRIMARY = "#16A34A";     // Luma-like green (tailwind green-600)
+const PRIMARY = "#16A34A";     // Daybreak brand green
 const PRIMARY_HOVER = "#15803D";
-const ACCENT = "#0EA5E9";      // optional accent (teal/blue)
-const BG_DEFAULT = "#F8FAFC";  // light gray seen in screenshots
-const BG_PAPER = "#FFFFFF";
+const ACCENT = "#0EA5E9";
+const BG_DEFAULT = "#F7F9FC";
+const BG_PAPER = "#F1F9F3";
+const FONT_STACK = "'Trebuchet MS', 'TrebuchetMS', 'Lucida Sans Unicode', 'Lucida Grande', sans-serif";
 
 const theme = createTheme({
   palette: {
@@ -16,7 +17,7 @@ const theme = createTheme({
     divider: "rgba(15, 23, 42, 0.08)",
   },
   typography: {
-    fontFamily: `Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, "Noto Sans", "Helvetica Neue", "Apple Color Emoji","Segoe UI Emoji"`,
+    fontFamily: FONT_STACK,
     // Figma-like type ramp (approximate)
     h1: { fontWeight: 700, fontSize: "2.5rem", letterSpacing: "-0.01em", lineHeight: 1.2 }, // 40px
     h2: { fontWeight: 700, fontSize: "2rem", lineHeight: 1.25 }, // 32px
@@ -36,7 +37,7 @@ const theme = createTheme({
     MuiCssBaseline: {
       styleOverrides: {
         "html, body, #root": { height: "100%" },
-        body: { backgroundColor: BG_DEFAULT },
+        body: { backgroundColor: BG_DEFAULT, fontFamily: FONT_STACK },
         main: { backgroundColor: BG_DEFAULT },
       },
     },
@@ -79,9 +80,37 @@ const theme = createTheme({
       defaultProps: { elevation: 0, variant: "outlined" },
       styleOverrides: {
         outlined: {
-          background: "#FFFFFF",
-          borderColor: "rgba(15,23,42,0.08)",
+          background: BG_PAPER,
+          borderColor: "rgba(22, 101, 52, 0.18)",
           boxShadow: "0 1px 2px rgba(15,23,42,0.06)",
+        },
+      },
+    },
+    MuiCard: {
+      styleOverrides: {
+        root: {
+          background: BG_PAPER,
+          borderColor: "rgba(22, 101, 52, 0.18)",
+          boxShadow: "0 1px 2px rgba(15,23,42,0.06)",
+        },
+      },
+    },
+    MuiFormLabel: {
+      styleOverrides: {
+        root: {
+          fontFamily: FONT_STACK,
+          fontWeight: 600,
+          fontSize: "1rem",
+          color: "#0f172a",
+        },
+      },
+    },
+    MuiFormHelperText: {
+      styleOverrides: {
+        root: {
+          fontFamily: FONT_STACK,
+          fontSize: "0.75rem",
+          color: "#4a5568",
         },
       },
     },

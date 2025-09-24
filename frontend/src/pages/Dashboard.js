@@ -38,6 +38,14 @@ import SkuTable from '../components/SkuTable';
 import { useAuth } from '../contexts/AuthContext';
 import { getHumanDashboard } from '../services/dashboardService';
 
+const PRIMARY_FONT = "'Trebuchet MS', 'TrebuchetMS', 'Lucida Sans Unicode', 'Lucida Grande', sans-serif";
+const CARD_BG_LIGHT = 'green.50';
+const CARD_BG_DARK = 'green.900';
+const BORDER_LIGHT = 'green.200';
+const BORDER_DARK = 'green.700';
+const TIMELINE_BG_LIGHT = 'green.100';
+const TIMELINE_BG_DARK = 'green.800';
+
 const FALLBACK_DEMAND_SERIES = [
   { name: 'W1', actual: 2100, forecast: 2200, target: 2000 },
   { name: 'W2', actual: 2250, forecast: 2300, target: 2050 },
@@ -144,9 +152,9 @@ const formatSigned = (value, { asPercent = false } = {}) => {
 };
 
 const Dashboard = () => {
-  const cardBg = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.700');
-  const timelineBg = useColorModeValue('gray.50', 'gray.700');
+  const cardBg = useColorModeValue(CARD_BG_LIGHT, CARD_BG_DARK);
+  const borderColor = useColorModeValue(BORDER_LIGHT, BORDER_DARK);
+  const timelineBg = useColorModeValue(TIMELINE_BG_LIGHT, TIMELINE_BG_DARK);
   const navigate = useNavigate();
   const toast = useToast();
   const { logout, user } = useAuth();
@@ -334,15 +342,19 @@ const Dashboard = () => {
             <>
               {error && (
                 <Alert status="error" mb={4}>
-                  <AlertIcon />
+                  <AlertIcon boxSize="1em" />
                   {error}
                 </Alert>
               )}
 
               <Flex justify="space-between" align={{ base: 'flex-start', md: 'center' }} mb={6} mt={2} direction={{ base: 'column', md: 'row' }} gap={4}>
                 <VStack align="flex-start" spacing={1}>
-                  <Heading size="xl" fontWeight="600">{dashboardData?.game_name || 'Dashboard'}</Heading>
-                  <Text color="gray.500" fontSize="md">Overview of your supply chain performance</Text>
+                  <Heading size="xl" fontWeight="600" fontFamily={PRIMARY_FONT}>
+                    {dashboardData?.game_name || 'Dashboard'}
+                  </Heading>
+                  <Text color="gray.600" fontSize="0.75rem">
+                    Overview of your supply chain performance
+                  </Text>
                   <HStack spacing={2} mt={1}>
                     {playerRoleLabel && (
                       <Badge colorScheme="blue" textTransform="capitalize">{playerRoleLabel}</Badge>
@@ -356,7 +368,7 @@ const Dashboard = () => {
 
               <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6} className="card-surface pad-6">
                 <CardHeader pb={2}>
-                  <Heading size="md">Game Progress</Heading>
+                  <Heading size="md" fontFamily={PRIMARY_FONT}>Game Progress</Heading>
                 </CardHeader>
                 <CardBody pt={0}>
                   <VStack align="stretch" spacing={3}>
@@ -372,7 +384,7 @@ const Dashboard = () => {
                         <Text fontSize="xs">{sliderValue}</Text>
                       </SliderThumb>
                     </Slider>
-                    <Text fontSize="sm" color="gray.500">Week {sliderValue} of {sliderMax}</Text>
+                    <Text fontSize="0.75rem" color="gray.600">Week {sliderValue} of {sliderMax}</Text>
                   </VStack>
                 </CardBody>
               </Card>
@@ -395,7 +407,7 @@ const Dashboard = () => {
                 <GridItem>
                   <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6} className="card-surface pad-6">
                     <CardHeader>
-                      <Heading size="md">Demand Forecast vs Actual</Heading>
+                      <Heading size="md" fontFamily={PRIMARY_FONT}>Demand Forecast vs Actual</Heading>
                     </CardHeader>
                     <CardBody>
                       <Box h="300px">
@@ -417,7 +429,7 @@ const Dashboard = () => {
 
                   <Card variant="outline" bg={cardBg} borderColor={borderColor} mb={6} className="card-surface pad-6">
                     <CardHeader>
-                      <Heading size="md">Stock vs Forecast (Recent)</Heading>
+                      <Heading size="md" fontFamily={PRIMARY_FONT}>Stock vs Forecast (Recent)</Heading>
                     </CardHeader>
                     <CardBody>
                       <Box h="300px">
@@ -440,7 +452,7 @@ const Dashboard = () => {
                 <GridItem>
                   <Card variant="outline" bg={cardBg} borderColor={borderColor} h="100%" mb={6} className="card-surface pad-6">
                     <CardHeader>
-                      <Heading size="md">Stock vs Safety Stock</Heading>
+                      <Heading size="md" fontFamily={PRIMARY_FONT}>Stock vs Safety Stock</Heading>
                     </CardHeader>
                     <CardBody>
                       <Box h="300px">
@@ -469,8 +481,8 @@ const Dashboard = () => {
 
               <Card variant="outline" bg={cardBg} borderColor={borderColor} className="card-surface" mt={6}>
                 <CardHeader pb={2}>
-                  <Heading size="md">Order Reasoning Timeline</Heading>
-                  <Text color="gray.500" fontSize="sm">Most recent decisions are shown first</Text>
+                  <Heading size="md" fontFamily={PRIMARY_FONT}>Order Reasoning Timeline</Heading>
+                  <Text color="gray.600" fontSize="0.75rem">Most recent decisions are shown first</Text>
                 </CardHeader>
                 <CardBody pt={0}>
                   <VStack align="stretch" spacing={4}>
@@ -488,9 +500,9 @@ const Dashboard = () => {
                             <Badge colorScheme="blue">Week {entry.week}</Badge>
                             <Badge colorScheme="purple" variant="subtle">Order {entry.order}</Badge>
                           </HStack>
-                          <Text fontSize="sm" color="gray.500">Inventory {entry.inventory} · Backlog {entry.backlog}</Text>
+                          <Text fontSize="0.75rem" color="gray.600">Inventory {entry.inventory} · Backlog {entry.backlog}</Text>
                         </Flex>
-                        <Text fontSize="sm" color="gray.700">{entry.reason}</Text>
+                        <Text fontSize="0.75rem" color="gray.700">{entry.reason}</Text>
                       </Box>
                     ))}
                   </VStack>

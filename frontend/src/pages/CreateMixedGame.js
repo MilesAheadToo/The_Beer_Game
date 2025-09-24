@@ -23,7 +23,6 @@ import {
   Heading,
   useColorModeValue,
   Switch,
-  FormHelperText,
   Grid,
   Badge,
   Tabs,
@@ -38,7 +37,9 @@ import {
   RadioGroup,
   Radio,
   Spinner,
-  Checkbox
+  Checkbox,
+  Spinner
+
 } from '@chakra-ui/react';
 import PageLayout from '../components/PageLayout';
 import { getAllConfigs } from '../services/supplyChainConfigService';
@@ -47,6 +48,15 @@ import PricingConfigForm from '../components/PricingConfigForm';
 import { api, mixedGameApi } from '../services/api';
 import { getModelStatus } from '../services/modelService';
 import { useSystemConfig } from '../contexts/SystemConfigContext.jsx';
+import {
+  PRIMARY_FONT,
+  CARD_BG_LIGHT,
+  CARD_BG_DARK,
+  BORDER_LIGHT,
+  BORDER_DARK,
+  TIMELINE_BG_LIGHT,
+  TIMELINE_BG_DARK,
+} from '../theme/constants';
 
 const playerRoles = [
   { value: 'retailer', label: 'Retailer' },
@@ -85,8 +95,6 @@ const agentStrategies = [
   }
 ];
 
-const HUMAN_ASSIGNMENT = 'HUMAN';
-
 const strategyLabelMap = agentStrategies.reduce((acc, group) => {
   group.options.forEach((option) => {
     acc[option.value] = option.label;
@@ -101,6 +109,12 @@ const daybreakStrategyDescriptions = {
   DAYBREAK_DTCE_CENTRAL:
     'Daybreak - Roles + Supervisor allows a network supervisor to adjust orders within the configured percentage.',
   DAYBREAK_DTCE_GLOBAL: 'Daybreak - SC Orchestrator runs a single agent across the entire supply chain.',
+};
+
+const DEFAULT_CLASSIC_PARAMS = {
+  initial_demand: 4,
+  change_week: 6,
+  final_demand: 8,
 };
 
 const strategyDescriptions = {
@@ -119,6 +133,29 @@ const strategyDescriptions = {
   DAYBREAK_DTCE_CENTRAL: daybreakStrategyDescriptions.DAYBREAK_DTCE_CENTRAL,
   DAYBREAK_DTCE_GLOBAL: daybreakStrategyDescriptions.DAYBREAK_DTCE_GLOBAL,
 };
+
+const StyledFormLabel = (props) => (
+  <FormLabel fontWeight="semibold" fontSize="md" {...props} />
+);
+
+const HelperText = ({ children, ...props }) => (
+  <Text fontSize="0.75rem" color="gray.600" mt={1} {...props}>
+    {children}
+  </Text>
+);
+
+const progressionOptions = [
+  {
+    value: 'supervised',
+    label: 'Supervised',
+    description: 'Group Admin advances rounds manually.',
+  },
+  {
+    value: 'unsupervised',
+    label: 'Unsupervised',
+    description: 'Advance automatically when every player submits.',
+  },
+];
 
 const DEFAULT_SYSTEM_CONFIG = {
   min_order_quantity: 0,
@@ -236,7 +273,7 @@ const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
     <Box>
       <HStack spacing={4} mb={4}>
         <FormControl maxW="xs">
-          <FormLabel>Node Type</FormLabel>
+          <StyledFormLabel>Node Type</StyledFormLabel>
           <Select value={selected} onChange={(e) => setSelected(e.target.value)}>
             <option value="retailer">Retailer</option>
             <option value="distributor">Distributor</option>
@@ -249,7 +286,7 @@ const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
 
       <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={6}>
         <FormControl>
-          <FormLabel>Order Leadtime (weeks)</FormLabel>
+          <StyledFormLabel>Order Leadtime (weeks)</StyledFormLabel>
           <NumberInput min={ranges.info_delay?.min ?? 0} max={ranges.info_delay?.max ?? 8} value={current.info_delay}
             onChange={(v) => update('info_delay', parseInt(v) || 0)}>
             <NumberInputField />
@@ -260,7 +297,7 @@ const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
           </NumberInput>
         </FormControl>
         <FormControl>
-          <FormLabel>Supply Leadtime (weeks)</FormLabel>
+          <StyledFormLabel>Supply Leadtime (weeks)</StyledFormLabel>
           <NumberInput min={ranges.ship_delay?.min ?? 0} max={ranges.ship_delay?.max ?? 8} value={current.ship_delay}
             onChange={(v) => update('ship_delay', parseInt(v) || 0)}>
             <NumberInputField />
@@ -271,7 +308,7 @@ const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
           </NumberInput>
         </FormControl>
         <FormControl>
-          <FormLabel>Initial Inventory (units)</FormLabel>
+          <StyledFormLabel>Initial Inventory (units)</StyledFormLabel>
           <NumberInput min={ranges.init_inventory?.min ?? 0} max={ranges.init_inventory?.max ?? 1000} value={current.init_inventory}
             onChange={(v) => update('init_inventory', parseInt(v) || 0)}>
             <NumberInputField />
@@ -282,7 +319,7 @@ const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
           </NumberInput>
         </FormControl>
         <FormControl>
-          <FormLabel>Minimum Order Quantity</FormLabel>
+          <StyledFormLabel>Minimum Order Quantity</StyledFormLabel>
           <NumberInput min={ranges.min_order_qty?.min ?? 0} max={ranges.min_order_qty?.max ?? 1000} value={current.min_order_qty || 0}
             onChange={(v) => update('min_order_qty', parseInt(v) || 0)}>
             <NumberInputField />
@@ -293,7 +330,7 @@ const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
           </NumberInput>
         </FormControl>
         <FormControl>
-          <FormLabel>Price</FormLabel>
+          <StyledFormLabel>Price</StyledFormLabel>
           <NumberInput min={ranges.price?.min ?? 0} max={ranges.price?.max ?? 10000} step={0.01} precision={2} value={current.price}
             onChange={(v) => update('price', parseFloat(v) || 0)}>
             <NumberInputField />
@@ -304,7 +341,7 @@ const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
           </NumberInput>
         </FormControl>
         <FormControl>
-          <FormLabel>Standard Cost</FormLabel>
+          <StyledFormLabel>Standard Cost</StyledFormLabel>
           <NumberInput min={ranges.standard_cost?.min ?? 0} max={ranges.standard_cost?.max ?? 10000} step={0.01} precision={2} value={current.standard_cost}
             onChange={(v) => update('standard_cost', parseFloat(v) || 0)}>
             <NumberInputField />
@@ -315,7 +352,7 @@ const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
           </NumberInput>
         </FormControl>
         <FormControl>
-          <FormLabel>Variable Cost</FormLabel>
+          <StyledFormLabel>Variable Cost</StyledFormLabel>
           <NumberInput min={ranges.variable_cost?.min ?? 0} max={ranges.variable_cost?.max ?? 10000} step={0.01} precision={2} value={current.variable_cost}
             onChange={(v) => update('variable_cost', parseFloat(v) || 0)}>
             <NumberInputField />
@@ -324,7 +361,7 @@ const PerNodePolicyEditor = ({ value, onChange, ranges = {} }) => {
               <NumberDecrementStepper />
             </NumberInputStepper>
           </NumberInput>
-          <FormHelperText>Margin = price - std cost - variable cost</FormHelperText>
+          <HelperText>Margin = price - std cost - variable cost</HelperText>
         </FormControl>
       </Grid>
       <Text mt={2} fontSize="sm" color={margin >= 0 ? 'green.600' : 'red.600'}>
@@ -361,8 +398,8 @@ const CreateMixedGame = () => {
     shared_history_weeks: DEFAULT_DAYBREAK_LLM_CONFIG.shared_history_weeks,
     volatility_window: DEFAULT_DAYBREAK_LLM_CONFIG.volatility_window,
   }));
-  const cardBg = useColorModeValue('white', 'gray.800');
-  const borderColor = useColorModeValue('gray.200', 'gray.700');
+  const cardBg = useColorModeValue(CARD_BG_LIGHT, CARD_BG_DARK);
+  const borderColor = useColorModeValue(BORDER_LIGHT, BORDER_DARK);
   const { user } = useAuth();
   const [modelStatus, setModelStatus] = useState(null);
   const { ranges: systemRanges } = useSystemConfig();
@@ -678,8 +715,12 @@ const CreateMixedGame = () => {
             updatedPlayer.userId = user.id;
           }
           updatedPlayer.daybreakOverridePct = undefined;
-        } else if (type === 'ai' && !updatedPlayer.llmModel) {
-          updatedPlayer.llmModel = 'gpt-4o-mini';
+        } else if (type === 'ai') {
+          updatedPlayer.userId = null;
+          updatedPlayer.strategy = updatedPlayer.strategy || agentStrategies[0].options[0].value;
+          if (!updatedPlayer.llmModel) {
+            updatedPlayer.llmModel = 'gpt-4o-mini';
+          }
         }
         return updatedPlayer;
       })
@@ -703,15 +744,6 @@ const CreateMixedGame = () => {
         return updated;
       })
     );
-  };
-
-  const handleAssignmentSelect = (index, assignmentValue) => {
-    if (assignmentValue === HUMAN_ASSIGNMENT) {
-      handlePlayerTypeChange(index, 'human');
-      return;
-    }
-    handlePlayerTypeChange(index, 'ai');
-    handleStrategyChange(index, assignmentValue);
   };
 
   const handleUserChange = (index, userId) => {
@@ -909,8 +941,10 @@ const CreateMixedGame = () => {
   if (isEditing && initializing) {
     return (
       <PageLayout title="Edit Mixed Game">
-        <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
-          <Spinner size="xl" />
+        <Box fontFamily={PRIMARY_FONT}>
+          <Box display="flex" justifyContent="center" alignItems="center" minHeight="60vh">
+            <Spinner size="xl" />
+          </Box>
         </Box>
       </PageLayout>
     );
@@ -918,14 +952,15 @@ const CreateMixedGame = () => {
 
   return (
     <PageLayout title={isEditing ? 'Edit Mixed Game' : 'Mixed Game Definition'}>
+      <Box fontFamily={PRIMARY_FONT}>
       {/* Quick links to saved Game Configurations */}
       {!isEditing && configs?.length > 0 && (
         <Box mb={4}>
           <Alert status="info" borderRadius="md" mb={3}>
-            <AlertIcon />
+            <AlertIcon boxSize="1em" />
             <Box>
               <AlertTitle mr={2}>Saved Game Configurations</AlertTitle>
-              <AlertDescription fontSize="sm">Use a configuration to prefill this form.</AlertDescription>
+              <HelperText mt={0} mb={0}>Use a configuration to prefill this form.</HelperText>
             </Box>
           </Alert>
           <HStack spacing={2} wrap="wrap">
@@ -939,24 +974,12 @@ const CreateMixedGame = () => {
       )}
       {modelStatus && !modelStatus.is_trained && (
         <Alert status="error" variant="left-accent" mb={6} borderRadius="md">
-          <AlertIcon boxSize="16px" color="red.500" />
+          <AlertIcon boxSize="1em" color="red.500" />
           <Box>
             <AlertTitle>Daybreak Agent Not Trained</AlertTitle>
-            <AlertDescription fontSize="sm">
+            <HelperText mt={0} mb={0}>
               The Daybreak agent has not yet been trained, so it cannot be used until training completes. You may still select Basic (heuristics) or Daybreak LLM agents.
-            </AlertDescription>
-          </Box>
-        </Alert>
-      )}
-      {(!systemConfig || Object.keys(systemConfig||{}).length === 0) && (
-        <Alert status="info" variant="left-accent" mb={4} borderRadius="md">
-          <AlertIcon />
-          <Box>
-            <AlertTitle>Using default ranges</AlertTitle>
-            <AlertDescription fontSize="sm">
-              You can define system-wide ranges for configuration variables in the System Configuration page.
-              <Button ml={3} size="sm" colorScheme="blue" variant="ghost" onClick={() => navigate('/system-config')}>Open System Config</Button>
-            </AlertDescription>
+            </HelperText>
           </Box>
         </Alert>
       )}
@@ -974,13 +997,13 @@ const CreateMixedGame = () => {
                 {/* Game Details Card */}
                 <Card variant="outline" bg={cardBg} borderColor={borderColor} w="100%" className="card-surface pad-6">
                   <CardHeader pb={2}>
-                    <Heading size="md">Game Settings</Heading>
+                    <Heading size="md" fontFamily="inherit">Game Settings</Heading>
                     <Text color="gray.500" fontSize="sm">Configure the basic settings for your game</Text>
                   </CardHeader>
                   <CardBody pt={0}>
                     <VStack spacing={5}>
                       <FormControl>
-                        <FormLabel>Game Name</FormLabel>
+                        <StyledFormLabel>Game Name</StyledFormLabel>
                         <Input 
                           value={gameName}
                           onChange={(e) => setGameName(e.target.value)}
@@ -991,8 +1014,8 @@ const CreateMixedGame = () => {
                       </FormControl>
 
                       <Grid templateColumns={{ base: '1fr', md: '1fr 1fr' }} gap={6} w="full">
-                        <FormControl>
-                          <FormLabel>Maximum Rounds</FormLabel>
+                      <FormControl>
+                        <StyledFormLabel>Maximum Rounds</StyledFormLabel>
                           <NumberInput 
                             min={1} 
                             max={999}
@@ -1006,11 +1029,11 @@ const CreateMixedGame = () => {
                               <NumberDecrementStepper />
                             </NumberInputStepper>
                           </NumberInput>
-                          <FormHelperText>Maximum 999 rounds</FormHelperText>
+                          <HelperText>Maximum 999 rounds</HelperText>
                         </FormControl>
 
                         <FormControl display="flex" flexDirection="column" justifyContent="flex-end">
-                          <FormLabel mb={0}>Game Visibility</FormLabel>
+                          <StyledFormLabel mb={0}>Game Visibility</StyledFormLabel>
                           <HStack spacing={4} align="center">
                             <Text fontSize="sm" color={isPublic ? 'gray.500' : 'gray.800'} fontWeight={isPublic ? 'normal' : 'medium'}>Private</Text>
                             <Switch 
@@ -1021,39 +1044,57 @@ const CreateMixedGame = () => {
                             />
                             <Text fontSize="sm" color={isPublic ? 'gray.800' : 'gray.500'} fontWeight={isPublic ? 'medium' : 'normal'}>Public</Text>
                           </HStack>
-                          <FormHelperText>
+                          <HelperText>
                             {isPublic 
                               ? 'Anyone can join this game' 
                               : 'Only invited players can join this game'}
-                          </FormHelperText>
+                          </HelperText>
                         </FormControl>
                       </Grid>
 
                       <FormControl>
-                        <FormLabel>Game Orchestration</FormLabel>
-                        <RadioGroup value={progressionMode} onChange={setProgressionMode}>
-                          <VStack align="start" spacing={2}>
-                            <Radio value="supervised">Supervised – Group Admin advances rounds manually</Radio>
-                            <Radio value="unsupervised">Unsupervised – advance automatically when every player submits</Radio>
-                          </VStack>
-                        </RadioGroup>
-                        <FormHelperText>Select how rounds should progress.</FormHelperText>
+                        <StyledFormLabel>Game Orchestration</StyledFormLabel>
+                        <VStack align="stretch" spacing={3}>
+                          {progressionOptions.map((option) => (
+                            <Box
+                              key={option.value}
+                              borderWidth="1px"
+                              borderColor={progressionMode === option.value ? 'blue.400' : borderColor}
+                              bg={progressionMode === option.value ? 'blue.50' : 'whiteAlpha.0'}
+                              borderRadius="md"
+                              px={4}
+                              py={3}
+                              cursor="pointer"
+                              onClick={() => setProgressionMode(option.value)}
+                              _hover={{ borderColor: 'blue.400' }}
+                            >
+                              <HStack align="flex-start" spacing={3}>
+                                <Text fontSize="md">{progressionMode === option.value ? '☒' : '☐'}</Text>
+                                <Box>
+                                  <Text fontWeight="semibold">{option.label}</Text>
+                                  <HelperText>{option.description}</HelperText>
+                                </Box>
+                              </HStack>
+                            </Box>
+                          ))}
+                        </VStack>
+                        <HelperText>Select how rounds should progress.</HelperText>
                       </FormControl>
 
                       {progressionMode === 'unsupervised' && (
                         <Alert status="info" variant="left-accent" borderRadius="md">
-                          <AlertIcon />
+                          <AlertIcon boxSize="1em" />
                           <Box>
                             <AlertTitle fontSize="sm">Unsupervised mode</AlertTitle>
-                            <AlertDescription fontSize="sm">
+                            <HelperText mt={0} mb={0}>
                               Rounds advance automatically once all players submit their orders. Use this for self-paced games.
-                            </AlertDescription>
+                            </HelperText>
                           </Box>
                         </Alert>
                       )}
 
                       <FormControl>
-                        <FormLabel>Description (Optional)</FormLabel>
+                        <StyledFormLabel>Description (Optional)</StyledFormLabel>
                         <Input 
                           as="textarea"
                           value={description}
@@ -1071,13 +1112,13 @@ const CreateMixedGame = () => {
                 {/* Market Demand Settings */}
                 <Card variant="outline" bg={cardBg} borderColor={borderColor} w="100%" className="card-surface pad-6">
                   <CardHeader pb={2}>
-                    <Heading size="md">Market Demand</Heading>
+                    <Heading size="md" fontFamily="inherit">Market Demand</Heading>
                     <Text color="gray.500" fontSize="sm">Configure how customer demand evolves during the game</Text>
                   </CardHeader>
                   <CardBody pt={0}>
                     <VStack spacing={5} align="stretch">
                       <FormControl>
-                        <FormLabel>Demand Pattern</FormLabel>
+                        <StyledFormLabel>Demand Pattern</StyledFormLabel>
                         <Select value={demandPattern} onChange={(e) => setDemandPattern(e.target.value)}>
                           {demandPatterns.map((pattern) => (
                             <option key={pattern.value} value={pattern.value}>
@@ -1085,12 +1126,12 @@ const CreateMixedGame = () => {
                             </option>
                           ))}
                         </Select>
-                        <FormHelperText>Select the demand model to use for this game</FormHelperText>
+                        <HelperText>Select the demand model to use for this game</HelperText>
                       </FormControl>
                       {demandPattern === 'classic' && (
                         <Grid templateColumns={{ base: '1fr', md: 'repeat(3, 1fr)' }} gap={6}>
                           <FormControl>
-                            <FormLabel>Initial demand</FormLabel>
+                            <StyledFormLabel>Initial demand</StyledFormLabel>
                             <NumberInput min={0} value={initialDemand} onChange={(value) => setInitialDemand(parseInt(value) || 0)}>
                               <NumberInputField />
                               <NumberInputStepper>
@@ -1098,10 +1139,10 @@ const CreateMixedGame = () => {
                                 <NumberDecrementStepper />
                               </NumberInputStepper>
                             </NumberInput>
-                            <FormHelperText>Customer demand before the change occurs</FormHelperText>
+                            <HelperText>Customer demand before the change occurs</HelperText>
                           </FormControl>
                           <FormControl>
-                            <FormLabel>Change occurs in week</FormLabel>
+                            <StyledFormLabel>Change occurs in week</StyledFormLabel>
                             <NumberInput min={1} value={demandChangeWeek} onChange={(value) => setDemandChangeWeek(parseInt(value) || 1)}>
                               <NumberInputField />
                               <NumberInputStepper>
@@ -1109,10 +1150,10 @@ const CreateMixedGame = () => {
                                 <NumberDecrementStepper />
                               </NumberInputStepper>
                             </NumberInput>
-                            <FormHelperText>Week when demand switches to the new level</FormHelperText>
+                            <HelperText>Week when demand switches to the new level</HelperText>
                           </FormControl>
                           <FormControl>
-                            <FormLabel>Final demand</FormLabel>
+                            <StyledFormLabel>Final demand</StyledFormLabel>
                             <NumberInput min={0} value={finalDemand} onChange={(value) => setFinalDemand(parseInt(value) || 0)}>
                               <NumberInputField />
                               <NumberInputStepper>
@@ -1120,7 +1161,7 @@ const CreateMixedGame = () => {
                                 <NumberDecrementStepper />
                               </NumberInputStepper>
                             </NumberInput>
-                            <FormHelperText>Customer demand after the change</FormHelperText>
+                            <HelperText>Customer demand after the change</HelperText>
                           </FormControl>
                         </Grid>
                       )}
@@ -1136,13 +1177,13 @@ const CreateMixedGame = () => {
                 {/* Policy Settings (bounded) */}
                 <Card variant="outline" bg={cardBg} borderColor={borderColor} w="100%" className="card-surface pad-6">
                   <CardHeader pb={2}>
-                    <Heading size="md">Policy Settings</Heading>
+                    <Heading size="md" fontFamily="inherit">Policy Settings</Heading>
                     <Text color="gray.500" fontSize="sm">Lead times, inventory and cost parameters</Text>
                   </CardHeader>
                   <CardBody pt={0}>
                     <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={6}>
                       <FormControl>
-                        <FormLabel>Order Leadtime (weeks)</FormLabel>
+                        <StyledFormLabel>Order Leadtime (weeks)</StyledFormLabel>
                         <NumberInput min={systemConfig.info_delay?.min ?? 0} max={systemConfig.info_delay?.max ?? 8} value={policy.info_delay}
                           onChange={(v) => setPolicy((p) => ({ ...p, info_delay: parseInt(v) || 0 }))}>
                           <NumberInputField />
@@ -1154,7 +1195,7 @@ const CreateMixedGame = () => {
                       </FormControl>
 
                       <FormControl>
-                        <FormLabel>Supply Leadtime (weeks)</FormLabel>
+                        <StyledFormLabel>Supply Leadtime (weeks)</StyledFormLabel>
                         <NumberInput min={systemConfig.ship_delay?.min ?? 0} max={systemConfig.ship_delay?.max ?? 8} value={policy.ship_delay}
                           onChange={(v) => setPolicy((p) => ({ ...p, ship_delay: parseInt(v) || 0 }))}>
                           <NumberInputField />
@@ -1166,7 +1207,7 @@ const CreateMixedGame = () => {
                       </FormControl>
 
                       <FormControl>
-                        <FormLabel>Initial Inventory (units)</FormLabel>
+                        <StyledFormLabel>Initial Inventory (units)</StyledFormLabel>
                         <NumberInput min={systemConfig.init_inventory?.min ?? 0} max={systemConfig.init_inventory?.max ?? 1000} value={policy.init_inventory}
                           onChange={(v) => setPolicy((p) => ({ ...p, init_inventory: parseInt(v) || 0 }))}>
                           <NumberInputField />
@@ -1178,7 +1219,7 @@ const CreateMixedGame = () => {
                       </FormControl>
 
                       <FormControl>
-                        <FormLabel>Holding Cost (per unit/week)</FormLabel>
+                        <StyledFormLabel>Holding Cost (per unit/week)</StyledFormLabel>
                         <NumberInput min={systemConfig.holding_cost?.min ?? 0} max={systemConfig.holding_cost?.max ?? 100} step={0.1} precision={2} value={policy.holding_cost}
                           onChange={(v) => setPolicy((p) => ({ ...p, holding_cost: parseFloat(v) || 0 }))}>
                           <NumberInputField />
@@ -1190,7 +1231,7 @@ const CreateMixedGame = () => {
                       </FormControl>
 
                       <FormControl>
-                        <FormLabel>Backlog Cost (per unit/week)</FormLabel>
+                        <StyledFormLabel>Backlog Cost (per unit/week)</StyledFormLabel>
                         <NumberInput min={systemConfig.backlog_cost?.min ?? 0} max={systemConfig.backlog_cost?.max ?? 200} step={0.1} precision={2} value={policy.backlog_cost}
                           onChange={(v) => setPolicy((p) => ({ ...p, backlog_cost: parseFloat(v) || 0 }))}>
                           <NumberInputField />
@@ -1202,7 +1243,7 @@ const CreateMixedGame = () => {
                       </FormControl>
 
                       <FormControl>
-                        <FormLabel>Shipment Capacity (per link)</FormLabel>
+                        <StyledFormLabel>Shipment Capacity (per link)</StyledFormLabel>
                         <NumberInput min={systemConfig.max_inbound_per_link?.min ?? 10} max={systemConfig.max_inbound_per_link?.max ?? 2000} value={policy.max_inbound_per_link}
                           onChange={(v) => setPolicy((p) => ({ ...p, max_inbound_per_link: parseInt(v) || 0 }))}>
                           <NumberInputField />
@@ -1214,7 +1255,7 @@ const CreateMixedGame = () => {
                       </FormControl>
 
                       <FormControl>
-                        <FormLabel>Max Order (units)</FormLabel>
+                        <StyledFormLabel>Max Order (units)</StyledFormLabel>
                         <NumberInput min={systemConfig.max_order?.min ?? 10} max={systemConfig.max_order?.max ?? 2000} value={policy.max_order}
                           onChange={(v) => setPolicy((p) => ({ ...p, max_order: parseInt(v) || 0 }))}>
                           <NumberInputField />
@@ -1230,7 +1271,7 @@ const CreateMixedGame = () => {
                     </Text>
 
                     <Box mt={6}>
-                      <Heading size="sm" mb={2}>Per-Node Policies</Heading>
+                      <Heading size="sm" mb={2} fontFamily="inherit">Per-Node Policies</Heading>
                       <Text color="gray.500" fontSize="sm" mb={4}>
                         Select a node type and edit its leadtimes and costs. Daybreak agent availability depends on training status.
                       </Text>
@@ -1357,7 +1398,7 @@ const CreateMixedGame = () => {
               {/* Player Configuration Card */}
               <Card variant="outline" bg={cardBg} borderColor={borderColor} className="card-surface pad-6">
                 <CardHeader>
-                  <Heading size="md">Player Configuration</Heading>
+                  <Heading size="md" fontFamily="inherit">Player Configuration</Heading>
                   <Text color="gray.500" fontSize="sm">
                     Configure players and AI agents for each role
                   </Text>
@@ -1365,25 +1406,22 @@ const CreateMixedGame = () => {
                 <CardBody>
                   <VStack spacing={6} align="stretch">
               {players.map((player, index) => {
-                const assignmentValue =
-                  player.playerType === 'ai'
-                    ? player.strategy || agentStrategies[0].options[0].value
-                    : HUMAN_ASSIGNMENT;
-                const assignmentLabel =
-                  assignmentValue === HUMAN_ASSIGNMENT
+                const selectedStrategy = player.strategy || agentStrategies[0].options[0].value;
+                const badgeLabel =
+                  player.playerType === 'human'
                     ? 'Human Player'
-                    : getStrategyLabel(assignmentValue);
+                    : getStrategyLabel(selectedStrategy);
                 const isDaybreakSelection =
-                  ['DAYBREAK_DTCE', 'DAYBREAK_DTCE_CENTRAL', 'DAYBREAK_DTCE_GLOBAL'].includes(assignmentValue);
+                  player.playerType === 'ai' &&
+                  ['DAYBREAK_DTCE', 'DAYBREAK_DTCE_CENTRAL', 'DAYBREAK_DTCE_GLOBAL'].includes(selectedStrategy);
                 const daybreakTrainingLocked =
                   isDaybreakSelection && !(modelStatus && modelStatus.is_trained);
-                const descriptionText =
-                  assignmentValue === HUMAN_ASSIGNMENT
-                    ? 'Assign a participant to control this role.'
-                    : strategyDescriptions[assignmentValue] || 'AI agent will manage ordering for this role.';
-                const helperText = daybreakTrainingLocked
-                  ? `${descriptionText} Training must complete before using Daybreak agents.`
-                  : descriptionText;
+                const humanHelper = 'Assign a participant to control this role.';
+                const agentHelper =
+                  strategyDescriptions[selectedStrategy] || 'AI agent will manage ordering for this role.';
+                const agentHelperText = daybreakTrainingLocked
+                  ? `${agentHelper} Training must complete before using Daybreak agents.`
+                  : agentHelper;
 
                 return (
                   <Box
@@ -1412,53 +1450,79 @@ const CreateMixedGame = () => {
                             </Badge>
                           )}
                           <Badge
-                            colorScheme={assignmentValue === HUMAN_ASSIGNMENT ? 'green' : 'purple'}
+                            colorScheme={player.playerType === 'human' ? 'green' : 'purple'}
                             variant="subtle"
                             borderRadius="full"
                             px={2}
                           >
-                            {assignmentLabel}
+                            {badgeLabel}
                           </Badge>
                         </HStack>
                       </HStack>
 
                       <FormControl>
-                        <FormLabel>Assignment</FormLabel>
-                        <Select
-                          value={assignmentValue}
-                          onChange={(e) => handleAssignmentSelect(index, e.target.value)}
-                          size="md"
-                          bg="white"
-                          _dark={{
-                            bg: 'gray.700',
-                            borderColor: 'gray.600',
-                            _hover: { borderColor: 'gray.500' },
-                            _focus: { borderColor: 'blue.500', boxShadow: '0 0 0 1px #3182ce' }
-                          }}
-                        >
-                          <option value={HUMAN_ASSIGNMENT}>Human Player</option>
-                          {agentStrategies.map((group, groupIndex) => (
-                            <optgroup key={groupIndex} label={group.group}>
-                              {group.options.map((option) => (
-                                <option
-                                  key={option.value}
-                                  value={option.value}
-                                  disabled={option.requiresModel && !(modelStatus && modelStatus.is_trained)}
-                                >
-                                  {option.label}
-                                </option>
-                              ))}
-                            </optgroup>
-                          ))}
-                        </Select>
-                        <FormHelperText>{helperText}</FormHelperText>
+                        <StyledFormLabel>Player Type</StyledFormLabel>
+                        <HStack spacing={3}>
+                          <Button
+                            variant={player.playerType === 'human' ? 'solid' : 'outline'}
+                            colorScheme="green"
+                            onClick={() => handlePlayerTypeChange(index, 'human')}
+                            size="sm"
+                          >
+                            Human
+                          </Button>
+                          <Button
+                            variant={player.playerType === 'ai' ? 'solid' : 'outline'}
+                            colorScheme="purple"
+                            onClick={() => handlePlayerTypeChange(index, 'ai')}
+                            size="sm"
+                          >
+                            Agent
+                          </Button>
+                        </HStack>
+                        <HelperText>
+                          {player.playerType === 'human' ? humanHelper : agentHelper}
+                        </HelperText>
                       </FormControl>
+
+                      {player.playerType === 'ai' && (
+                        <FormControl>
+                          <StyledFormLabel>Agent Strategy</StyledFormLabel>
+                          <Select
+                            value={selectedStrategy}
+                            onChange={(e) => handleStrategyChange(index, e.target.value)}
+                            size="md"
+                            bg="white"
+                            _dark={{
+                              bg: 'gray.700',
+                              borderColor: 'gray.600',
+                              _hover: { borderColor: 'gray.500' },
+                              _focus: { borderColor: 'blue.500', boxShadow: '0 0 0 1px #3182ce' }
+                            }}
+                          >
+                            {agentStrategies.map((group, groupIndex) => (
+                              <optgroup key={groupIndex} label={group.group}>
+                                {group.options.map((option) => (
+                                  <option
+                                    key={option.value}
+                                    value={option.value}
+                                    disabled={option.requiresModel && !(modelStatus && modelStatus.is_trained)}
+                                  >
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            ))}
+                          </Select>
+                          <HelperText>{agentHelperText}</HelperText>
+                        </FormControl>
+                      )}
 
                       {player.playerType === 'ai' && (
                         <VStack align="stretch" spacing={3}>
                           {String(player.strategy).startsWith('LLM_') && (
                             <Box>
-                              <FormLabel>Choose Daybreak LLM</FormLabel>
+                              <StyledFormLabel>Choose Daybreak LLM</StyledFormLabel>
                               <Select
                                 value={player.llmModel}
                                 onChange={(e) =>
@@ -1472,13 +1536,13 @@ const CreateMixedGame = () => {
                                 <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
                                 <option value="claude-3-5-haiku">Claude 3.5 Haiku</option>
                               </Select>
-                              <FormHelperText>Pick the Daybreak LLM backend for this agent.</FormHelperText>
+                              <HelperText>Pick the Daybreak LLM backend for this agent.</HelperText>
                             </Box>
                           )}
 
                           {player.strategy === 'DAYBREAK_DTCE_CENTRAL' && (
                             <Box>
-                              <FormLabel>Supervisor Override (±%)</FormLabel>
+                              <StyledFormLabel>Supervisor Override (±%)</StyledFormLabel>
                               <NumberInput
                                 min={5}
                                 max={50}
@@ -1504,9 +1568,9 @@ const CreateMixedGame = () => {
                                   <NumberDecrementStepper />
                                 </NumberInputStepper>
                               </NumberInput>
-                              <FormHelperText>
+                              <HelperText>
                                 Supervisor may adjust the Daybreak recommendation by up to this percentage.
-                              </FormHelperText>
+                              </HelperText>
                             </Box>
                           )}
                         </VStack>
@@ -1514,7 +1578,7 @@ const CreateMixedGame = () => {
 
                       {player.playerType === 'human' && (
                         <FormControl>
-                          <FormLabel>Assign User</FormLabel>
+                          <StyledFormLabel>Assign User</StyledFormLabel>
                           <Select
                             placeholder="Select a user"
                             value={player.userId || ''}
@@ -1540,13 +1604,13 @@ const CreateMixedGame = () => {
                               </option>
                             ))}
                           </Select>
-                          <FormHelperText>
+                          <HelperText>
                             {loadingUsers
                               ? 'Loading users...'
                               : player.userId
                                 ? `Assigned to: ${availableUsers.find(u => u.id === player.userId)?.username || 'Unknown'}`
                                 : 'Select a user to assign to this role'}
-                          </FormHelperText>
+                          </HelperText>
                         </FormControl>
                       )}
 
@@ -1559,10 +1623,10 @@ const CreateMixedGame = () => {
                           colorScheme="blue"
                           mr={3}
                         />
-                        <FormLabel htmlFor={`demand-${index}`} mb={0} opacity={player.role === 'retailer' ? 0.7 : 1}>
+                        <StyledFormLabel htmlFor={`demand-${index}`} mb={0} opacity={player.role === 'retailer' ? 0.7 : 1}>
                           Can see customer demand
                           {player.role === 'retailer' && ' (Always enabled for Retailer)'}
-                        </FormLabel>
+                        </StyledFormLabel>
                       </FormControl>
                     </VStack>
                   </Box>
@@ -1594,6 +1658,7 @@ const CreateMixedGame = () => {
           </Button>
         </HStack>
       </VStack>
+      </Box>
     </PageLayout>
   );
 };
