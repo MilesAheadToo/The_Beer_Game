@@ -122,10 +122,12 @@ async def create_default_environment():
             
                 # Create nodes
                 nodes = [
-                    {"name": "Retailer", "node_type": NodeType.RETAILER, "position_x": 0, "position_y": 0, "role": PlayerRole.RETAILER},
-                    {"name": "Wholesaler", "node_type": NodeType.WHOLESALER, "position_x": 1, "position_y": 0, "role": PlayerRole.WHOLESALER},
-                    {"name": "Distributor", "node_type": NodeType.DISTRIBUTOR, "position_x": 2, "position_y": 0, "role": PlayerRole.DISTRIBUTOR},
-                    {"name": "Manufacturer", "node_type": NodeType.MANUFACTURER, "position_x": 3, "position_y": 0, "role": PlayerRole.MANUFACTURER},
+                    {"name": "Market Supply", "node_type": NodeType.MARKET_SUPPLY, "position_x": -1, "position_y": 0, "role": None},
+                    {"name": "Manufacturer", "node_type": NodeType.MANUFACTURER, "position_x": 0, "position_y": 0, "role": PlayerRole.MANUFACTURER},
+                    {"name": "Distributor", "node_type": NodeType.DISTRIBUTOR, "position_x": 1, "position_y": 0, "role": PlayerRole.DISTRIBUTOR},
+                    {"name": "Wholesaler", "node_type": NodeType.WHOLESALER, "position_x": 2, "position_y": 0, "role": PlayerRole.WHOLESALER},
+                    {"name": "Retailer", "node_type": NodeType.RETAILER, "position_x": 3, "position_y": 0, "role": PlayerRole.RETAILER},
+                    {"name": "Market Demand", "node_type": NodeType.MARKET_DEMAND, "position_x": 4, "position_y": 0, "role": None},
                 ]
                 
                 node_objs = []
@@ -148,7 +150,7 @@ async def create_default_environment():
                         source_id=node_objs[i].id,
                         target_id=node_objs[i+1].id,
                         config_id=default_config.id,
-                        lead_time=1,
+                        lead_time=0 if node_objs[i].node_type in {NodeType.MARKET_SUPPLY} or node_objs[i+1].node_type in {NodeType.MARKET_DEMAND} else 1,
                         service_level=0.95
                     )
                     db.add(lane)
@@ -160,6 +162,8 @@ async def create_default_environment():
                 
                 # Create item-node configurations
                 for node in node_objs:
+                    if node.node_type in {NodeType.MARKET_SUPPLY, NodeType.MARKET_DEMAND}:
+                        continue
                     inc = ItemNodeConfig(
                         item_id=item.id,
                         node_id=node.id,

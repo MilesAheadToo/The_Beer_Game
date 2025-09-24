@@ -116,6 +116,11 @@ class MixedGameService:
     def _build_lane_views(node_policies: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
         lanes = cfg.get("lanes") or []
         node_keys = [MixedGameService._normalise_key(k) for k in node_policies.keys()]
+        raw_types = cfg.get("node_types") or {}
+        node_types = {
+            MixedGameService._normalise_key(name): str(node_type).lower()
+            for name, node_type in raw_types.items()
+        }
         if not lanes and len(node_keys) >= 2:
             # Fall back to a linear chain using node policy ordering
             fallback: List[Dict[str, Any]] = []
@@ -167,6 +172,7 @@ class MixedGameService:
             "all_nodes": sorted(all_nodes),
             "node_sequence": node_sequence,
             "lanes_by_upstream": lanes_by_upstream,
+            "node_types": node_types,
         }
 
     @staticmethod
@@ -544,6 +550,13 @@ class MixedGameService:
         }
         cfg['node_policies'] = node_policies
 
+        raw_types = cfg.get('node_types') or {}
+        node_types = {
+            self._normalise_key(name): str(node_type).lower()
+            for name, node_type in raw_types.items()
+        }
+        cfg['node_types'] = node_types
+
         lanes = cfg.get('lanes') or []
         self._validate_lanes(node_policies, lanes)
 
@@ -634,25 +647,40 @@ class MixedGameService:
         node_policies = cfg.get('node_policies', {})
         global_policy = cfg.get('global_policy', {})
         lane_views = self._build_lane_views(node_policies, cfg)
+        node_types_map = lane_views.get('node_types', {})
         all_nodes = lane_views['all_nodes'] or list(node_policies.keys())
-        market_nodes_config = lane_views['market_nodes']
+
         # Ensure engine entries exist for all nodes referenced by lanes
         for node in all_nodes:
             self._ensure_engine_node(engine, node_policies, node)
 
-        market_nodes = [n for n in (market_nodes_config or []) if n in engine]
-        if not market_nodes and all_nodes:
-            market_nodes = [all_nodes[-1]]
+        market_demand_nodes_config = set(
+            n for n in lane_views['market_nodes'] if n in engine
+        )
+        market_demand_nodes_types = {
+            node for node, node_type in node_types_map.items() if node_type == 'market_demand'
+        }
+        market_demand_nodes = market_demand_nodes_config or market_demand_nodes_types
+        if not market_demand_nodes and all_nodes:
+            market_demand_nodes = {all_nodes[-1]}
+
+        market_supply_nodes = {
+            node for node, node_type in node_types_map.items() if node_type == 'market_supply'
+        }
 
         pending_demand: Dict[str, int] = defaultdict(int)
-        for node in market_nodes:
-            pending_demand[node] += int(demand_value)
+        for node in market_demand_nodes:
+            if node in engine:
+                pending_demand[node] += int(demand_value)
 
-        # Orders flow upstream based on lanes
+        # Orders flow upstream based on lanes (excluding pure demand sinks)
         for lane in lane_views['lanes']:
             upstream = lane['from']
             downstream = lane['to']
             if upstream not in engine or downstream not in engine:
+                continue
+            downstream_type = node_types_map.get(downstream, '')
+            if downstream_type == 'market_demand':
                 continue
             pending_demand[upstream] += int(engine[downstream].get('last_order', 0))
 
@@ -690,6 +718,7 @@ class MixedGameService:
         lanes_by_upstream = lane_views.get('lanes_by_upstream', {})
 
         for upstream in node_sequence:
+            upstream_type = node_types_map.get(upstream, '')
             for lane in lanes_by_upstream.get(upstream, []):
                 downstream = lane['to']
                 if downstream not in demand_totals:
@@ -697,19 +726,26 @@ class MixedGameService:
                 remaining_demand = max(0, demand_totals[downstream] - shipments_inbound[downstream])
                 if remaining_demand <= 0:
                     continue
-                available = inventory_available.get(upstream, 0)
-                if available <= 0:
-                    continue
-                ship_qty = min(available, remaining_demand)
                 capacity = lane.get('capacity')
                 if capacity is not None:
                     try:
-                        ship_qty = min(ship_qty, int(capacity))
+                        remaining_demand = min(remaining_demand, int(capacity))
                     except (TypeError, ValueError):
                         pass
+
+                if upstream_type == 'market_supply':
+                    ship_qty = remaining_demand
+                else:
+                    available = inventory_available.get(upstream, 0)
+                    if available <= 0:
+                        continue
+                    ship_qty = min(available, remaining_demand)
+
                 if ship_qty <= 0:
                     continue
-                inventory_available[upstream] -= ship_qty
+
+                if upstream_type != 'market_supply':
+                    inventory_available[upstream] -= ship_qty
                 shipments_inbound[downstream] += ship_qty
                 shipments_planned[upstream] += ship_qty
 
@@ -734,19 +770,42 @@ class MixedGameService:
             arrivals_map[node] = arriving
 
         for node in all_nodes:
+            node_type = node_types_map.get(node, '')
             state = engine[node]
             arriving = arrivals_map.get(node, 0)
+
+            if node_type == 'market_supply':
+                state['inventory'] = 0
+                state['backlog'] = 0
+                state['last_arrival'] = arriving
+                state['holding_cost'] = 0.0
+                state['backorder_cost'] = 0.0
+                state['total_cost'] = 0.0
+                continue
+
             available_inventory = max(0, state.get('inventory', 0)) + arriving
             demand_here = demand_totals.get(node, 0)
             shipped = min(available_inventory, demand_here)
             state['inventory'] = available_inventory - shipped
             state['backlog'] = max(0, demand_here - shipped)
             state['last_arrival'] = arriving
-            state['holding_cost'] += state['inventory'] * hold_cost
-            state['backorder_cost'] += state['backlog'] * back_cost
-            state['total_cost'] = state['holding_cost'] + state['backorder_cost']
+
+            if node_type == 'market_demand':
+                state['holding_cost'] = 0.0
+                state['backorder_cost'] = state['backlog'] * back_cost
+                state['total_cost'] = state['backorder_cost']
+            else:
+                state['holding_cost'] += state['inventory'] * hold_cost
+                state['backorder_cost'] += state['backlog'] * back_cost
+                state['total_cost'] = state['holding_cost'] + state['backorder_cost']
 
         for node in all_nodes:
+            node_type = node_types_map.get(node, '')
+            if node_type in {"market_demand", "market_supply"}:
+                engine[node]['last_order'] = 0
+                engine[node]['on_order'] = 0
+                continue
+
             state = engine[node]
             policy = node_policies.get(node, {})
             target_inventory = int(policy.get('init_inventory', 12) + 2 * policy.get('ship_delay', 2))

@@ -82,16 +82,31 @@ class SupplyChainConfigService:
                 standard_cost = 2.0
             
             node_key = node.name.lower()
-            node_policies[node_key] = {
-                "info_delay": 1,  # Order lead time (weeks)
-                "ship_delay": 1,   # Shipping lead time (weeks)
+            node_policy = {
+                "info_delay": 1,
+                "ship_delay": 1,
                 "init_inventory": init_inventory,
                 "price": price,
                 "standard_cost": standard_cost,
                 "variable_cost": 0.1,
                 "min_order_qty": 1,
             }
-            node_types[node_key] = node.type.value if hasattr(node.type, "value") else str(node.type)
+            if node.type in {NodeType.MARKET_SUPPLY, NodeType.MARKET_DEMAND}:
+                node_policy.update({
+                    "info_delay": 0,
+                    "ship_delay": 0,
+                    "init_inventory": 0,
+                    "price": 0.0,
+                    "standard_cost": 0.0,
+                    "variable_cost": 0.0,
+                    "min_order_qty": 0,
+                })
+            node_policies[node_key] = node_policy
+            node_types[node_key] = (
+                node.type.value.lower()
+                if hasattr(node.type, "value")
+                else str(node.type).lower()
+            )
 
         lane_payload: List[Dict[str, Any]] = []
         for lane in lanes:
@@ -116,15 +131,20 @@ class SupplyChainConfigService:
                     market_nodes.append(retailer)
 
         if not market_nodes:
-            # Fallback to nodes that do not act as upstream origins (sinks)
-            upstream_names = {entry["from"] for entry in lane_payload if entry.get("from")}
-            downstream_only = {entry["to"] for entry in lane_payload if entry.get("to") and entry["to"] not in upstream_names}
-            if downstream_only:
-                market_nodes = sorted(downstream_only)
+            explicit_market = [name for name, ntype in node_types.items() if ntype == NodeType.MARKET_DEMAND.value.lower() or ntype == "market_demand"]
+            if explicit_market:
+                market_nodes = sorted(explicit_market)
             else:
-                market_nodes = [name for name, ntype in node_types.items() if ntype == NodeType.RETAILER.value]
-                if not market_nodes and node_policies:
-                    market_nodes = [next(iter(node_policies.keys()))]
+                upstream_names = {entry["from"] for entry in lane_payload if entry.get("from")}
+                downstream_only = {entry["to"] for entry in lane_payload if entry.get("to") and entry["to"] not in upstream_names}
+                if downstream_only:
+                    market_nodes = sorted(downstream_only)
+                else:
+                    fallback_retailers = [name for name, ntype in node_types.items() if ntype == NodeType.RETAILER.value.lower() or ntype == "retailer"]
+                    if fallback_retailers:
+                        market_nodes = fallback_retailers
+                    elif node_policies:
+                        market_nodes = [next(iter(node_policies.keys()))]
 
         # Create demand pattern from market demands
         # For now, use a simple constant demand based on the first market demand found

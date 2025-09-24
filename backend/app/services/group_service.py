@@ -92,10 +92,12 @@ class GroupService:
             self.db.flush()
 
             node_specs = [
-                ("Retailer", NodeType.RETAILER),
-                ("Wholesaler", NodeType.WHOLESALER),
-                ("Distributor", NodeType.DISTRIBUTOR),
+                ("Market Supply", NodeType.MARKET_SUPPLY),
                 ("Manufacturer", NodeType.MANUFACTURER),
+                ("Distributor", NodeType.DISTRIBUTOR),
+                ("Wholesaler", NodeType.WHOLESALER),
+                ("Retailer", NodeType.RETAILER),
+                ("Market Demand", NodeType.MARKET_DEMAND),
             ]
             nodes = {}
             for name, node_type in node_specs:
@@ -109,9 +111,11 @@ class GroupService:
                 nodes[node_type] = node
 
             lane_specs = [
+                (NodeType.MARKET_SUPPLY, NodeType.MANUFACTURER),
                 (NodeType.MANUFACTURER, NodeType.DISTRIBUTOR),
                 (NodeType.DISTRIBUTOR, NodeType.WHOLESALER),
                 (NodeType.WHOLESALER, NodeType.RETAILER),
+                (NodeType.RETAILER, NodeType.MARKET_DEMAND),
             ]
             for upstream_type, downstream_type in lane_specs:
                 lane = Lane(
@@ -119,13 +123,18 @@ class GroupService:
                     upstream_node_id=nodes[upstream_type].id,
                     downstream_node_id=nodes[downstream_type].id,
                     capacity=9999,
-                    lead_time_days={"min": 2, "max": 10},
+                    lead_time_days={
+                        "min": 0 if upstream_type == NodeType.MARKET_SUPPLY or downstream_type == NodeType.MARKET_DEMAND else 2,
+                        "max": 0 if upstream_type == NodeType.MARKET_SUPPLY or downstream_type == NodeType.MARKET_DEMAND else 10,
+                    },
                 )
                 self.db.add(lane)
 
             self.db.flush()
 
             for node in nodes.values():
+                if node.type in {NodeType.MARKET_SUPPLY, NodeType.MARKET_DEMAND}:
+                    continue
                 node_config = ItemNodeConfig(
                     item_id=item.id,
                     node_id=node.id,

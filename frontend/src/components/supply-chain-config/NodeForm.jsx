@@ -37,17 +37,21 @@ import {
 } from '@mui/icons-material';
 
 const NODE_TYPES = [
-  { value: 'retailer', label: 'Retailer' },
-  { value: 'wholesaler', label: 'Wholesaler' },
-  { value: 'distributor', label: 'Distributor' },
+  { value: 'market_supply', label: 'Market Supply' },
   { value: 'manufacturer', label: 'Manufacturer' },
+  { value: 'distributor', label: 'Distributor' },
+  { value: 'wholesaler', label: 'Wholesaler' },
+  { value: 'retailer', label: 'Retailer' },
+  { value: 'market_demand', label: 'Market Demand' },
 ];
 
 const NODE_TYPE_COLORS = {
   retailer: 'success',
+  wholesaler: 'error',
   distributor: 'info',
   manufacturer: 'warning',
-  wholesaler: 'error',
+  market_supply: 'primary',
+  market_demand: 'secondary',
 };
 
 const NodeForm = ({ nodes = [], onAdd, onUpdate, onDelete, loading = false }) => {

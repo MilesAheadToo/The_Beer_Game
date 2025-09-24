@@ -25,6 +25,8 @@ class NodeType(str, PyEnum):
     WHOLESALER = "WHOLESALER"
     DISTRIBUTOR = "DISTRIBUTOR"
     MANUFACTURER = "MANUFACTURER"
+    MARKET_DEMAND = "MARKET_DEMAND"
+    MARKET_SUPPLY = "MARKET_SUPPLY"
 
 class SupplyChainConfig(Base):
     """Core configuration for the supply chain"""

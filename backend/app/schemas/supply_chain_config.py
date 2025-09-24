@@ -8,6 +8,8 @@ class NodeType(str, Enum):
     WHOLESALER = "wholesaler"
     DISTRIBUTOR = "distributor"
     MANUFACTURER = "manufacturer"
+    MARKET_DEMAND = "market_demand"
+    MARKET_SUPPLY = "market_supply"
 
 class RangeConfig(BaseModel):
     min: float = Field(..., ge=0, description="Minimum value")

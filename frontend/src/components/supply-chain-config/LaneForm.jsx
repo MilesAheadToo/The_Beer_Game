@@ -34,6 +34,15 @@ import {
   ArrowForward as ArrowForwardIcon
 } from '@mui/icons-material';
 
+const FLOW_RULES = {
+  market_supply: ['manufacturer', 'distributor', 'wholesaler', 'retailer', 'market_demand'],
+  manufacturer: ['distributor', 'wholesaler', 'retailer', 'market_demand'],
+  distributor: ['wholesaler', 'retailer', 'market_demand'],
+  wholesaler: ['retailer', 'market_demand'],
+  retailer: ['market_demand'],
+  market_demand: [],
+};
+
 const LaneForm = ({ 
   lanes = [], 
   nodes = [],
@@ -58,49 +67,47 @@ const LaneForm = ({
   useEffect(() => {
     if (formData.from_node_id) {
       const fromNode = nodes.find(n => n.id === formData.from_node_id);
-      
-      // Filter out the source node and any nodes that would create a cycle
+      const fromType = fromNode?.type;
+      const allowedTypes = FLOW_RULES[fromType] || nodes.map(node => node.type);
+
       const availableNodes = nodes.filter(node => {
-        // Can't connect to self
         if (node.id === formData.from_node_id) return false;
-        
-        // Get node types
-        const fromType = fromNode?.type;
-        const toType = node.type;
-        
-        // Enforce supply chain flow: manufacturer -> distributor -> wholesaler -> retailer
-        switch (fromType) {
-          case 'manufacturer':
-            return toType === 'distributor';
-          case 'distributor':
-            return toType === 'wholesaler';
-          case 'wholesaler':
-            return toType === 'retailer';
-          default:
-            return false; // Retailers can't have outgoing lanes
+        if (node.type === 'market_supply') return false;
+        if (fromType === 'market_demand') return false;
+        if (allowedTypes && allowedTypes.length > 0) {
+          return allowedTypes.includes(node.type);
         }
+        return true;
       });
-      
+
       setFilteredToNodes(availableNodes);
-      
-      // Reset to_node_id if current selection is no longer valid
+
+       if (!editingLane && fromType === 'market_supply' && formData.lead_time !== 0) {
+         setFormData(prev => ({ ...prev, lead_time: 0 }));
+       }
+
       if (formData.to_node_id && !availableNodes.some(n => n.id === formData.to_node_id)) {
         setFormData(prev => ({ ...prev, to_node_id: '' }));
       }
     } else {
       setFilteredToNodes([]);
     }
-  }, [formData.from_node_id, formData.to_node_id, nodes]);
+  }, [formData.from_node_id, formData.to_node_id, nodes, editingLane, formData.lead_time]);
 
   const handleOpenDialog = (lane = null) => {
     if (lane) {
       setEditingLane(lane);
+      const existingLeadTime = lane.lead_time !== undefined
+        ? lane.lead_time
+        : lane.lead_time_days && typeof lane.lead_time_days === 'object'
+          ? lane.lead_time_days.min ?? 0
+          : 0;
       setFormData({
         from_node_id: lane.from_node_id,
         to_node_id: lane.to_node_id,
-        lead_time: lane.lead_time || 1,
-        capacity: lane.capacity || 100,
-        cost_per_unit: lane.cost_per_unit || 1.0
+        lead_time: existingLeadTime,
+        capacity: lane.capacity ?? 100,
+        cost_per_unit: lane.cost_per_unit ?? 1.0
       });
     } else {
       setEditingLane(null);
@@ -176,15 +183,19 @@ const LaneForm = ({
     if (!validateForm()) {
       return;
     }
-    
+
     const laneData = {
       from_node_id: formData.from_node_id,
       to_node_id: formData.to_node_id,
       lead_time: parseInt(formData.lead_time, 10),
+      lead_time_days: {
+        min: parseInt(formData.lead_time, 10),
+        max: parseInt(formData.lead_time, 10),
+      },
       capacity: parseInt(formData.capacity, 10),
       cost_per_unit: parseFloat(formData.cost_per_unit)
     };
-    
+
     if (editingLane) {
       onUpdate(editingLane.id, laneData);
     } else {
@@ -202,10 +213,31 @@ const LaneForm = ({
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    const numericValue = typeof value === 'string' && value !== '' && name !== 'cost_per_unit'
+      ? Number(value)
+      : value;
+    setFormData(prev => {
+      const next = {
+        ...prev,
+        [name]: numericValue
+      };
+
+      if (name === 'from_node_id') {
+        const fromNode = nodes.find(n => n.id === numericValue);
+        if (fromNode?.type === 'market_supply') {
+          next.lead_time = 0;
+        }
+      }
+
+      if (name === 'to_node_id') {
+        const toNode = nodes.find(n => n.id === numericValue);
+        if (toNode?.type === 'market_demand') {
+          next.lead_time = 0;
+        }
+      }
+
+      return next;
+    });
   };
 
   const getNodeName = (nodeId) => {
@@ -218,22 +250,60 @@ const LaneForm = ({
     return node ? node.type : 'unknown';
   };
 
+  const toTitle = (value) => value ? value.split('_').join(' ').replace(/\b\w/g, char => char.toUpperCase()) : 'Unknown';
+
+  const getNodeTypeLabel = (type) => NODE_TYPE_LABELS[type] || toTitle(type);
+
+  const getNodeTypeColor = (type) => NODE_TYPE_COLORS[type] || 'default';
+
+  const getLeadTimeDisplay = (lane) => {
+    if (lane.lead_time_days && typeof lane.lead_time_days === 'object') {
+      const { min, max } = lane.lead_time_days;
+      if (min === max) {
+        return `${min} days`;
+      }
+      return `${min} - ${max} days`;
+    }
+    if (lane.lead_time !== undefined) {
+      return `${lane.lead_time} days`;
+    }
+    return '—';
+  };
+
+  const getCapacityDisplay = (lane) => {
+    const value = lane.capacity;
+    if (value === undefined || value === null) return '—';
+    return Number(value).toLocaleString();
+  };
+
+  const getCostDisplay = (lane) => {
+    if (lane.cost_per_unit === undefined || lane.cost_per_unit === null) {
+      return '—';
+    }
+    const numeric = Number(lane.cost_per_unit);
+    return `$${numeric.toFixed(2)}`;
+  };
+
   const NODE_TYPE_LABELS = {
     retailer: 'Retailer',
+    wholesaler: 'Wholesaler',
     distributor: 'Distributor',
     manufacturer: 'Manufacturer',
-    wholesaler: 'Wholesaler'
+    market_supply: 'Market Supply',
+    market_demand: 'Market Demand'
   };
 
   const NODE_TYPE_COLORS = {
     retailer: 'success',
+    wholesaler: 'error',
     distributor: 'info',
     manufacturer: 'warning',
-    wholesaler: 'error'
+    market_supply: 'primary',
+    market_demand: 'secondary'
   };
 
-  // Get source nodes that can have outgoing lanes (all except retailers)
-  const sourceNodes = nodes.filter(node => node.type !== 'retailer');
+  // Get source nodes that can have outgoing lanes (exclude demand sinks)
+  const sourceNodes = nodes.filter(node => node.type !== 'market_demand');
 
   return (
     <Box>
@@ -244,7 +314,7 @@ const LaneForm = ({
           color="primary"
           startIcon={<AddIcon />}
           onClick={() => handleOpenDialog()}
-          disabled={loading || nodes.length < 2}
+          disabled={loading || nodes.length < 2 || sourceNodes.length === 0}
         >
           Add Lane
         </Button>
@@ -256,12 +326,26 @@ const LaneForm = ({
             Add at least 2 nodes to create lanes between them.
           </Typography>
         </Paper>
+      ) : sourceNodes.length === 0 ? (
+        <Paper variant="outlined" sx={{ p: 3, textAlign: 'center' }}>
+          <Typography color="textSecondary">
+            Add at least one upstream node (e.g., Market Supply or Manufacturer) to originate lanes.
+          </Typography>
+        </Paper>
       ) : (
         <TableContainer component={Paper} variant="outlined">
+          <Box px={3} py={2} borderBottom={1} borderColor="divider">
+            <Typography variant="body2" color="textSecondary">
+              Items flow from the source node to the destination node. Orders travel in the opposite direction.
+            </Typography>
+          </Box>
           <Table size="small">
             <TableHead>
               <TableRow>
                 <TableCell>From Node</TableCell>
+                <TableCell align="center" width={48}>
+                  <ArrowForwardIcon fontSize="small" color="action" />
+                </TableCell>
                 <TableCell>To Node</TableCell>
                 <TableCell align="right">Lead Time</TableCell>
                 <TableCell align="right">Capacity</TableCell>
@@ -272,7 +356,7 @@ const LaneForm = ({
             <TableBody>
               {lanes.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} align="center">
+                  <TableCell colSpan={7} align="center">
                     No lanes added yet. Click "Add Lane" to connect nodes.
                   </TableCell>
                 </TableRow>
@@ -282,28 +366,31 @@ const LaneForm = ({
                     <TableCell>
                       <Box display="flex" alignItems="center">
                         <Chip 
-                          label={NODE_TYPE_LABELS[getNodeType(lane.from_node_id)]}
+                          label={getNodeTypeLabel(getNodeType(lane.from_node_id))}
                           size="small"
-                          color={NODE_TYPE_COLORS[getNodeType(lane.from_node_id)]}
+                          color={getNodeTypeColor(getNodeType(lane.from_node_id))}
                           sx={{ mr: 1 }}
                         />
                         {getNodeName(lane.from_node_id)}
                       </Box>
                     </TableCell>
+                    <TableCell align="center">
+                      <ArrowForwardIcon fontSize="small" color="action" />
+                    </TableCell>
                     <TableCell>
                       <Box display="flex" alignItems="center">
                         <Chip 
-                          label={NODE_TYPE_LABELS[getNodeType(lane.to_node_id)]}
+                          label={getNodeTypeLabel(getNodeType(lane.to_node_id))}
                           size="small"
-                          color={NODE_TYPE_COLORS[getNodeType(lane.to_node_id)]}
+                          color={getNodeTypeColor(getNodeType(lane.to_node_id))}
                           sx={{ mr: 1 }}
                         />
                         {getNodeName(lane.to_node_id)}
                       </Box>
                     </TableCell>
-                    <TableCell align="right">{lane.lead_time} days</TableCell>
-                    <TableCell align="right">{lane.capacity.toLocaleString()}</TableCell>
-                    <TableCell align="right">${lane.cost_per_unit.toFixed(2)}</TableCell>
+                    <TableCell align="right">{getLeadTimeDisplay(lane)}</TableCell>
+                    <TableCell align="right">{getCapacityDisplay(lane)}</TableCell>
+                    <TableCell align="right">{getCostDisplay(lane)}</TableCell>
                     <TableCell align="right">
                       <Tooltip title="Edit">
                         <IconButton 
@@ -355,9 +442,9 @@ const LaneForm = ({
                       <MenuItem key={node.id} value={node.id}>
                         <Box display="flex" alignItems="center">
                           <Chip 
-                            label={NODE_TYPE_LABELS[node.type]}
+                            label={getNodeTypeLabel(node.type)}
                             size="small"
-                            color={NODE_TYPE_COLORS[node.type]}
+                            color={getNodeTypeColor(node.type)}
                             sx={{ mr: 1 }}
                           />
                           {node.name}
@@ -386,9 +473,9 @@ const LaneForm = ({
                       <MenuItem key={node.id} value={node.id}>
                         <Box display="flex" alignItems="center">
                           <Chip 
-                            label={NODE_TYPE_LABELS[node.type]}
+                            label={getNodeTypeLabel(node.type)}
                             size="small"
-                            color={NODE_TYPE_COLORS[node.type]}
+                            color={getNodeTypeColor(node.type)}
                             sx={{ mr: 1 }}
                           />
                           {node.name}
