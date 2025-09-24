@@ -86,6 +86,94 @@ def get_node_or_404(db: Session, node_id: int, config_id: int):
     return node
 
 
+def get_lane_or_404(db: Session, lane_id: int, config_id: int):
+    lane = crud.lane.get(db, id=lane_id)
+    if not lane or lane.config_id != config_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lane not found in this configuration",
+        )
+    return lane
+
+
+def get_item_node_config_or_404(db: Session, config_id: int, config_entry_id: int):
+    entry = crud.item_node_config.get(db, id=config_entry_id)
+    if not entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item-node configuration not found",
+        )
+
+    node = crud.node.get(db, id=entry.node_id)
+    item = crud.item.get(db, id=entry.item_id)
+    if not node or node.config_id != config_id or not item or item.config_id != config_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Item-node configuration not found in this configuration",
+        )
+    return entry
+
+
+def get_market_demand_or_404(db: Session, config_id: int, demand_id: int):
+    demand = crud.market_demand.get(db, id=demand_id)
+    if not demand or demand.config_id != config_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Market demand entry not found in this configuration",
+        )
+    return demand
+
+
+def _lane_to_payload(lane: models.Lane) -> Dict[str, Any]:
+    lead_time_days = lane.lead_time_days or {}
+    min_lead = lead_time_days.get("min")
+    max_lead = lead_time_days.get("max")
+
+    if min_lead is not None and max_lead is not None and min_lead == max_lead:
+        lead_time = min_lead
+    elif min_lead is not None:
+        lead_time = min_lead
+    elif max_lead is not None:
+        lead_time = max_lead
+    else:
+        lead_time = None
+
+    return {
+        "id": lane.id,
+        "from_node_id": lane.upstream_node_id,
+        "to_node_id": lane.downstream_node_id,
+        "capacity": lane.capacity,
+        "lead_time_days": lead_time_days,
+        "lead_time": lead_time,
+        "cost_per_unit": None,
+    }
+
+
+def _coerce_lane_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    upstream = payload.get("from_node_id", payload.get("upstream_node_id"))
+    downstream = payload.get("to_node_id", payload.get("downstream_node_id"))
+
+    lead_time_days = payload.get("lead_time_days")
+    if not lead_time_days and payload.get("lead_time") is not None:
+        try:
+            value = int(payload["lead_time"])
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Lead time must be a whole number",
+            )
+        lead_time_days = {"min": value, "max": value}
+
+    data = {
+        "upstream_node_id": upstream,
+        "downstream_node_id": downstream,
+        "capacity": payload.get("capacity"),
+        "lead_time_days": lead_time_days,
+    }
+
+    return data
+
+
 def _get_user_admin_group_id(db: Session, user: models.User) -> Optional[int]:
     """Return the group ID managed by the provided user, if any."""
     if user.is_superuser:
@@ -712,6 +800,62 @@ def create_item(
     _mark_config_requires_training(db, config)
     return created
 
+@router.get("/{config_id}/items/{item_id}", response_model=schemas.Item)
+def read_item(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    item_id: int,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    return get_item_or_404(db, item_id, config_id)
+
+
+@router.put("/{config_id}/items/{item_id}", response_model=schemas.Item)
+def update_item(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    item_id: int,
+    item_in: schemas.ItemUpdate,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    db_item = get_item_or_404(db, item_id, config_id)
+
+    new_name = item_in.name.strip() if isinstance(item_in.name, str) else db_item.name
+    if new_name and new_name != db_item.name:
+        existing = crud.item.get_by_name(db, name=new_name, config_id=config_id)
+        if existing and existing.id != db_item.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="An item with this name already exists in this configuration",
+            )
+
+    updated = crud.item.update(db, db_obj=db_item, obj_in=item_in)
+    _mark_config_requires_training(db, config)
+    return updated
+
+
+@router.delete("/{config_id}/items/{item_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_item(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    item_id: int,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    db_item = get_item_or_404(db, item_id, config_id)
+
+    crud.item.remove(db, id=db_item.id)
+    _mark_config_requires_training(db, config)
+    return None
+
 # ... (Additional endpoints for items, nodes, lanes, item_node_configs, and market_demands)
 # The full implementation would include similar CRUD endpoints for all models
 # including proper error handling and permissions
@@ -758,6 +902,432 @@ def create_node(
     _mark_config_requires_training(db, config)
     return created
 
+
+@router.get("/{config_id}/nodes/{node_id}", response_model=schemas.Node)
+def read_node(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    node_id: int,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    return get_node_or_404(db, node_id, config_id)
+
+
+@router.put("/{config_id}/nodes/{node_id}", response_model=schemas.Node)
+def update_node(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    node_id: int,
+    node_in: schemas.NodeUpdate,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    db_node = get_node_or_404(db, node_id, config_id)
+
+    new_name = node_in.name.strip() if isinstance(node_in.name, str) else db_node.name
+    new_type = node_in.type or db_node.type
+
+    if (new_name != db_node.name) or (new_type != db_node.type):
+        existing = crud.node.get_by_name_and_type(
+            db,
+            name=new_name,
+            node_type=new_type,
+            config_id=config_id,
+        )
+        if existing and existing.id != db_node.id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A node with this name and type already exists in this configuration",
+            )
+
+    updated = crud.node.update(db, db_obj=db_node, obj_in=node_in)
+    _mark_config_requires_training(db, config)
+    return updated
+
+
+@router.delete("/{config_id}/nodes/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_node(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    node_id: int,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    db_node = get_node_or_404(db, node_id, config_id)
+
+    if db_node.upstream_lanes or db_node.downstream_lanes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Remove associated lanes before deleting this node",
+        )
+
+    crud.node.remove(db, id=db_node.id)
+    _mark_config_requires_training(db, config)
+    return None
+
+
+# --- Lane Endpoints ---
+
+@router.get("/{config_id}/lanes")
+def read_lanes(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    current_user: models.User = Depends(deps.get_current_active_user),
+) -> List[Dict[str, Any]]:
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    lanes = crud.lane.get_by_config(db, config_id=config_id)
+    return [_lane_to_payload(lane) for lane in lanes]
+
+
+@router.get("/{config_id}/lanes/{lane_id}")
+def read_lane(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    lane_id: int,
+    current_user: models.User = Depends(deps.get_current_active_user),
+) -> Dict[str, Any]:
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    lane = get_lane_or_404(db, lane_id, config_id)
+    return _lane_to_payload(lane)
+
+
+@router.post("/{config_id}/lanes", status_code=status.HTTP_201_CREATED)
+def create_lane(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    lane_in: Dict[str, Any] = Body(...),
+    current_user: models.User = Depends(deps.get_current_active_user),
+) -> Dict[str, Any]:
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+
+    lane_data = _coerce_lane_payload(lane_in)
+    upstream_id = lane_data.get("upstream_node_id")
+    downstream_id = lane_data.get("downstream_node_id")
+    capacity = lane_data.get("capacity")
+    lead_time_days = lane_data.get("lead_time_days")
+
+    if not upstream_id or not downstream_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Both source and destination nodes are required",
+        )
+
+    upstream_node = get_node_or_404(db, upstream_id, config_id)
+    downstream_node = get_node_or_404(db, downstream_id, config_id)
+
+    if upstream_node.id == downstream_node.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Source and destination nodes must be different",
+        )
+
+    if lead_time_days is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Lead time information is required",
+        )
+
+    if capacity is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Capacity is required",
+        )
+
+    existing = crud.lane.get_by_nodes(
+        db,
+        upstream_node_id=upstream_node.id,
+        downstream_node_id=downstream_node.id,
+        config_id=config_id,
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A lane between these nodes already exists",
+        )
+
+    lane_payload = schemas.LaneCreate(**lane_data)
+    created = crud.lane.create_with_config(db, obj_in=lane_payload, config_id=config_id)
+    _mark_config_requires_training(db, config)
+    return _lane_to_payload(created)
+
+
+@router.put("/{config_id}/lanes/{lane_id}")
+def update_lane(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    lane_id: int,
+    lane_in: Dict[str, Any] = Body(...),
+    current_user: models.User = Depends(deps.get_current_active_user),
+) -> Dict[str, Any]:
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    lane = get_lane_or_404(db, lane_id, config_id)
+
+    update_payload: Dict[str, Any] = {}
+    if "capacity" in lane_in and lane_in["capacity"] is not None:
+        try:
+            update_payload["capacity"] = int(lane_in["capacity"])
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Capacity must be a whole number",
+            )
+
+    lead_time_days = lane_in.get("lead_time_days")
+    if not lead_time_days and lane_in.get("lead_time") is not None:
+        try:
+            value = int(lane_in["lead_time"])
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Lead time must be a whole number",
+            )
+        lead_time_days = {"min": value, "max": value}
+    if lead_time_days is not None:
+        update_payload["lead_time_days"] = lead_time_days
+
+    if not update_payload:
+        return _lane_to_payload(lane)
+
+    lane_update = schemas.LaneUpdate(**update_payload)
+    updated = crud.lane.update(db, db_obj=lane, obj_in=lane_update)
+    _mark_config_requires_training(db, config)
+    return _lane_to_payload(updated)
+
+
+@router.delete("/{config_id}/lanes/{lane_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_lane(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    lane_id: int,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    lane = get_lane_or_404(db, lane_id, config_id)
+
+    crud.lane.remove(db, id=lane.id)
+    _mark_config_requires_training(db, config)
+    return None
+
+
+# --- Item-Node Configuration Endpoints ---
+
+@router.get("/{config_id}/item-node-configs", response_model=List[schemas.ItemNodeConfig])
+def read_item_node_configs(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    return crud.item_node_config.get_by_config(db, config_id=config_id)
+
+
+@router.post(
+    "/{config_id}/item-node-configs",
+    response_model=schemas.ItemNodeConfig,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_item_node_config(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    config_in: schemas.ItemNodeConfigCreate,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+
+    item = crud.item.get(db, id=config_in.item_id)
+    node = crud.node.get(db, id=config_in.node_id)
+    if not item or item.config_id != config_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Item must belong to this configuration",
+        )
+    if not node or node.config_id != config_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Node must belong to this configuration",
+        )
+
+    existing = crud.item_node_config.get_by_item_and_node(
+        db,
+        item_id=config_in.item_id,
+        node_id=config_in.node_id,
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This item already has configuration for the specified node",
+        )
+
+    created = crud.item_node_config.create(db, obj_in=config_in)
+    _mark_config_requires_training(db, config)
+    return created
+
+
+@router.put(
+    "/{config_id}/item-node-configs/{config_entry_id}",
+    response_model=schemas.ItemNodeConfig,
+)
+def update_item_node_config(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    config_entry_id: int,
+    config_in: schemas.ItemNodeConfigUpdate,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    entry = get_item_node_config_or_404(db, config_id, config_entry_id)
+
+    updated = crud.item_node_config.update(db, db_obj=entry, obj_in=config_in)
+    _mark_config_requires_training(db, config)
+    return updated
+
+
+@router.delete(
+    "/{config_id}/item-node-configs/{config_entry_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_item_node_config(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    config_entry_id: int,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    entry = get_item_node_config_or_404(db, config_id, config_entry_id)
+
+    crud.item_node_config.remove(db, id=entry.id)
+    _mark_config_requires_training(db, config)
+    return None
+
+
+# --- Market Demand Endpoints ---
+
+@router.get(
+    "/{config_id}/market-demands",
+    response_model=List[schemas.MarketDemand],
+)
+def read_market_demands(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    return crud.market_demand.get_by_config(db, config_id=config_id)
+
+
+@router.post(
+    "/{config_id}/market-demands",
+    response_model=schemas.MarketDemand,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_market_demand(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    demand_in: schemas.MarketDemandCreate,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+
+    item = crud.item.get(db, id=demand_in.item_id)
+    retailer = crud.node.get(db, id=demand_in.retailer_id)
+
+    if not item or item.config_id != config_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Item must belong to this configuration",
+        )
+
+    if not retailer or retailer.config_id != config_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Retailer must belong to this configuration",
+        )
+
+    existing = crud.market_demand.get_by_item_and_retailer(
+        db,
+        item_id=demand_in.item_id,
+        retailer_id=demand_in.retailer_id,
+        config_id=config_id,
+    )
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A market demand entry already exists for this item and retailer",
+        )
+
+    created = crud.market_demand.create(db, obj_in=demand_in)
+    _mark_config_requires_training(db, config)
+    return created
+
+
+@router.put(
+    "/{config_id}/market-demands/{demand_id}",
+    response_model=schemas.MarketDemand,
+)
+def update_market_demand(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    demand_id: int,
+    demand_in: schemas.MarketDemandUpdate,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    demand = get_market_demand_or_404(db, config_id, demand_id)
+
+    updated = crud.market_demand.update(db, db_obj=demand, obj_in=demand_in)
+    _mark_config_requires_training(db, config)
+    return updated
+
+
+@router.delete(
+    "/{config_id}/market-demands/{demand_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_market_demand(
+    *,
+    db: Session = Depends(deps.get_db),
+    config_id: int,
+    demand_id: int,
+    current_user: models.User = Depends(deps.get_current_active_user),
+):
+    config = get_config_or_404(db, config_id)
+    _ensure_user_can_manage_config(db, current_user, config)
+    demand = get_market_demand_or_404(db, config_id, demand_id)
+
+    crud.market_demand.remove(db, id=demand.id)
+    _mark_config_requires_training(db, config)
+    return None
 # --- Game Integration Endpoints ---
 
 @router.post("/{config_id}/create-game", response_model=Dict[str, Any])

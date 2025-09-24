@@ -3,9 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Button,
-  Card,
-  CardContent,
-  CardHeader,
   Chip,
   CircularProgress,
   Dialog,
@@ -13,10 +10,7 @@ import {
   DialogContent,
   DialogContentText,
   DialogTitle,
-  Divider,
   IconButton,
-  List,
-  ListItem,
   Menu,
   MenuItem,
   Paper,
@@ -398,99 +392,6 @@ const SupplyChainConfigList = ({
 
   return (
     <>
-      <Card>
-        <CardHeader 
-          title={title}
-          action={
-            <Button
-              variant="contained"
-              color="primary"
-              startIcon={<AddIcon />}
-              onClick={handleCreateNew}
-            >
-              New Configuration
-            </Button>
-          }
-        />
-        <Divider />
-        <CardContent>
-          {configs.length === 0 ? (
-            <Box textAlign="center" py={4}>
-              <Typography
-                variant="body1"
-                color={error ? 'error.main' : 'text.secondary'}
-              >
-                {error || 'No supply chain configurations found. Create your first configuration to get started.'}
-              </Typography>
-              <Box mt={2}>
-                <Button
-                  variant="contained"
-                  color="primary"
-                  startIcon={<AddIcon />}
-                  onClick={handleCreateNew}
-                >
-                  Create Configuration
-                </Button>
-              </Box>
-            </Box>
-          ) : (
-            <List>
-              {configs.map((config) => (
-                <React.Fragment key={config.id}>
-                  <ListItem>
-                    <Box display="flex" alignItems="center" width="100%">
-                      <Box flexGrow={1}>
-                        <Box display="flex" alignItems="center" mb={1}>
-                          <Typography variant="h6" component="div">
-                            {config.name}
-                          </Typography>
-                          {config.is_active && (
-                            <Chip
-                              label="Active"
-                              color="success"
-                              size="small"
-                              sx={{ ml: 1 }}
-                              icon={<ActiveIcon />}
-                            />
-                          )}
-                          {enableTraining && (
-                            <Box ml={1}>{renderTrainingChip(config)}</Box>
-                          )}
-                        </Box>
-                        <Typography variant="body2" color="textSecondary">
-                          {config.description || 'No description provided'}
-                        </Typography>
-                        <Box display="flex" mt={1}>
-                          <Typography variant="caption" color="textSecondary" sx={{ mr: 2 }}>
-                            Created: {format(new Date(config.created_at), 'MMM d, yyyy')}
-                          </Typography>
-                          <Typography variant="caption" color="textSecondary">
-                            Updated: {format(new Date(config.updated_at), 'MMM d, yyyy')}
-                          </Typography>
-                        </Box>
-                      </Box>
-                      <Box>
-                        <Tooltip title="Actions">
-                          <IconButton
-                            onClick={(e) => handleMenuOpen(e, config)}
-                            color="primary"
-                            size="large"
-                          >
-                            <MoreVertIcon />
-                          </IconButton>
-                        </Tooltip>
-                      </Box>
-                    </Box>
-                  </ListItem>
-                  <Divider component="li" />
-                </React.Fragment>
-              ))}
-            </List>
-          )}
-        </CardContent>
-      </Card>
-
-
       <Paper elevation={0} sx={{ p: 3 }}>
         <Box
           display="flex"
@@ -502,7 +403,7 @@ const SupplyChainConfigList = ({
         >
           <Box>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
-              Supply Chain Configurations
+              {title}
             </Typography>
             <Typography variant="body2" color="text.secondary">
               Manage the supply chain setups available for your group&apos;s games.
