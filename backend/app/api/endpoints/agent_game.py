@@ -1,11 +1,13 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import Dict, Any, Optional
 
-from app.db.session import get_db
-from app.schemas.game import GameCreate, GameUpdate, GameState, PlayerState
-from app.services.agent_game_service import AgentGameService
+from fastapi import Body
+
 from app.core.security import get_current_user
+from app.db.session import get_db
+from app.schemas.game import GameCreate
+from app.services.agent_game_service import AgentGameService
 
 router = APIRouter()
 
@@ -88,6 +90,7 @@ def set_agent_strategy(
     game_id: int,
     role: str,
     strategy: str,
+    params: Optional[Dict[str, Any]] = Body(default=None),
     agent_service: AgentGameService = Depends(get_agent_service),
     current_user: dict = Depends(get_current_user)
 ):
@@ -98,7 +101,7 @@ def set_agent_strategy(
     - **strategy**: The strategy to use (naive, bullwhip, conservative, random)
     """
     try:
-        agent_service.set_agent_strategy(role, strategy)
+        agent_service.set_agent_strategy(game_id, role, strategy, params=params)
         return {"message": f"Strategy for {role} set to {strategy}"}
     except ValueError as e:
         raise HTTPException(

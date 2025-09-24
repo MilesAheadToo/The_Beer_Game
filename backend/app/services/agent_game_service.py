@@ -1,30 +1,57 @@
-from typing import List, Dict, Optional, Any
-from datetime import datetime
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, select
+"""Service layer for running fully automated Beer Game simulations."""
 
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.orm import Session
+
+from app.core.demand_patterns import (
+    DEFAULT_CLASSIC_PARAMS,
+    DEFAULT_DEMAND_PATTERN,
+    normalize_demand_pattern,
+)
 from app.models.game import Game, GameStatus
 from app.models.player import Player, PlayerRole
-from app.models.supply_chain import PlayerInventory, Order, GameRound, PlayerRound
-from app.db.session import SessionLocal, get_db
-from app.schemas.game import GameCreate, PlayerCreate, GameState, PlayerState, DemandPattern
-from app.services.agents import AgentManager, AgentType, AgentStrategy
-from app.services.llm_payload import build_llm_decision_payload
-from app.core.demand_patterns import (
-    normalize_demand_pattern,
-    DEFAULT_DEMAND_PATTERN,
-    DEFAULT_CLASSIC_PARAMS,
-)
+from app.models.supply_chain import GameRound, PlayerInventory, PlayerRound
+from app.schemas.game import GameCreate, DemandPattern
+
+from .engine import BeerLine
+from .policy_factory import make_policy
+
 
 class AgentGameService:
-    """Service for managing the Beer Game with AI agents."""
-    
-    def __init__(self, db_session: AsyncSession):
+    """Manage Beer Game simulations where every role is controlled by an agent."""
+
+    ROLE_SEQUENCE: List[PlayerRole] = [
+        PlayerRole.RETAILER,
+        PlayerRole.WHOLESALER,
+        PlayerRole.DISTRIBUTOR,
+        PlayerRole.MANUFACTURER,
+    ]
+
+    ROLE_LABELS: Dict[PlayerRole, str] = {
+        PlayerRole.RETAILER: "Retailer",
+        PlayerRole.WHOLESALER: "Wholesaler",
+        PlayerRole.DISTRIBUTOR: "Distributor",
+        PlayerRole.MANUFACTURER: "Factory",
+    }
+    LABEL_TO_ROLE: Dict[str, PlayerRole] = {
+        label: role for role, label in ROLE_LABELS.items()
+    }
+
+    def __init__(self, db_session: Session) -> None:
         self.db = db_session
-        self.agent_manager = AgentManager(can_see_demand=False)
-    
+        self._demand_visible = False
+
+    # ------------------------------------------------------------------
+    # Game lifecycle helpers
+    # ------------------------------------------------------------------
+
     def create_game(self, game_data: GameCreate) -> Game:
-        """Create a new game with AI agents."""
+        """Create a new Beer Game and register AI players for every role."""
+
         pattern_config = (
             normalize_demand_pattern(game_data.demand_pattern.dict())
             if game_data.demand_pattern
@@ -36,306 +63,335 @@ class AgentGameService:
             status=GameStatus.CREATED,
             current_round=0,
             max_rounds=game_data.max_rounds,
-            demand_pattern=pattern_config
+            demand_pattern=pattern_config,
+            config={"agent_policies": self._default_policy_config()},
         )
         self.db.add(game)
         self.db.commit()
         self.db.refresh(game)
-        
-        # Create AI players for each role
+
         self._create_ai_players(game.id)
-        
         return game
-    
-    def _create_ai_players(self, game_id: int):
-        """Create AI players for all roles."""
-        roles = [
-            (PlayerRole.RETAILER, "AI Retailer"),
-            (PlayerRole.WHOLESALER, "AI Wholesaler"),
-            (PlayerRole.DISTRIBUTOR, "AI Distributor"),
-            (PlayerRole.MANUFACTURER, "AI Manufacturer")
-        ]
-        
-        for role, name in roles:
-            player = Player(
-                game_id=game_id,
-                name=name,
-                role=role,
-                is_ai=True
-            )
-            self.db.add(player)
-        
-        self.db.commit()
-    
+
     def start_game(self, game_id: int) -> Game:
-        """Start the game and initialize the first round."""
-        game = self.db.query(Game).filter(Game.id == game_id).first()
-        if not game:
-            raise ValueError("Game not found")
-            
-        game.status = GameStatus.IN_PROGRESS
+        game = self._get_game(game_id)
+        if game.status not in {GameStatus.CREATED, GameStatus.ROUND_COMPLETED}:
+            raise ValueError("Game is already in progress or finished")
+
+        config = self._ensure_agent_config(game)
+        policies = self._build_policy_map(config)
+        base_stocks = self._extract_base_stocks(config)
+        line = BeerLine(role_policies=policies, base_stocks=base_stocks)
+
+        config["agent_engine_state"] = line.to_dict()
+        game.config = config
+        game.status = GameStatus.STARTED
         game.current_round = 1
         game.started_at = datetime.utcnow()
-        
-        # Initialize player inventories
-        players = self.db.query(Player).filter(Player.game_id == game_id).all()
-        for player in players:
-            inventory = PlayerInventory(
-                player_id=player.id,
-                current_inventory=12,  # Starting inventory
-                current_backlog=0,
-                incoming_shipment=0,
-                outgoing_shipment=0
-            )
-            self.db.add(inventory)
-        
+
+        self._initialise_inventories(game, line)
+
         self.db.commit()
         self.db.refresh(game)
         return game
-    
-    def play_round(self, game_id: int) -> Dict:
-        """Play one round of the game with AI agents making decisions."""
+
+    def play_round(self, game_id: int) -> Dict[str, Any]:
+        game = self._get_game(game_id)
+        if game.status not in {
+            GameStatus.STARTED,
+            GameStatus.ROUND_COMPLETED,
+            GameStatus.ROUND_IN_PROGRESS,
+        }:
+            raise ValueError("Game must be started before playing rounds")
+
+        config = self._ensure_agent_config(game)
+        state = config.get("agent_engine_state")
+        if not state:
+            raise ValueError("Game engine state is missing; ensure the game is started")
+
+        demand_pattern = DemandPattern(**game.demand_pattern)
+        current_demand = self._get_current_demand(game.current_round, demand_pattern)
+
+        policies = self._build_policy_map(config)
+        base_stocks = self._extract_base_stocks(config)
+        line = BeerLine(role_policies=policies, base_stocks=base_stocks, state=state)
+
+        tick_stats = line.tick(current_demand)
+        config["agent_engine_state"] = line.to_dict()
+        game.config = config
+
+        players = self._get_players_in_order(game_id)
+        round_record = self._get_or_create_round(game, current_demand)
+
+        node_map = {node.name: node for node in line.nodes}
+        for player in players:
+            label = self.ROLE_LABELS[player.role]
+            node = node_map[label]
+            node_stats = tick_stats[label]
+
+            inventory_before = int(node_stats.get("inventory_before", node.inv))
+            inventory_after = int(node_stats.get("inventory_after", node.inv))
+            backlog_before = int(node_stats.get("backlog_before", node.backlog))
+            backlog_after = int(node_stats.get("backlog_after", node.backlog))
+            order_placed = int(node_stats.get("order_placed", 0))
+            order_received = int(node_stats.get("incoming_shipment", 0))
+
+            holding_cost = float(max(node.inv, 0))
+            backlog_cost = float(node.backlog * 2)
+
+            player_round = (
+                self.db.query(PlayerRound)
+                .filter(
+                    PlayerRound.round_id == round_record.id,
+                    PlayerRound.player_id == player.id,
+                )
+                .one_or_none()
+            )
+            if not player_round:
+                player_round = PlayerRound(
+                    round_id=round_record.id,
+                    player_id=player.id,
+                    order_placed=order_placed,
+                    order_received=order_received,
+                    inventory_before=inventory_before,
+                    inventory_after=inventory_after,
+                    backorders_before=backlog_before,
+                    backorders_after=backlog_after,
+                    holding_cost=holding_cost,
+                    backorder_cost=backlog_cost,
+                    total_cost=holding_cost + backlog_cost,
+                )
+                self.db.add(player_round)
+            else:
+                player_round.order_placed = order_placed
+                player_round.order_received = order_received
+                player_round.inventory_before = inventory_before
+                player_round.inventory_after = inventory_after
+                player_round.backorders_before = backlog_before
+                player_round.backorders_after = backlog_after
+                player_round.holding_cost = holding_cost
+                player_round.backorder_cost = backlog_cost
+                player_round.total_cost = holding_cost + backlog_cost
+
+            inventory = player.inventory
+            if not inventory:
+                inventory = PlayerInventory(player_id=player.id)
+                self.db.add(inventory)
+            inventory.current_stock = node.inv
+            inventory.backorders = node.backlog
+            inventory.incoming_shipments = list(node.pipeline_shipments)
+            inventory.cost = node.cost
+
+        round_record.is_completed = True
+        round_record.completed_at = datetime.utcnow()
+
+        if game.current_round >= game.max_rounds:
+            game.status = GameStatus.FINISHED
+            game.finished_at = datetime.utcnow()
+        else:
+            game.current_round += 1
+            game.status = GameStatus.ROUND_COMPLETED
+
+        self.db.commit()
+        return self.get_game_state(game_id)
+
+    def get_game_state(self, game_id: int) -> Dict[str, Any]:
+        game = self._get_game(game_id)
+
+        players = self._get_players_in_order(game_id)
+        player_states: List[Dict[str, Any]] = []
+        for player in players:
+            inventory = player.inventory
+            player_states.append(
+                {
+                    "id": player.id,
+                    "name": player.name,
+                    "role": player.role,
+                    "is_ai": player.is_ai,
+                    "inventory": inventory.current_stock if inventory else 0,
+                    "backlog": inventory.backorders if inventory else 0,
+                    "incoming_shipments": inventory.incoming_shipments if inventory else [0, 0],
+                    "cost": inventory.cost if inventory else 0.0,
+                }
+            )
+
+        return {
+            "game_id": game.id,
+            "name": game.name,
+            "status": game.status,
+            "current_round": game.current_round,
+            "max_rounds": game.max_rounds,
+            "players": player_states,
+            "demand_pattern": game.demand_pattern,
+        }
+
+    # ------------------------------------------------------------------
+    # Strategy management
+    # ------------------------------------------------------------------
+
+    def set_agent_strategy(
+        self,
+        game_id: int,
+        role: str,
+        strategy: str,
+        params: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        game = self._get_game(game_id)
+        config = self._ensure_agent_config(game)
+
+        label = self._normalise_role_label(role)
+
+        existing = config["agent_policies"].get(label, {"policy": "naive", "params": {}})
+        merged_params = existing.get("params", {}).copy()
+        if params:
+            merged_params.update(params)
+
+        # Validate strategy configuration by instantiating the policy
+        make_policy(strategy, merged_params)
+
+        config["agent_policies"][label] = {
+            "policy": strategy,
+            "params": merged_params,
+        }
+
+        engine_state = config.get("agent_engine_state")
+        if engine_state and label in engine_state:
+            engine_state[label]["base_stock"] = int(merged_params.get("base_stock", engine_state[label].get("base_stock", 20)))
+            engine_state[label]["policy_state"] = {}
+            config["agent_engine_state"] = engine_state
+
+        game.config = config
+        self.db.commit()
+
+    def set_demand_visibility(self, visible: bool) -> None:
+        self._demand_visible = bool(visible)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _default_policy_config(self) -> Dict[str, Dict[str, Any]]:
+        return {
+            label: {"policy": "naive", "params": {"base_stock": 20}}
+            for label in self.ROLE_LABELS.values()
+        }
+
+    def _ensure_agent_config(self, game: Game) -> Dict[str, Any]:
+        config = game.config or {}
+        if not isinstance(config, dict):
+            config = {}
+        policies = config.get("agent_policies")
+        if not isinstance(policies, dict) or not policies:
+            policies = self._default_policy_config()
+        else:
+            for label in self.ROLE_LABELS.values():
+                policies.setdefault(label, {"policy": "naive", "params": {"base_stock": 20}})
+        config["agent_policies"] = policies
+        game.config = config
+        return config
+
+    def _build_policy_map(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        policy_map: Dict[str, Any] = {}
+        for label, spec in config.get("agent_policies", {}).items():
+            policy_map[label] = make_policy(spec.get("policy", "naive"), spec.get("params"))
+        return policy_map
+
+    def _extract_base_stocks(self, config: Dict[str, Any]) -> Dict[str, int]:
+        base_stocks: Dict[str, int] = {}
+        for label, spec in config.get("agent_policies", {}).items():
+            params = spec.get("params") or {}
+            base_stocks[label] = int(params.get("base_stock", 20))
+        return base_stocks
+
+    def _create_ai_players(self, game_id: int) -> None:
+        for role in self.ROLE_SEQUENCE:
+            player = Player(
+                game_id=game_id,
+                name=f"AI {self.ROLE_LABELS[role]}",
+                role=role,
+                is_ai=True,
+            )
+            self.db.add(player)
+        self.db.commit()
+
+    def _initialise_inventories(self, game: Game, line: BeerLine) -> None:
+        players = self._get_players_in_order(game.id)
+        node_map = {node.name: node for node in line.nodes}
+        for player in players:
+            node = node_map[self.ROLE_LABELS[player.role]]
+            inventory = player.inventory
+            if not inventory:
+                inventory = PlayerInventory(player_id=player.id)
+                self.db.add(inventory)
+            inventory.current_stock = node.inv
+            inventory.backorders = node.backlog
+            inventory.incoming_shipments = list(node.pipeline_shipments)
+            inventory.cost = node.cost
+
+    def _get_game(self, game_id: int) -> Game:
         game = self.db.query(Game).filter(Game.id == game_id).first()
         if not game:
             raise ValueError("Game not found")
-            
-        if game.status != GameStatus.IN_PROGRESS:
-            raise ValueError("Game is not in progress")
-            
-        # Get current demand based on the pattern
-        demand_pattern = DemandPattern(**game.demand_pattern)
-        current_demand = self._get_current_demand(game.current_round, demand_pattern)
-        
-        # Get all players in the correct order (Retailer -> Wholesaler -> Distributor -> Manufacturer)
-        players = (
-            self.db.query(Player)
-            .filter(Player.game_id == game_id)
-            .order_by(Player.role)
-            .all()
-        )
-        
-        # Process each player's turn
-        for player in players:
-            self._process_player_turn(player, game, current_demand)
-        
-        # Advance to next round
-        game.current_round += 1
-        if game.current_round > game.max_rounds:
-            game.status = GameStatus.COMPLETED
-            game.completed_at = datetime.utcnow()
-        
-        self.db.commit()
-        return self.get_game_state(game_id)
-    
-    def _process_player_turn(self, player: Player, game: Game, current_demand: int):
-        """Process a single player's turn using AI agent."""
-        # Get the AI agent for this player
-        agent_type = AgentType(player.role.value)
-        agent = self.agent_manager.get_agent(agent_type)
-        
-        # Get player's current state
-        inventory = (
-            self.db.query(PlayerInventory)
-            .filter(PlayerInventory.player_id == player.id)
-            .first()
-        )
-        
-        # Get previous round's data for the agent
-        previous_round = (
+        return game
+
+    def _get_players_in_order(self, game_id: int) -> List[Player]:
+        players = self.db.query(Player).filter(Player.game_id == game_id).all()
+        players.sort(key=lambda p: self.ROLE_SEQUENCE.index(p.role))
+        return players
+
+    def _get_or_create_round(self, game: Game, demand: int) -> GameRound:
+        round_record = (
             self.db.query(GameRound)
             .filter(
                 GameRound.game_id == game.id,
-                GameRound.round_number == game.current_round - 1
+                GameRound.round_number == game.current_round,
             )
-            .first()
+            .one_or_none()
         )
-        
-        # Make decision based on agent's strategy
-        incoming_shipments = getattr(inventory, "incoming_shipments", None)
-        if incoming_shipments is None:
-            single = getattr(inventory, "incoming_shipment", None)
-            if single is not None:
-                incoming_shipments = [single]
-        if not isinstance(incoming_shipments, list):
-            incoming_shipments = []
-
-        local_state = {
-            "inventory": getattr(inventory, "current_inventory", getattr(inventory, "current_stock", 0)),
-            "backlog": getattr(inventory, "current_backlog", getattr(inventory, "backorders", 0)),
-            "incoming_shipments": incoming_shipments,
-        }
-
-        previous_orders: List[int] = []
-        previous_orders_by_role: Dict[str, int] = {}
-        if previous_round:
-            for pr in previous_round.player_rounds:
-                quantity = getattr(pr, "order_quantity", getattr(pr, "order_placed", 0))
-                try:
-                    previous_orders.append(int(quantity))
-                except (TypeError, ValueError):
-                    continue
-                role_key: Optional[str] = None
-                if getattr(pr, "player", None) is not None:
-                    role_obj = getattr(pr.player, "role", None)
-                    if hasattr(role_obj, "value"):
-                        role_key = str(role_obj.value)
-                    elif isinstance(role_obj, str):
-                        role_key = role_obj.lower()
-                if role_key:
-                    previous_orders_by_role[role_key] = int(quantity)
-
-        llm_payload = None
-        if agent.strategy == AgentStrategy.LLM:
-            llm_payload = build_llm_decision_payload(
-                self.db,
-                game,
-                round_number=game.current_round,
-                action_role=player.role.value if hasattr(player.role, "value") else str(player.role).lower(),
-            )
-
-        upstream_context = {
-            'previous_orders': previous_orders,
-            'previous_orders_by_role': previous_orders_by_role,
-        }
-        if llm_payload is not None:
-            upstream_context['llm_payload'] = llm_payload
-
-        order_quantity = agent.make_decision(
-            current_round=game.current_round,
-            current_demand=current_demand if player.role == PlayerRole.RETAILER else None,
-            upstream_data=upstream_context,
-            local_state=local_state,
-        )
-        
-        # Create new game round if it doesn't exist
-        current_round = (
-            self.db.query(GameRound)
-            .filter(
-                GameRound.game_id == game.id,
-                GameRound.round_number == game.current_round
-            )
-            .first()
-        )
-        
-        if not current_round:
-            current_round = GameRound(
+        if not round_record:
+            round_record = GameRound(
                 game_id=game.id,
                 round_number=game.current_round,
-                demand=current_demand
+                customer_demand=demand,
+                started_at=datetime.utcnow(),
             )
-            self.db.add(current_round)
+            self.db.add(round_record)
             self.db.flush()
-        
-        # Record player's action
-        player_round = PlayerRound(
-            round_id=current_round.id,
-            player_id=player.id,
-            order_quantity=order_quantity,
-            received_quantity=0,  # Will be updated when upstream ships
-            inventory=inventory.current_inventory,
-            backlog=inventory.current_backlog,
-            comment=agent.get_last_explanation_comment(),
-        )
-        self.db.add(player_round)
-        
-        # Update inventory based on the order
-        # (In a real implementation, you'd update inventory based on lead times, etc.)
-        inventory.current_inventory -= order_quantity
-        if inventory.current_inventory < 0:
-            inventory.current_backlog += abs(inventory.current_inventory)
-            inventory.current_inventory = 0
-        
-        self.db.commit()
-    
+        else:
+            round_record.customer_demand = demand
+        return round_record
+
     def _get_current_demand(self, round_number: int, demand_pattern: DemandPattern) -> int:
-        """Get the demand for the current round based on the pattern."""
-        if not hasattr(demand_pattern, 'pattern') or not demand_pattern.pattern:
-            # Generate pattern if not already generated
+        if not getattr(demand_pattern, "pattern", None):
             self._generate_demand_pattern(demand_pattern)
-        
-        # Use pattern if available, otherwise default to 4
-        pattern = getattr(demand_pattern, 'pattern', [])
-        if round_number - 1 < len(pattern):
+
+        pattern = getattr(demand_pattern, "pattern", [])
+        if 0 <= round_number - 1 < len(pattern):
             return pattern[round_number - 1]
-        return 4  # Default demand
-    
-    def _generate_demand_pattern(self, demand_pattern: DemandPattern):
-        """Generate a demand pattern based on the game settings."""
+        return 4
+
+    def _generate_demand_pattern(self, demand_pattern: DemandPattern) -> None:
         normalized = normalize_demand_pattern(demand_pattern.dict())
-        if normalized.get('type') == 'classic':
-            params = normalized.get('params', {})
-            initial = params.get('initial_demand', DEFAULT_CLASSIC_PARAMS['initial_demand'])
-            final = params.get('final_demand', DEFAULT_CLASSIC_PARAMS['final_demand'])
-            change_week = params.get('change_week', DEFAULT_CLASSIC_PARAMS['change_week'])
+        if normalized.get("type") == "classic":
+            params = normalized.get("params", {})
+            initial = params.get("initial_demand", DEFAULT_CLASSIC_PARAMS["initial_demand"])
+            final = params.get("final_demand", DEFAULT_CLASSIC_PARAMS["final_demand"])
+            change_week = params.get("change_week", DEFAULT_CLASSIC_PARAMS["change_week"])
             total_rounds = max(change_week, 20)
             pattern: List[int] = []
             for week in range(1, total_rounds + 1):
                 pattern.append(final if week >= change_week else initial)
-
             demand_pattern.pattern = pattern
-    
-    def get_game_state(self, game_id: int) -> Dict:
-        """Get the current state of the game."""
-        game = self.db.query(Game).filter(Game.id == game_id).first()
-        if not game:
-            raise ValueError("Game not found")
-            
-        players = (
-            self.db.query(Player)
-            .filter(Player.game_id == game_id)
-            .order_by(Player.role)
-            .all()
-        )
-        
-        player_states = []
-        for player in players:
-            inventory = (
-                self.db.query(PlayerInventory)
-                .filter(PlayerInventory.player_id == player.id)
-                .first()
-            )
-            
-            player_states.append({
-                'id': player.id,
-                'name': player.name,
-                'role': player.role,
-                'is_ai': player.is_ai,
-                'inventory': inventory.current_inventory if inventory else 0,
-                'backlog': inventory.current_backlog if inventory else 0,
-                'incoming_shipment': inventory.incoming_shipment if inventory else 0,
-                'outgoing_shipment': inventory.outgoing_shipment if inventory else 0
-            })
-        
-        return {
-            'game_id': game.id,
-            'name': game.name,
-            'status': game.status,
-            'current_round': game.current_round,
-            'max_rounds': game.max_rounds,
-            'players': player_states,
-            'demand_pattern': game.demand_pattern
-        }
-    
-    def set_agent_strategy(
-        self,
-        role: str,
-        strategy: str,
-        llm_model: Optional[str] = None,
-        override_pct: Optional[float] = None,
-    ):
-        """Set the strategy for an AI agent."""
-        try:
-            agent_type = AgentType(role.lower())
-            strategy_enum = AgentStrategy(strategy.lower())
-            self.agent_manager.set_agent_strategy(
-                agent_type,
-                strategy_enum,
-                llm_model=llm_model,
-                override_pct=override_pct,
-            )
-        except ValueError as e:
-            raise ValueError(f"Invalid role or strategy: {e}")
-    
-    def set_demand_visibility(self, visible: bool):
-        """Set whether agents can see the actual customer demand."""
-        self.agent_manager.set_demand_visibility(visible)
+
+    def _normalise_role_label(self, role: str) -> str:
+        if not role:
+            raise ValueError("Role name is required")
+        role_clean = role.strip()
+        if role_clean.title() in self.LABEL_TO_ROLE:
+            return role_clean.title()
+        role_upper = role_clean.upper()
+        for enum_role, label in self.ROLE_LABELS.items():
+            if enum_role.name == role_upper:
+                return label
+        raise ValueError(f"Unknown role: {role}")
+
