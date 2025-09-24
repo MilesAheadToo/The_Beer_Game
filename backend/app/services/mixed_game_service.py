@@ -191,6 +191,8 @@ class MixedGameService:
             payload["system_config"] = config["system_config"]
         if config.get("global_policy"):
             payload["global_policy"] = config["global_policy"]
+        if config.get("daybreak_llm"):
+            payload["daybreak_llm"] = config["daybreak_llm"]
 
         try:
             return GameInDBBase.model_validate(payload)
@@ -220,6 +222,8 @@ class MixedGameService:
             "system_config": (game_data.system_config or {}),
             "global_policy": (game_data.global_policy or {}),
         }
+        if getattr(game_data, "daybreak_llm", None):
+            config["daybreak_llm"] = game_data.daybreak_llm.model_dump()
         game = Game(
             name=game_data.name,
             max_rounds=game_data.max_rounds,
@@ -531,6 +535,7 @@ class MixedGameService:
             if ship_cap is not None:
                 can_ship = min(can_ship, ship_cap)
             engine[dn]['ship_queue'].append(int(can_ship))
+            engine[up]['last_shipment_planned'] = int(can_ship)
         # 5) process ship delays (arrivals)
         for r in chain:
             if r not in engine: continue
@@ -540,6 +545,7 @@ class MixedGameService:
             shipped = min(inv, demand_here)
             engine[r]['inventory'] = inv - shipped
             engine[r]['backlog'] = max(0, demand_here - shipped)
+            engine[r]['last_arrival'] = int(arriving)
             # costs
             engine[r]['holding_cost'] += engine[r]['inventory'] * hold_cost
             engine[r]['backorder_cost'] += engine[r]['backlog'] * back_cost

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams, Link, useParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { 
@@ -33,7 +33,13 @@ import {
   Alert,
   AlertIcon,
   AlertTitle,
+  AlertDescription,
+  RadioGroup,
+  Radio,
+  Spinner,
+  Checkbox,
   Spinner
+
 } from '@chakra-ui/react';
 import PageLayout from '../components/PageLayout';
 import { getAllConfigs } from '../services/supplyChainConfigService';
@@ -226,6 +232,16 @@ const DEFAULT_PRICING_CONFIG = {
   manufacturer: { selling_price: 45.0, standard_cost: 30.0 },
 };
 
+const DEFAULT_DAYBREAK_LLM_CONFIG = {
+  toggles: {
+    customer_demand_history_sharing: false,
+    volatility_signal_sharing: false,
+    downstream_inventory_visibility: false,
+  },
+  shared_history_weeks: null,
+  volatility_window: null,
+};
+
 const demandPatterns = [
   { value: 'classic', label: 'Classic (Step Increase)' },
   { value: 'random', label: 'Random' },
@@ -377,6 +393,11 @@ const CreateMixedGame = () => {
   const [nodePolicies, setNodePolicies] = useState(() => JSON.parse(JSON.stringify(DEFAULT_NODE_POLICIES)));
   // Policy/Simulation settings (bounded)
   const [policy, setPolicy] = useState(() => ({ ...DEFAULT_POLICY }));
+  const [daybreakLlmConfig, setDaybreakLlmConfig] = useState(() => ({
+    toggles: { ...DEFAULT_DAYBREAK_LLM_CONFIG.toggles },
+    shared_history_weeks: DEFAULT_DAYBREAK_LLM_CONFIG.shared_history_weeks,
+    volatility_window: DEFAULT_DAYBREAK_LLM_CONFIG.volatility_window,
+  }));
   const cardBg = useColorModeValue(CARD_BG_LIGHT, CARD_BG_DARK);
   const borderColor = useColorModeValue(BORDER_LIGHT, BORDER_DARK);
   const { user } = useAuth();
@@ -401,6 +422,21 @@ const CreateMixedGame = () => {
   const navigate = useNavigate();
   const toast = useToast();
   const [initializing, setInitializing] = useState(isEditing);
+
+  const usesDaybreakStrategist = useMemo(
+    () =>
+      players.some(
+        (player) => player.playerType === 'ai' && String(player.strategy || '').startsWith('LLM_')
+      ),
+    [players]
+  );
+
+  const hasDaybreakOverrides = useMemo(() => {
+    const toggles = daybreakLlmConfig?.toggles || {};
+    return Object.values(toggles).some(Boolean);
+  }, [daybreakLlmConfig]);
+
+  const showDaybreakSharingCard = usesDaybreakStrategist || hasDaybreakOverrides;
 
   // Fetch available users
   useEffect(() => {
@@ -523,6 +559,20 @@ const CreateMixedGame = () => {
         setSystemConfig({ ...DEFAULT_SYSTEM_CONFIG, ...(config.system_config || {}) });
         setPolicy({ ...DEFAULT_POLICY, ...(config.global_policy || {}) });
 
+        const rawDaybreak = config.daybreak_llm || {};
+        const toggleBlock = rawDaybreak.toggles || {};
+        setDaybreakLlmConfig({
+          toggles: {
+            customer_demand_history_sharing: Boolean(toggleBlock.customer_demand_history_sharing),
+            volatility_signal_sharing: Boolean(toggleBlock.volatility_signal_sharing),
+            downstream_inventory_visibility: Boolean(toggleBlock.downstream_inventory_visibility),
+          },
+          shared_history_weeks:
+            rawDaybreak.shared_history_weeks != null ? rawDaybreak.shared_history_weeks : null,
+          volatility_window:
+            rawDaybreak.volatility_window != null ? rawDaybreak.volatility_window : null,
+        });
+
         const overrides = config.daybreak_overrides || {};
         const statePlayers = Array.isArray(state?.players) ? state.players : [];
         const mappedPlayers = playerRoles.map(({ value: roleValue }) => {
@@ -640,6 +690,14 @@ const CreateMixedGame = () => {
     setSystemConfig(prev => ({ ...prev, ...systemRanges }));
   }, [systemRanges, isEditing, initializing]);
 
+
+  const handleDaybreakToggleChange = (key) => (event) => {
+    const checked = event.target.checked;
+    setDaybreakLlmConfig((prev) => ({
+      ...prev,
+      toggles: { ...prev.toggles, [key]: checked },
+    }));
+  };
 
   const handlePlayerTypeChange = (index, type) => {
     setPlayers((prevPlayers) =>
@@ -798,7 +856,25 @@ const CreateMixedGame = () => {
           };
         })
       };
-      
+
+      if (usesDaybreakStrategist) {
+        const toggles = daybreakLlmConfig?.toggles || {};
+        const daybreakPayload = {
+          toggles: {
+            customer_demand_history_sharing: Boolean(toggles.customer_demand_history_sharing),
+            volatility_signal_sharing: Boolean(toggles.volatility_signal_sharing),
+            downstream_inventory_visibility: Boolean(toggles.downstream_inventory_visibility),
+          },
+        };
+        if (daybreakLlmConfig?.shared_history_weeks != null) {
+          daybreakPayload.shared_history_weeks = daybreakLlmConfig.shared_history_weeks;
+        }
+        if (daybreakLlmConfig?.volatility_window != null) {
+          daybreakPayload.volatility_window = daybreakLlmConfig.volatility_window;
+        }
+        gameData.daybreak_llm = daybreakPayload;
+      }
+
       const response = isEditing
         ? await mixedGameApi.updateGame(gameId, gameData)
         : await mixedGameApi.createGame(gameData);
@@ -1222,8 +1298,79 @@ const CreateMixedGame = () => {
                   </CardBody>
                 </Card>
 
-              </VStack>
-            </TabPanel>
+                {/* System Configuration Ranges */}
+                <Card variant="outline" bg={cardBg} borderColor={borderColor} w="100%" className="card-surface pad-6">
+                  <CardHeader pb={2}>
+                    <Heading size="md">System Configuration</Heading>
+                    <Text color="gray.500" fontSize="sm">Define permissible ranges for configuration variables</Text>
+                    <HStack mt={2}>
+                      <Button size="sm" variant="outline" onClick={() => setSystemConfig(prev => ({ ...prev, ...systemRanges }))}>
+                        Use System Ranges
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => navigate('/system-config')}>
+                        Edit in System Config
+                      </Button>
+                    </HStack>
+                  </CardHeader>
+                  <CardBody pt={0}>
+                    <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={6}>
+                      {Object.entries(systemConfig).map(([key, rng]) => (
+                        <HStack key={key} spacing={3} align="flex-end">
+                          <FormControl>
+                            <FormLabel textTransform="capitalize">{key.replaceAll('_',' ') } Min</FormLabel>
+                            <NumberInput value={rng.min} onChange={(v)=> setSystemConfig(s=> ({...s, [key]: { ...s[key], min: parseFloat(v)||0 }}))}>
+                              <NumberInputField />
+                            </NumberInput>
+                          </FormControl>
+                          <FormControl>
+                            <FormLabel textTransform="capitalize">{key.replaceAll('_',' ') } Max</FormLabel>
+                            <NumberInput value={rng.max} onChange={(v)=> setSystemConfig(s=> ({...s, [key]: { ...s[key], max: parseFloat(v)||0 }}))}>
+                              <NumberInputField />
+                            </NumberInput>
+                          </FormControl>
+                        </HStack>
+                      ))}
+                    </Grid>
+                </CardBody>
+              </Card>
+
+              {showDaybreakSharingCard && (
+                <Card variant="outline" bg={cardBg} borderColor={borderColor} w="100%" className="card-surface pad-6">
+                  <CardHeader pb={2}>
+                    <Heading size="md">Daybreak Strategist Sharing</Heading>
+                    <Text color="gray.500" fontSize="sm">
+                      Choose which information the Daybreak Beer Game Strategist can see when any role uses a Daybreak LLM strategy.
+                    </Text>
+                  </CardHeader>
+                  <CardBody pt={0}>
+                    <VStack align="stretch" spacing={3}>
+                      <Checkbox
+                        isChecked={daybreakLlmConfig.toggles.customer_demand_history_sharing}
+                        onChange={handleDaybreakToggleChange('customer_demand_history_sharing')}
+                      >
+                        Share retailer demand history with upstream roles
+                      </Checkbox>
+                      <Checkbox
+                        isChecked={daybreakLlmConfig.toggles.volatility_signal_sharing}
+                        onChange={handleDaybreakToggleChange('volatility_signal_sharing')}
+                      >
+                        Share volatility signal (variance + trend) from the retailer
+                      </Checkbox>
+                      <Checkbox
+                        isChecked={daybreakLlmConfig.toggles.downstream_inventory_visibility}
+                        onChange={handleDaybreakToggleChange('downstream_inventory_visibility')}
+                      >
+                        Allow visibility into the immediate downstream inventory/backlog
+                      </Checkbox>
+                      <Text fontSize="xs" color="gray.500">
+                        Disable a toggle to keep the strategist limited to local information for that scope.
+                      </Text>
+                    </VStack>
+                  </CardBody>
+                </Card>
+              )}
+            </VStack>
+          </TabPanel>
             
             <TabPanel p={0}>
               <HStack justify="space-between" mb={3}>
