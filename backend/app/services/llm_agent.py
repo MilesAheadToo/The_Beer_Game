@@ -1,7 +1,7 @@
 import logging
 import os
 from typing import Dict, Any, Optional, Tuple
-import openai
+from openai import OpenAI
 from enum import Enum
 import json
 
@@ -29,7 +29,7 @@ class LLMAgent:
         if not self.openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable not set")
 
-        openai.api_key = self.openai_api_key
+        self.client = OpenAI(api_key=self.openai_api_key)
         self.conversation_history = []
         self.initialize_agent()
     
@@ -93,15 +93,26 @@ class LLMAgent:
         self.conversation_history = self.conversation_history[:1]
         self.add_message("user", user_content)
 
-        response = openai.ChatCompletion.create(
+        response = self.client.chat.completions.create(
             model=self.model,
             messages=self.conversation_history,
             temperature=0.7 if self.strategy == LLMStrategy.ADAPTIVE else 0.3,
             max_tokens=200,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
         )
 
-        response_content = response.choices[0].message.content
+        message = response.choices[0].message
+        response_content: str = ""
+        if getattr(message, "content", None):
+            content_blocks = message.content
+            if isinstance(content_blocks, list):
+                response_content = "".join(
+                    getattr(block, "text", "") or getattr(block, "content", "")
+                    for block in content_blocks
+                )
+            else:
+                response_content = str(content_blocks)
+
         self.add_message("assistant", response_content)
 
         try:
@@ -208,16 +219,16 @@ def check_daybreak_llm_access(
     target_model = model or os.getenv("DAYBREAK_LLM_MODEL") or "gpt-4o-mini"
 
     try:
-        openai.api_key = api_key
-        openai.ChatCompletion.create(  # type: ignore[attr-defined]
+        client = OpenAI(api_key=api_key)
+        client.chat.completions.create(
             model=target_model,
             messages=[
                 {"role": "system", "content": "You are a health-check for the Daybreak Beer Game."},
-                {"role": "user", "content": "Reply with \"ok\"."},
+                {"role": "user", "content": "Reply with 'ok'."},
             ],
             max_tokens=1,
             temperature=0.0,
-            request_timeout=request_timeout,
+            timeout=request_timeout,
         )
         return True, target_model
     except Exception as exc:  # pragma: no cover - depends on external service

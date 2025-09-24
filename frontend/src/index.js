@@ -79,7 +79,7 @@ init()
   .catch((e) => {
     const el = document.getElementById("root");
     el.innerHTML = `
-      <div style="font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; padding: 32px;">
+      <div style="font-family: 'Trebuchet MS', 'TrebuchetMS', 'Lucida Sans Unicode', 'Lucida Grande', sans-serif; padding: 32px;">
         <h1 style="margin:0 0 8px 0;">Error</h1>
         <p style="margin:0 0 16px 0;">Initialization failed: ${e.message}</p>
         <p style="color:#666;margin:0;">Current Step:<br/><strong>Initializing...</strong></p>

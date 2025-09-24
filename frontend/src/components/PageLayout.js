@@ -3,6 +3,8 @@ import { Box } from '@chakra-ui/react';
 import { Typography } from '@mui/material';
 import { Helmet } from 'react-helmet-async';
 
+const PRIMARY_FONT = "'Trebuchet MS', 'TrebuchetMS', 'Lucida Sans Unicode', 'Lucida Grande', sans-serif";
+
 const PageLayout = ({ title, children, maxW = 'container.lg', ...rest }) => {
   return (
     <>
@@ -15,13 +17,18 @@ const PageLayout = ({ title, children, maxW = 'container.lg', ...rest }) => {
         mx="auto" 
         px={4} 
         py={8}
-        /* rely on global font stack from index.css */
+        fontFamily={PRIMARY_FONT}
         {...rest}
       >
         {title && (
           <Box mb={8}>
             <Box h="0.5em" />
-            <Typography variant="h2" component="h1" color="text.primary" sx={{ fontWeight: 700 }}>
+            <Typography
+              variant="h2"
+              component="h1"
+              color="text.primary"
+              sx={{ fontWeight: 700, fontFamily: PRIMARY_FONT }}
+            >
               {title}
             </Typography>
           </Box>
@@ -40,7 +47,8 @@ export const PageSection = ({ title, children, ...rest }) => (
         fontWeight: 600,
         margin: '1.25em 0 0.75em',
         lineHeight: 1.2,
-        color: '#2D3748'
+        color: '#2D3748',
+        fontFamily: PRIMARY_FONT,
       }}>
         {title}
       </h2>
