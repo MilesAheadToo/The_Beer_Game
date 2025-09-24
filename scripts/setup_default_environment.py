@@ -123,13 +123,14 @@ async def create_default_environment():
                 # Create default supply chain configuration using raw SQL
                 result = await db.execute(
                     text("""
-                    INSERT INTO supply_chain_configs 
-                    (name, description, created_by, created_at, updated_at)
-                    VALUES (:name, :description, :created_by, NOW(), NOW())
+                    INSERT INTO supply_chain_configs
+                    (name, description, group_id, created_by, created_at, updated_at)
+                    VALUES (:name, :description, :group_id, :created_by, NOW(), NOW())
                     """),
                     {
                         "name": "Default TBG",
                         "description": "Default supply chain configuration for The Beer Game",
+                        "group_id": default_group.id,
                         "created_by": group_admin.id
                     }
                 )
@@ -316,131 +317,11 @@ async def create_default_environment():
             await db.rollback()
             logger.error(f"❌ Error setting up default environment: {e}")
             raise
-                    {"name": "Retailer", "node_type": NodeType.RETAILER, "position_x": 0, "position_y": 0, "role": PlayerRole.RETAILER},
-                    {"name": "Wholesaler", "node_type": NodeType.WHOLESALER, "position_x": 1, "position_y": 0, "role": PlayerRole.WHOLESALER},
-                    {"name": "Distributor", "node_type": NodeType.DISTRIBUTOR, "position_x": 2, "position_y": 0, "role": PlayerRole.DISTRIBUTOR},
-                    {"name": "Manufacturer", "node_type": NodeType.MANUFACTURER, "position_x": 3, "position_y": 0, "role": PlayerRole.MANUFACTURER},
-                ]
-                
-                node_objs = []
-                for node_data in nodes:
-                    node = Node(
-                        name=node_data["name"],
-                        node_type=node_data["node_type"],
-                        position_x=node_data["position_x"],
-                        position_y=node_data["position_y"],
-                        config_id=default_config.id
-                    )
-                    db.add(node)
-                    node_objs.append(node)
-                
-                await db.flush()
-                
-                # Create lanes between nodes
-                for i in range(len(node_objs) - 1):
-                    lane = Lane(
-                        source_id=node_objs[i].id,
-                        target_id=node_objs[i+1].id,
-                        config_id=default_config.id,
-                        lead_time=1,
-                        service_level=0.95
-                    )
-                    db.add(lane)
-                
-                # Create default item
-                item = Item(name="Beer", description="Standard beer product")
-                db.add(item)
-                await db.flush()
-                
-                # Create item-node configurations
-                for node in node_objs:
-                    inc = ItemNodeConfig(
-                        item_id=item.id,
-                        node_id=node.id,
-                        config_id=default_config.id,
-                        holding_cost=1.0,
-                        backlog_cost=2.0,
-                        initial_inventory=12,
-                        order_up_to=30,
-                        reorder_point=10
-                    )
-                    db.add(inc)
-                
-                # Create market demand
-                market_demand = MarketDemand(
-                    config_id=default_config.id,
-                    item_id=item.id,
-                    mean_demand=8,
-                    std_demand=2,
-                    pattern_type="NORMAL"
-                )
-                db.add(market_demand)
-            
-                logger.info(f"✅ Created default supply chain configuration: {default_config.name}")
-            
-            # Create AI users for each role
-            ai_users = {}
-            for role in ["retailer", "wholesaler", "distributor", "manufacturer"]:
-                ai_user = User(
-                    username=f"ai_{role}",
-                    email=f"ai_{role}@daybreak.ai",
-                    hashed_password=get_password_hash("Daybreak@2025"),
-                    full_name=f"AI {role.capitalize()}",
-                    is_superuser=False,
-                    is_active=True,
-                    group_id=default_group.id  # Add AI users to the default group
-                )
-                db.add(ai_user)
-                await db.flush()
-                ai_users[role] = ai_user
-                logger.info(f"✅ Created AI player: {ai_user.username}")
-            
-            # Check if default game exists
-            result = await db.execute(
-                select(Game).where(Game.name == "The Beer Game")
-            )
-            default_game = result.scalars().first()
-            
-            if not default_game:
-                # Create default game
-                default_game = Game(
-                    name="The Beer Game",
-                    description="Default beer game with AI players",
-                    max_rounds=50,
-                    current_round=0,
-                    status=GameStatus.CREATED,
-                    config_id=default_config.id,
-                    group_id=default_group.id,
-                    created_by=group_admin.id
-                )
-                db.add(default_game)
-                await db.flush()
-                
-                # Create players for the game
-                for role, user in ai_users.items():
-                    player = Player(
-                        game_id=default_game.id,
-                        user_id=user.id,
-                        role=PlayerRole[role.upper()],
-                        is_ai=True,
-                        strategy="naive"  # Simple ordering strategy
-                    )
-                    db.add(player)
-                
-                logger.info(f"✅ Created default game: {default_game.name}")
-            
-            # Commit all changes at the end
-            await db.commit()
-            logger.info("✅ Successfully set up default environment")
 
-        except Exception as e:
-            await db.rollback()
-            logger.error(f"❌ Error setting up default environment: {e}")
-            raise
 
 if __name__ == "__main__":
     import asyncio
-    
+
     logger.info("\n[+] Setting up default environment...")
     try:
         asyncio.run(create_default_environment())
