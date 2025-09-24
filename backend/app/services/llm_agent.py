@@ -1,9 +1,9 @@
 import logging
 import os
-from typing import Dict, Any, Optional, Tuple
-import openai
 from enum import Enum
-import json
+from typing import Any, Dict, Optional, Tuple
+
+from llm_agent.daybreak_client import DaybreakStrategistSession
 
 class LLMStrategy(Enum):
     """Different Daybreak LLM prompting strategies for the Beer Game."""
@@ -13,7 +13,7 @@ class LLMStrategy(Enum):
     ADAPTIVE = "adaptive"
 
 class LLMAgent:
-    """Daybreak LLM-based agent for the Beer Game that uses OpenAI's API."""
+    """Daybreak LLM-based agent that delegates to the Strategist assistant."""
 
     def __init__(
         self,
@@ -25,91 +25,12 @@ class LLMAgent:
         self.strategy = strategy
         default_model = os.getenv("DAYBREAK_LLM_MODEL")
         self.model = model or default_model or "gpt-4"
-        self.openai_api_key = os.getenv("OPENAI_API_KEY")
-        if not self.openai_api_key:
+        if not os.getenv("OPENAI_API_KEY"):
             raise ValueError("OPENAI_API_KEY environment variable not set")
 
-        openai.api_key = self.openai_api_key
-        self.conversation_history = []
-        self.initialize_agent()
-    
-    def initialize_agent(self):
-        """Initialize the agent with role-specific instructions."""
-        role_context = {
-            "retailer": "You are the Retailer in the Beer Game supply chain. "
-                       "You receive customer demand and place orders to the Wholesaler. "
-                       "Your goal is to minimize costs while maintaining good service levels.",
-            "wholesaler": "You are the Wholesaler in the Beer Game supply chain. "
-                         "You receive orders from the Retailer and place orders to the Distributor. "
-                         "You need to balance inventory costs with order fulfillment.",
-            "distributor": "You are the Distributor in the Beer Game supply chain. "
-                          "You receive orders from the Wholesaler and place orders to the Manufacturer. "
-                          "You need to manage the bullwhip effect in the supply chain.",
-            "manufacturer": "You are the Manufacturer in the Beer Game supply chain. "
-                           "You receive orders from the Distributor and produce finished goods. "
-                           "You need to manage production capacity and lead times effectively."
-        }
-        
-        strategy_context = {
-            LLMStrategy.CONSERVATIVE: "You are a conservative player who prioritizes maintaining high inventory levels "
-                                   "to avoid stockouts, even if it means higher holding costs.",
-            LLMStrategy.BALANCED: "You are a balanced player who tries to maintain moderate inventory levels "
-                                "while being responsive to demand changes.",
-            LLMStrategy.AGGRESSIVE: "You are an aggressive player who keeps inventory levels low to minimize holding costs, "
-                                 "but this increases the risk of stockouts.",
-            LLMStrategy.ADAPTIVE: "You are an adaptive player who adjusts strategy based on the current game state, "
-                               "demand patterns, and supply chain dynamics."
-        }
-        
-        self.system_prompt = f"""
-        {role_context.get(self.role.lower(), "")}
-        {strategy_context.get(self.strategy, "")}
-
-        You will be given a JSON payload describing the current Beer Game state. The payload includes:
-        - week: current round number.
-        - config: supply-chain parameters (lead times, holding/backorder costs, demand pattern, visibility toggles).
-        - roles: per-role snapshots (inventory, backlog, pipeline, incoming order, recent history).
-        - action_request: which role you are making a decision for.
-
-        Use the numbers in the JSON (especially config.costs, config.lead_times, and roles[role]) to decide how many
-        units to order from your upstream partner. Respond ONLY with a JSON object containing:
-        {
-            "order_quantity": <non-negative integer>,
-            "reasoning": "<brief explanation of the key factors>"
-        }
-        """
-        
-        # Initialize conversation with system message
-        self.add_message("system", self.system_prompt)
-    
-    def add_message(self, role: str, content: str):
-        """Add a message to the conversation history."""
-        self.conversation_history.append({"role": role, "content": content})
-
-    def _query_llm(self, user_content: str) -> Optional[Dict[str, Any]]:
-        """Send a message to the Daybreak LLM and parse the JSON response."""
-
-        # Keep only the system prompt to avoid runaway conversations
-        self.conversation_history = self.conversation_history[:1]
-        self.add_message("user", user_content)
-
-        response = openai.ChatCompletion.create(
-            model=self.model,
-            messages=self.conversation_history,
-            temperature=0.7 if self.strategy == LLMStrategy.ADAPTIVE else 0.3,
-            max_tokens=200,
-            response_format={"type": "json_object"}
-        )
-
-        response_content = response.choices[0].message.content
-        self.add_message("assistant", response_content)
-
-        try:
-            return json.loads(response_content)
-        except (json.JSONDecodeError, ValueError) as exc:
-            print(f"Error parsing Daybreak LLM response: {exc}")
-            print(f"Response was: {response_content}")
-            return None
+        self.session = DaybreakStrategistSession(model=self.model)
+        self.last_explanation: Optional[str] = None
+        self._last_ship_plan: Optional[int] = None
 
     def make_decision(
         self,
@@ -123,55 +44,30 @@ class LLMAgent:
         upstream_data: Optional[Dict[str, Any]] = None
     ) -> int:
         """Make a decision on how many units to order."""
+        self.last_explanation = None
+        self._last_ship_plan = None
         payload = None
         if isinstance(upstream_data, dict):
             payload = upstream_data.get("llm_payload")
-            upstream_data = {k: v for k, v in upstream_data.items() if k != "llm_payload"}
 
         if payload:
-            response_json = self._query_llm(json.dumps(payload, separators=(",", ":")))
-            if response_json:
-                order_quantity = max(0, int(response_json.get("order_quantity", 0)))
-                reasoning = response_json.get("reasoning", "No reasoning provided")
-                print(f"Daybreak LLM agent ({self.role}, {self.strategy.value}) order: {order_quantity}")
-                print(f"Reasoning: {reasoning}")
+            try:
+                decision = self.session.decide(payload)
+                order_quantity = max(0, int(decision.get("order_upstream", 0)))
+                self._last_ship_plan = max(0, int(decision.get("ship_to_downstream", 0)))
+                rationale = decision.get("rationale", "")
+                ship_fragment = (
+                    f" | Proposed ship downstream: {self._last_ship_plan}"
+                    if self._last_ship_plan is not None
+                    else ""
+                )
+                self.last_explanation = f"{rationale}{ship_fragment}".strip()
                 return order_quantity
-            return self._fallback_strategy(current_inventory, backorders, current_demand)
+            except Exception as exc:
+                print(f"Error calling Daybreak strategist: {exc}")
+                return self._fallback_strategy(current_inventory, backorders, current_demand)
 
-        # Prepare the prompt with current game state
-        prompt = f"""Current Game State (Round {current_round}):
-        - Current Inventory: {current_inventory} units
-        - Current Backorders: {backorders} units
-        - Incoming Shipments (next 2 rounds): {incoming_shipments}
-        - Recent Demand: {demand_history[-5:] if len(demand_history) > 0 else 'No history'}
-        - Your Recent Orders: {order_history[-5:] if len(order_history) > 0 else 'No history'}
-        """
-        
-        if current_demand is not None:
-            prompt += f"\n- Current Customer Demand: {current_demand} units"
-        
-        if upstream_data:
-            prompt += "\n\nUpstream Information:"
-            for key, value in upstream_data.items():
-                prompt += f"\n- {key.replace('_', ' ').title()}: {value}"
-        
-        prompt += "\n\nHow many units would you like to order this round?"
-        
-        try:
-            response_json = self._query_llm(prompt)
-            if response_json:
-                order_quantity = max(0, int(response_json.get("order_quantity", 0)))
-                reasoning = response_json.get("reasoning", "No reasoning provided")
-
-                print(f"Daybreak LLM agent ({self.role}, {self.strategy.value}) order: {order_quantity}")
-                print(f"Reasoning: {reasoning}")
-
-                return order_quantity
-            return 0
-        except Exception as e:
-            print(f"Error calling OpenAI API: {e}")
-            # Fallback to a simple strategy if API call fails
-            return self._fallback_strategy(current_inventory, backorders, current_demand)
+        return self._fallback_strategy(current_inventory, backorders, current_demand)
 
     def _fallback_strategy(
         self, 
@@ -201,24 +97,41 @@ def check_daybreak_llm_access(
 ) -> Tuple[bool, str]:
     """Probe the configured Daybreak LLM endpoint to confirm availability."""
 
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+    if not os.getenv("OPENAI_API_KEY"):
         return False, "OPENAI_API_KEY environment variable not set"
 
     target_model = model or os.getenv("DAYBREAK_LLM_MODEL") or "gpt-4o-mini"
 
     try:
-        openai.api_key = api_key
-        openai.ChatCompletion.create(  # type: ignore[attr-defined]
-            model=target_model,
-            messages=[
-                {"role": "system", "content": "You are a health-check for the Daybreak Beer Game."},
-                {"role": "user", "content": "Reply with \"ok\"."},
-            ],
-            max_tokens=1,
-            temperature=0.0,
-            request_timeout=request_timeout,
-        )
+        session = DaybreakStrategistSession(model=target_model)
+        session.reset()
+        # Minimal ping state adhering to the strategist schema
+        ping_state: Dict[str, Any] = {
+            "role": "retailer",
+            "week": 0,
+            "toggles": {
+                "customer_demand_history_sharing": False,
+                "volatility_signal_sharing": False,
+                "downstream_inventory_visibility": False,
+            },
+            "parameters": {
+                "holding_cost": 0.5,
+                "backlog_cost": 0.5,
+                "L_order": 2,
+                "L_ship": 2,
+                "L_prod": 4,
+            },
+            "local_state": {
+                "on_hand": 12,
+                "backlog": 0,
+                "incoming_orders_this_week": 0,
+                "received_shipment_this_week": 0,
+                "pipeline_orders_upstream": [0, 0],
+                "pipeline_shipments_inbound": [0, 0],
+                "optional": {},
+            },
+        }
+        session.decide(ping_state)
         return True, target_model
     except Exception as exc:  # pragma: no cover - depends on external service
         logger.warning("Daybreak LLM probe failed for model %s: %s", target_model, exc)

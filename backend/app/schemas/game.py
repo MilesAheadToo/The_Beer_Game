@@ -81,6 +81,21 @@ class NodePolicy(BaseModel):
     variable_cost: float = Field(ge=0, default=0)
     min_order_qty: int = Field(ge=0, default=0)
 
+
+class DaybreakLLMToggles(BaseModel):
+    customer_demand_history_sharing: bool = Field(default=False)
+    volatility_signal_sharing: bool = Field(default=False)
+    downstream_inventory_visibility: bool = Field(default=False)
+
+
+class DaybreakLLMConfig(BaseModel):
+    toggles: DaybreakLLMToggles = Field(default_factory=DaybreakLLMToggles)
+    shared_history_weeks: Optional[int] = Field(default=None, ge=0)
+    volatility_window: Optional[int] = Field(default=None, ge=0)
+
+    model_config = ConfigDict(extra="allow")
+
+
 class GameBase(BaseModel):
     name: str = Field(..., max_length=100)
     max_rounds: int = Field(default=52, ge=1, le=1000)
@@ -98,6 +113,10 @@ class GameBase(BaseModel):
     node_policies: Optional[Dict[str, NodePolicy]] = Field(default=None)
     system_config: Optional[Dict[str, Any]] = Field(default=None)
     global_policy: Optional[Dict[str, Any]] = Field(default=None, description="Optional top-level policy values (lead times, inventory, costs, capacities)")
+    daybreak_llm: Optional[DaybreakLLMConfig] = Field(
+        default=None,
+        description="Configuration block for the Daybreak Beer Game Strategist",
+    )
 
 class GameCreate(GameBase):
     player_assignments: List[PlayerAssignment] = Field(
