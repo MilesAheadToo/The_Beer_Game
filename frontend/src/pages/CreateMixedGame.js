@@ -522,7 +522,7 @@ const CreateMixedGame = () => {
   }, []);
 
   useEffect(() => {
-    if (!Array.isArray(configs)) {
+    if (!Array.isArray(configs) || isEditing) {
       return;
     }
     const groupIdRaw = user?.group_id;
@@ -533,7 +533,7 @@ const CreateMixedGame = () => {
     });
     const chosen = candidates.find((config) => Boolean(config?.is_active)) || candidates[0] || configs[0] || null;
     setActiveConfigId(chosen ? chosen.id : null);
-  }, [configs, user]);
+  }, [configs, user, isEditing]);
 
   useEffect(() => {
     let ignore = false;
@@ -593,17 +593,20 @@ const CreateMixedGame = () => {
         const state = await mixedGameApi.getGameState(gameId);
         if (cancelled) return;
 
-        const game = state?.game || {};
-        const config = game?.config || {};
-        setGameName(game.name || '');
-        setDescription(game.description || '');
-        setMaxRounds(game.max_rounds || 20);
-        setIsPublic(game.is_public !== undefined ? Boolean(game.is_public) : true);
+        const game = state?.game ?? state ?? {};
+        const config = state?.config ?? game?.config ?? {};
 
-        const nextProgression = state?.progression_mode || config.progression_mode || 'supervised';
+        setGameName(game?.name || '');
+        setDescription(game?.description || '');
+        setMaxRounds(game?.max_rounds || 20);
+        setIsPublic(game?.is_public !== undefined ? Boolean(game.is_public) : true);
+
+        const nextProgression =
+          state?.progression_mode || game?.progression_mode || config?.progression_mode || 'supervised';
         setProgressionMode(nextProgression);
 
-        const demand = game.demand_pattern || config.demand_pattern || {};
+        const demand =
+          state?.demand_pattern || game?.demand_pattern || config?.demand_pattern || {};
         const demandType = String(demand.type || 'classic').toLowerCase();
         setDemandPattern(demandType);
         const demandParams = demand.params || {};
@@ -623,7 +626,8 @@ const CreateMixedGame = () => {
             : DEFAULT_CLASSIC_PARAMS.final_demand
         );
 
-        const pricing = config.pricing_config || {};
+        const pricing =
+          state?.pricing_config || game?.pricing_config || config?.pricing_config || {};
         setPricingConfig({
           retailer: {
             selling_price: Number(pricing.retailer?.selling_price ?? DEFAULT_PRICING_CONFIG.retailer.selling_price),
@@ -643,12 +647,17 @@ const CreateMixedGame = () => {
           },
         });
 
-        setNodePolicies(normalizeLoadedPolicies(config.node_policies));
+        const resolvedNodePolicies = state?.node_policies || game?.node_policies || config?.node_policies;
+        setNodePolicies(normalizeLoadedPolicies(resolvedNodePolicies));
 
-        setSystemConfig({ ...DEFAULT_SYSTEM_CONFIG, ...(config.system_config || {}) });
-        setPolicy({ ...DEFAULT_POLICY, ...(config.global_policy || {}) });
+        const resolvedSystemConfig = state?.system_config || game?.system_config || config?.system_config || {};
+        setSystemConfig({ ...DEFAULT_SYSTEM_CONFIG, ...resolvedSystemConfig });
 
-        const rawDaybreak = config.daybreak_llm || {};
+        const resolvedPolicy = state?.global_policy || game?.global_policy || config?.global_policy || {};
+        setPolicy({ ...DEFAULT_POLICY, ...resolvedPolicy });
+
+        const rawDaybreak =
+          state?.daybreak_llm || game?.daybreak_llm || config?.daybreak_llm || {};
         const toggleBlock = rawDaybreak.toggles || {};
         setDaybreakLlmConfig({
           toggles: {
@@ -662,8 +671,13 @@ const CreateMixedGame = () => {
             rawDaybreak.volatility_window != null ? rawDaybreak.volatility_window : null,
         });
 
-        const overrides = config.daybreak_overrides || {};
-        const statePlayers = Array.isArray(state?.players) ? state.players : [];
+        const overrides =
+          state?.daybreak_overrides || game?.daybreak_overrides || config?.daybreak_overrides || {};
+        const statePlayers = Array.isArray(state?.players)
+          ? state.players
+          : Array.isArray(game?.players)
+            ? game.players
+            : [];
         const mappedPlayers = statePlayers.reduce((acc, record) => {
           const roleValue = String(record.role || '').toLowerCase();
           if (!roleValue) {
@@ -707,6 +721,12 @@ const CreateMixedGame = () => {
           };
         });
         setPlayers(orderedPlayers);
+
+        const supplyChainConfigId =
+          config?.supply_chain_config_id ?? game?.supply_chain_config_id ?? null;
+        if (supplyChainConfigId) {
+          setActiveConfigId(supplyChainConfigId);
+        }
       } catch (error) {
         console.error('Failed to load game configuration', error);
         toast({
@@ -1284,7 +1304,7 @@ const CreateMixedGame = () => {
 
       setTimeout(() => {
         if (isEditing) {
-          navigate('/games');
+          navigate('/games', { state: { refresh: Date.now() } });
         } else if (response && response.id) {
           navigate(`/games/${response.id}`);
         } else {

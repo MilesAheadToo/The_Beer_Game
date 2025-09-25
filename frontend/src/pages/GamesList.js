@@ -32,7 +32,7 @@ import {
   RestartAlt,
   Autorenew,
 } from '@mui/icons-material';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { isGroupAdmin as isGroupAdminUser } from '../utils/authUtils';
 import { mixedGameApi } from '../services/api';
@@ -64,6 +64,7 @@ const GamesList = () => {
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [modelStatus, setModelStatus] = useState({ is_trained: false });
   const [loadingModelStatus, setLoadingModelStatus] = useState(true);
+  const location = useLocation();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
@@ -110,6 +111,13 @@ const GamesList = () => {
   useEffect(() => {
     fetchGames();
   }, [fetchGames]);
+
+  useEffect(() => {
+    if (location.state?.refresh) {
+      fetchGames();
+      navigate(`${location.pathname}${location.search}`, { replace: true, state: null });
+    }
+  }, [location, fetchGames, navigate]);
 
   const handleStartGame = async (gameId) => {
     try {
