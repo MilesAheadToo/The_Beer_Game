@@ -221,6 +221,17 @@ const clampOverridePercent = (value) => {
   return Math.min(50, Math.max(5, numeric));
 };
 
+const normalizeStrategyForPayload = (strategy) => {
+  if (!strategy) {
+    return null;
+  }
+  const raw = String(strategy).toLowerCase();
+  if (raw === 'pi' || raw === 'pi_controller') {
+    return 'pi_heuristic';
+  }
+  return raw;
+};
+
 const CreateMixedGame = () => {
   const { gameId } = useParams();
   const isEditing = Boolean(gameId);
@@ -1189,22 +1200,27 @@ const CreateMixedGame = () => {
             standard_cost: parseFloat(pricingConfig.manufacturer.standard_cost)
           }
         },
-        player_assignments: players.map(player => {
+        player_assignments: players.map((player) => {
+          const role = String(player?.role || '').toLowerCase();
           const isAi = player.playerType === 'ai';
-          const strategyValue = player.strategy ? player.strategy.toLowerCase() : null;
-          const overridePercent = player.strategy === 'DAYBREAK_DTCE_CENTRAL'
-            ? clampOverridePercent(player.daybreakOverridePct) / 100
-            : null;
+          const normalizedStrategy = isAi ? normalizeStrategyForPayload(player.strategy) : null;
+          const overridePercent =
+            normalizedStrategy === 'daybreak_dtce_central'
+              ? clampOverridePercent(player.daybreakOverridePct) / 100
+              : null;
 
           return {
-            role: player.role.toUpperCase(),
+            role,
             player_type: isAi ? 'agent' : 'human',
-            strategy: strategyValue,
-            can_see_demand: player.canSeeDemand,
-            user_id: player.userId || null,
-            llm_model: (isAi && String(player.strategy).startsWith('LLM_'))
-              ? player.llmModel
-              : null,
+            strategy: normalizedStrategy,
+            can_see_demand: Boolean(player.canSeeDemand),
+            user_id: isAi ? null : (player.userId || null),
+            llm_model:
+              isAi && String(player.strategy || '')
+                .toUpperCase()
+                .startsWith('LLM_')
+                ? player.llmModel
+                : null,
             daybreak_override_pct: overridePercent,
           };
         })

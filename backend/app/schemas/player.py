@@ -18,6 +18,7 @@ class PlayerStrategy(str, Enum):
     BULLWHIP = "bullwhip"
     CONSERVATIVE = "conservative"
     RANDOM = "random"
+    PI_HEURISTIC = "pi_heuristic"
     # Advanced strategies
     DEMAND_DRIVEN = "demand_driven"
     COST_OPTIMIZATION = "cost_optimization"
