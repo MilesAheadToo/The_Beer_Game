@@ -144,9 +144,19 @@ export const mixedGameApi = {
     return data;
   },
 
-  async startGame(gameId) {
-    const { data } = await http.post(`/mixed-games/${gameId}/start`);
-    return data;
+  async startGame(gameId, options = {}) {
+    const payload = {};
+    if (Object.prototype.hasOwnProperty.call(options, 'debugLogging')) {
+      payload.debug_logging = Boolean(options.debugLogging);
+    }
+
+    let response;
+    if (Object.keys(payload).length > 0) {
+      response = await http.post(`/mixed-games/${gameId}/start`, payload);
+    } else {
+      response = await http.post(`/mixed-games/${gameId}/start`);
+    }
+    return response.data;
   },
 
   async stopGame(gameId) {

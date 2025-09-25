@@ -8,7 +8,9 @@ import {
   Dialog,
   DialogContent,
   DialogTitle,
+  FormControlLabel,
   IconButton,
+  Switch,
   Paper,
   Stack,
   Table,
@@ -68,6 +70,7 @@ const GroupGameSupervisionPanel = ({
   const { enqueueSnackbar } = useSnackbar();
   const [actionState, setActionState] = useState({});
   const [autoProgress, setAutoProgress] = useState(null);
+  const [debugLoggingEnabled, setDebugLoggingEnabled] = useState(false);
 
   const supervisedGames = useMemo(() => {
     if (!Array.isArray(games)) {
@@ -113,7 +116,12 @@ const GroupGameSupervisionPanel = ({
 
   const handleStart = async (game) => {
     if (!game) return;
-    const result = await runAction(game.id, 'start', mixedGameApi.startGame, 'Game started');
+    const result = await runAction(
+      game.id,
+      'start',
+      (id) => mixedGameApi.startGame(id, { debugLogging: debugLoggingEnabled }),
+      'Game started',
+    );
     if (!result) {
       return;
     }
@@ -351,7 +359,13 @@ const GroupGameSupervisionPanel = ({
   return (
     <>
       <Paper elevation={0} sx={{ p: 3 }}>
-        <Stack direction={{ xs: 'column', md: 'row' }} justifyContent="space-between" alignItems={{ xs: 'stretch', md: 'center' }} spacing={2} mb={3}>
+        <Stack
+          direction={{ xs: 'column', md: 'row' }}
+          justifyContent="space-between"
+          alignItems={{ xs: 'stretch', md: 'center' }}
+          spacing={2}
+          mb={3}
+        >
           <Box>
             <Typography variant="h6" sx={{ fontWeight: 700 }}>
               Game Supervision
@@ -360,11 +374,29 @@ const GroupGameSupervisionPanel = ({
               Monitor live sessions and orchestrate progress across your group's games.
             </Typography>
           </Box>
-          {onRefresh && (
-            <Button variant="outlined" onClick={onRefresh} disabled={loading}>
-              Refresh
-            </Button>
-          )}
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={1.5}
+            alignItems="center"
+            justifyContent="flex-end"
+          >
+            <FormControlLabel
+              control={
+                <Switch
+                  color="primary"
+                  checked={debugLoggingEnabled}
+                  onChange={(event) => setDebugLoggingEnabled(event.target.checked)}
+                  inputProps={{ 'aria-label': 'Enable debug logging for games' }}
+                />
+              }
+              label="Enable debug logging"
+            />
+            {onRefresh && (
+              <Button variant="outlined" onClick={onRefresh} disabled={loading}>
+                Refresh
+              </Button>
+            )}
+          </Stack>
         </Stack>
 
         {error && (

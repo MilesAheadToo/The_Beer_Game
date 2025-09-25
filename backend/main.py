@@ -110,6 +110,12 @@ _FAKE_USERS["groupadmin@daybreak.ai"] = {
 # Logger used across helpers/routes
 logger = logging.getLogger(__name__)
 
+# Directory for optional debug logs written during game execution
+DEBUG_LOG_DIR = Path(
+    os.getenv("BEER_GAME_DEBUG_DIR")
+    or (Path(__file__).resolve().parent / "debug_logs")
+)
+
 # ------------------------------------------------------------------------------
 # Models
 # ------------------------------------------------------------------------------
@@ -1066,6 +1072,128 @@ def _coerce_game_config(game: DbGame) -> Dict[str, Any]:
     return {}
 
 
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        token = value.strip().lower()
+        return token in {"1", "true", "yes", "on", "enabled"}
+    return False
+
+
+def _normalize_debug_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    raw = config.get("debug_logging")
+    if isinstance(raw, dict):
+        cfg = dict(raw)
+    elif isinstance(raw, bool):
+        cfg = {"enabled": raw}
+    else:
+        cfg = {}
+    enabled_token = cfg.get("enabled", cfg.get("active", cfg.get("debug")))
+    cfg["enabled"] = _to_bool(enabled_token)
+    return cfg
+
+
+def _ensure_debug_log_file(config: Dict[str, Any], game: DbGame) -> Optional[Path]:
+    cfg = _normalize_debug_config(config)
+    if not cfg.get("enabled"):
+        config["debug_logging"] = {"enabled": False}
+        return None
+
+    path_value = cfg.get("file_path")
+    if path_value:
+        path = Path(path_value)
+    else:
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        name_token = (game.name or f"game_{game.id}")
+        safe_token = "".join(
+            char if char.isalnum() or char in {"-", "_"} else "_" for char in name_token
+        )[:48]
+        filename = (
+            f"game_{game.id}_{safe_token}_{timestamp}.txt"
+            if safe_token
+            else f"game_{game.id}_{timestamp}.txt"
+        )
+        path = DEBUG_LOG_DIR / filename
+        cfg["file_path"] = str(path)
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            with path.open("w", encoding="utf-8") as handle:
+                handle.write(f"Game {game.id} Debug Log\n")
+                if game.name:
+                    handle.write(f"Name: {game.name}\n")
+                handle.write(f"Created: {datetime.utcnow().isoformat()}Z\n\n")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to prepare debug log for game %s: %s", game.id, exc)
+        cfg["enabled"] = False
+        config["debug_logging"] = cfg
+        return None
+
+    config["debug_logging"] = cfg
+    return path
+
+
+def _format_debug_block(data: Any, *, indent: str = "      ") -> str:
+    if data is None:
+        return f"{indent}None"
+    try:
+        text = json.dumps(data, indent=2, sort_keys=True, default=str, ensure_ascii=False)
+    except TypeError:
+        text = json.dumps(str(data), ensure_ascii=False)
+    return "\n".join(f"{indent}{line}" for line in text.splitlines())
+
+
+def _append_debug_round_log(
+    config: Dict[str, Any],
+    game: DbGame,
+    *,
+    round_number: int,
+    timestamp: datetime,
+    entries: List[Dict[str, Any]],
+) -> None:
+    if not entries:
+        return
+
+    path = _ensure_debug_log_file(config, game)
+    if not path:
+        return
+
+    iso_timestamp = timestamp.isoformat() + "Z"
+    lines: List[str] = [f"Round {round_number} @ {iso_timestamp}"]
+    for entry in entries:
+        node_name = entry.get("node") or "unknown"
+        lines.append(f"  Node: {node_name}")
+        player_info = entry.get("player") or {}
+        if player_info:
+            player_label = player_info.get("name") or "Unnamed player"
+            player_id = player_info.get("id")
+            player_type = "AI" if player_info.get("is_ai") else "Human"
+            if player_id is not None:
+                lines.append(f"    Player: {player_label} (ID: {player_id}, {player_type})")
+            else:
+                lines.append(f"    Player: {player_label} ({player_type})")
+        info_sent = entry.get("info_sent")
+        lines.append("    Info provided:")
+        lines.append(_format_debug_block(info_sent))
+        reply = entry.get("reply")
+        lines.append("    Reply:")
+        lines.append(_format_debug_block(reply))
+        ending_state = entry.get("ending_state")
+        lines.append("    Ending state:")
+        lines.append(_format_debug_block(ending_state))
+    lines.append("")
+
+    try:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write("\n".join(lines))
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Failed to append debug log for game %s: %s", game.id, exc)
+
+
 def _save_game_config(db: Session, game: DbGame, config: Dict[str, Any]) -> None:
     game.config = config
     db.add(game)
@@ -1407,6 +1535,9 @@ def _finalize_round_if_ready(
     node_orders_new = {}
     orders_timestamp_iso = timestamp.isoformat() + "Z"
 
+    round_debug_entries: Dict[str, Dict[str, Any]] = {}
+    round_debug_order: List[str] = []
+
     processing_nodes = []
     for node in reversed(node_sequence):
         if node not in processing_nodes:
@@ -1471,6 +1602,17 @@ def _finalize_round_if_ready(
             "previous_orders_by_role": previous_downstream_orders,
             "downstream_orders": downstream_orders_latest,
         }
+        info_payload = {
+            "current_round": round_number,
+            "current_demand": current_demand_value,
+            "local_state": dict(local_state),
+            "upstream_context": upstream_context,
+        }
+        player_info = {
+            "id": getattr(player, "id", None),
+            "name": getattr(player, "name", None),
+            "is_ai": bool(getattr(player, "is_ai", False)),
+        }
         order_qty = agent.make_decision(
             current_round=round_number,
             current_demand=current_demand_value,
@@ -1494,6 +1636,22 @@ def _finalize_round_if_ready(
         entry["quantity"] = order_qty
         entry.setdefault("submitted_at", orders_timestamp_iso)
         orders_by_role[node_key] = entry
+        reply_payload = {
+            "type": "agent_decision",
+            "order_quantity": order_qty,
+            "submitted_at": entry.get("submitted_at"),
+        }
+        if entry.get("comment"):
+            reply_payload["comment"] = entry["comment"]
+        debug_entry = {
+            "node": node_key,
+            "player": player_info,
+            "info_sent": info_payload,
+            "reply": reply_payload,
+        }
+        round_debug_entries[node_key] = debug_entry
+        if node_key not in round_debug_order:
+            round_debug_order.append(node_key)
         action_obj = actions_by_role.get(node_key)
         if action_obj is None:
             action_obj = PlayerAction(
@@ -1520,6 +1678,47 @@ def _finalize_round_if_ready(
                 "submitted_at": orders_timestamp_iso,
             },
         )
+
+    for node in all_nodes:
+        if node in round_debug_entries:
+            continue
+        player = players_by_role.get(node)
+        if not player:
+            continue
+        recorded = orders_by_role.get(node, {})
+        reply_payload = {
+            "type": "human_input"
+            if not bool(getattr(player, "is_ai", False))
+            else "recorded_order",
+            "order_quantity": int(recorded.get("quantity") or 0),
+            "submitted_at": recorded.get("submitted_at"),
+        }
+        if recorded.get("comment"):
+            reply_payload["comment"] = recorded["comment"]
+        info_payload = {
+            "current_round": round_number,
+            "note": "Order received from player submission",
+            "observed_demand": int(incoming_orders_map.get(node, 0)),
+            "inventory_before": int(
+                pre_inventory.get(node, engine.get(node, {}).get("inventory", 0))
+            ),
+            "backlog_before": int(
+                pre_backlog.get(node, engine.get(node, {}).get("backlog", 0))
+            ),
+        }
+        debug_entry = {
+            "node": node,
+            "player": {
+                "id": getattr(player, "id", None),
+                "name": getattr(player, "name", None),
+                "is_ai": bool(getattr(player, "is_ai", False)),
+            },
+            "info_sent": info_payload,
+            "reply": reply_payload,
+        }
+        round_debug_entries[node] = debug_entry
+        if node not in round_debug_order:
+            round_debug_order.append(node)
 
     role_stats = {}
     for role in ROLES_IN_ORDER:
@@ -1549,6 +1748,35 @@ def _finalize_round_if_ready(
             "total_cost": round(total_cost_delta, 2),
         }
 
+    for node, debug_entry in round_debug_entries.items():
+        stats = role_stats.get(node)
+        node_state = engine.get(node, {})
+        ending_state = {
+            "inventory": int(
+                node_state.get("inventory", stats["inventory_after"] if stats else 0)
+            ),
+            "backlog": int(
+                node_state.get("backlog", stats["backlog_after"] if stats else 0)
+            ),
+            "last_order": int(node_state.get("last_order", 0)),
+            "on_order": int(node_state.get("on_order", 0)),
+            "incoming_shipments": int(node_state.get("incoming_shipments", 0)),
+            "observed_demand": int(
+                incoming_orders_map.get(node, stats["demand"] if stats else 0)
+            ),
+        }
+        if stats:
+            ending_state.update(
+                {
+                    "shipped": int(stats.get("shipped", 0)),
+                    "arrivals": int(stats.get("arrivals", 0)),
+                    "holding_cost": stats.get("holding_cost"),
+                    "backlog_cost": stats.get("backlog_cost"),
+                    "total_cost_delta": stats.get("total_cost"),
+                }
+            )
+        debug_entry["ending_state"] = ending_state
+
     state_inventory = state.setdefault("inventory", {})
     state_backlog = state.setdefault("backlog", {})
     state_last_orders = state.setdefault("last_orders", {})
@@ -1563,6 +1791,15 @@ def _finalize_round_if_ready(
 
     if pending is not None:
         pending.clear()
+
+    ordered_debug_entries: List[Dict[str, Any]] = []
+    for node in round_debug_order:
+        entry = round_debug_entries.get(node)
+        if entry:
+            ordered_debug_entries.append(entry)
+    for node, entry in round_debug_entries.items():
+        if entry not in ordered_debug_entries:
+            ordered_debug_entries.append(entry)
 
     history_entry = {
         "round": round_number,
@@ -1594,6 +1831,14 @@ def _finalize_round_if_ready(
         },
         "total_cost": round(sum(role_stats[role]["total_cost"] for role in ROLES_IN_ORDER), 2),
     }
+
+    _append_debug_round_log(
+        config,
+        game,
+        round_number=round_number,
+        timestamp=timestamp,
+        entries=ordered_debug_entries,
+    )
 
     config.setdefault("history", []).append(history_entry)
     config["pending_orders"] = {}
@@ -2391,13 +2636,42 @@ async def list_players(game_id: int, user: Dict[str, Any] = Depends(get_current_
 
 
 @api.post("/mixed-games/{game_id}/start")
-async def start_game(game_id: int, user: Dict[str, Any] = Depends(get_current_user)):
+async def start_game(
+    game_id: int,
+    request: Request,
+    user: Dict[str, Any] = Depends(get_current_user),
+):
     db = SyncSessionLocal()
     try:
         game = _get_game_for_user(db, user, game_id)
         if game.status == DbGameStatus.FINISHED:
             raise HTTPException(status_code=400, detail="Game is already finished")
+        payload: Dict[str, Any] = {}
+        try:
+            if request.headers.get("content-length") not in (None, "0"):
+                payload = await request.json()
+        except Exception:  # noqa: BLE001
+            payload = {}
+        if not isinstance(payload, dict):
+            payload = {}
+        debug_requested = _to_bool(
+            payload.get("debug_logging")
+            or payload.get("debug")
+            or payload.get("debug_mode")
+        )
+        if not debug_requested:
+            qp_value = (
+                request.query_params.get("debug_logging")
+                or request.query_params.get("debug")
+                or request.query_params.get("debug_mode")
+            )
+            if qp_value is not None:
+                debug_requested = _to_bool(qp_value)
+
         config = _coerce_game_config(game)
+        config["debug_logging"] = {"enabled": bool(debug_requested)}
+        if debug_requested:
+            _ensure_debug_log_file(config, game)
         pending = _pending_orders(config)
         pending.clear()
         config.setdefault("history", [])
