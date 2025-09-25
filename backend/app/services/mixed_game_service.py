@@ -309,6 +309,11 @@ class MixedGameService:
         if group_id is not None and "group_id" not in config:
             config["group_id"] = group_id
 
+        progression_mode = config.get("progression_mode")
+        if not progression_mode:
+            progression_mode = "supervised"
+            config.setdefault("progression_mode", progression_mode)
+
         payload: Dict[str, Any] = {
             "id": game.id,
             "name": getattr(game, "name", f"Game {game.id}") or f"Game {game.id}",
@@ -323,6 +328,7 @@ class MixedGameService:
             "created_by": getattr(game, "created_by", None),
             "group_id": group_id,
             "config": config,
+            "progression_mode": progression_mode,
             "players": [],
         }
 
@@ -364,6 +370,7 @@ class MixedGameService:
             "node_policies": (game_data.node_policies or {}),
             "system_config": (game_data.system_config or {}),
             "global_policy": (game_data.global_policy or {}),
+            "progression_mode": getattr(game_data, "progression_mode", "supervised"),
         }
         if getattr(game_data, "daybreak_llm", None):
             config["daybreak_llm"] = game_data.daybreak_llm.model_dump()
@@ -1573,9 +1580,11 @@ class MixedGameService:
         system_config = {}
         pricing_config = {}
         global_policy = {}
+        progression_mode = "supervised"
         try:
             cfg = json.loads(game_result[8]) if len(game_result) > 8 and game_result[8] else {}
             if isinstance(cfg, dict):
+                progression_mode = cfg.get("progression_mode", progression_mode) or "supervised"
                 node_policies = cfg.get('node_policies', {})
                 system_config = cfg.get('system_config', {})
                 pricing_config = cfg.get('pricing_config', {})
@@ -1587,13 +1596,14 @@ class MixedGameService:
                 system_config = demand_pattern.get('params', {}).get('system_config', {}) if isinstance(demand_pattern, dict) else {}
         except Exception:
             pass
-            
+
         return GameState(
             id=game_result[0],
             name=game_result[1],
             status=game_result[2],
             current_round=game_result[3],
             max_rounds=game_result[4],
+            progression_mode=progression_mode,
             players=player_states,
             current_demand=None,  # Will be set by the round
             round_started_at=None,  # Will be set by the round
