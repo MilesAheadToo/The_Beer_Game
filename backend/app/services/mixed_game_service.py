@@ -6,16 +6,16 @@ import json
 from collections import defaultdict, deque
 
 from types import SimpleNamespace
+from pydantic import ValidationError
 from sqlalchemy import inspect
 from sqlalchemy.orm import Session
 
 from app.models.game import Game, GameStatus as GameStatusDB
-from app.models.player import Player, PlayerRole
+from app.models.player import Player, PlayerRole, PlayerType as PlayerTypeDB, PlayerStrategy as PlayerStrategyDB
 from app.models.supply_chain import PlayerInventory, Order, GameRound, PlayerRound
 from app.models.user import User, UserTypeEnum
 from app.schemas.game import (
     GameCreate,
-    GameUpdate,
     GameState,
     PlayerState,
     GameStatus,
@@ -484,54 +484,257 @@ class MixedGameService:
         self.db.refresh(game)
         return game
 
-    def update_game_config(
-        self,
-        game_id: int,
-        node_policies: Optional[Dict[str, Any]] = None,
-        system_config: Optional[Dict[str, Any]] = None,
-        pricing_config: Optional[Dict[str, Any]] = None,
-        global_policy: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        game = self.db.query(Game).filter(Game.id == game_id).first()
+    def update_game(self, game_id: int, payload: Dict[str, Any]) -> Game:
+        game = (
+            self.db.query(Game)
+            .filter(Game.id == game_id)
+            .first()
+        )
         if not game:
             raise ValueError("Game not found")
 
         cfg: Dict[str, Any] = dict(game.config or {})
-        # Validate ranges if provided
         sys_cfg = read_system_cfg()
-        rng = (sys_cfg.dict() if sys_cfg else {})
-        def _check_range(key: str, val: float):
-            r = rng.get(key)
-            if not r:
+        ranges = sys_cfg.dict() if sys_cfg else {}
+
+        def _check_range(key: str, value: Optional[Any]) -> None:
+            if value is None:
                 return
-            lo, hi = r.get('min'), r.get('max')
-            if lo is not None and val < lo: 
+            window = ranges.get(key)
+            if not window:
+                return
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{key} must be numeric") from exc
+            lo, hi = window.get("min"), window.get("max")
+            if lo is not None and numeric < lo:
                 raise ValueError(f"{key} below minimum {lo}")
-            if hi is not None and val > hi:
+            if hi is not None and numeric > hi:
                 raise ValueError(f"{key} above maximum {hi}")
 
-        if node_policies:
-            for _, pol in node_policies.items():
-                for k in ['info_delay','ship_delay','init_inventory','price','standard_cost','variable_cost','min_order_qty']:
-                    if k in pol and pol[k] is not None:
-                        _check_range(k, float(pol[k]))
-            cfg['node_policies'] = node_policies
+        # --- Update simple fields ---
+        if "name" in payload and payload["name"]:
+            game.name = str(payload["name"]).strip()
 
-        if system_config:
-            cfg['system_config'] = system_config
+        if "description" in payload:
+            game.description = payload.get("description")
 
-        if pricing_config:
-            cfg['pricing_config'] = pricing_config
+        if "is_public" in payload:
+            game.is_public = bool(payload.get("is_public"))
 
-        if global_policy:
-            for k, v in global_policy.items():
-                if v is not None:
-                    _check_range(k, float(v))
-            cfg['global_policy'] = global_policy
+        if "max_rounds" in payload and payload["max_rounds"] is not None:
+            try:
+                game.max_rounds = int(payload["max_rounds"])
+            except (TypeError, ValueError) as exc:
+                raise ValueError("max_rounds must be an integer") from exc
+
+        if "progression_mode" in payload and payload["progression_mode"]:
+            cfg["progression_mode"] = payload["progression_mode"]
+
+        # Demand pattern update
+        if payload.get("demand_pattern"):
+            try:
+                normalized_pattern = normalize_demand_pattern(payload["demand_pattern"])
+            except Exception as exc:
+                raise ValueError(f"Invalid demand pattern: {exc}") from exc
+            cfg["demand_pattern"] = normalized_pattern
+            game.demand_pattern = normalized_pattern
+
+        # Config blocks
+        node_policies = payload.get("node_policies")
+        if node_policies is not None:
+            for pol in node_policies.values():
+                if not isinstance(pol, dict):
+                    continue
+                for key in [
+                    "info_delay",
+                    "ship_delay",
+                    "init_inventory",
+                    "price",
+                    "standard_cost",
+                    "variable_cost",
+                    "min_order_qty",
+                ]:
+                    if key in pol:
+                        _check_range(key, pol[key])
+            cfg["node_policies"] = node_policies
+
+        system_config = payload.get("system_config")
+        if system_config is not None:
+            cfg["system_config"] = system_config
+
+        pricing_config = payload.get("pricing_config")
+        if pricing_config is not None:
+            cfg["pricing_config"] = pricing_config
+
+        global_policy = payload.get("global_policy")
+        if global_policy is not None:
+            for key, value in global_policy.items():
+                _check_range(key, value)
+            cfg["global_policy"] = global_policy
+
+        daybreak_llm = payload.get("daybreak_llm")
+        if daybreak_llm is not None:
+            cfg["daybreak_llm"] = daybreak_llm
+
+        player_assignments_payload = payload.get("player_assignments")
+        if player_assignments_payload is not None:
+            self._apply_player_updates(game, cfg, player_assignments_payload)
 
         game.config = cfg
         self.db.add(game)
         self.db.commit()
+        self.db.refresh(game)
+        return game
+
+    def _apply_player_updates(
+        self,
+        game: Game,
+        cfg: Dict[str, Any],
+        assignments_payload: Any,
+    ) -> None:
+        try:
+            assignments = [
+                PlayerAssignment.model_validate(entry)
+                for entry in assignments_payload
+            ]
+        except ValidationError as exc:
+            raise ValueError(f"Invalid player assignments: {exc}") from exc
+
+        if not assignments:
+            raise ValueError("At least one player assignment is required")
+
+        existing_players: Dict[str, Player] = {
+            self._normalise_key(getattr(player.role, "value", player.role)):
+                player
+            for player in list(game.players or [])
+        }
+
+        seen_roles: Set[str] = set()
+        config_assignments: List[Dict[str, Any]] = []
+        role_assignments: Dict[str, Dict[str, Any]] = {}
+        overrides: Dict[str, Any] = dict(cfg.get("daybreak_overrides") or {})
+
+        for assignment in assignments:
+            role_key = self._normalise_key(assignment.role.value)
+            seen_roles.add(role_key)
+
+            config_assignments.append(
+                {
+                    "role": assignment.role.value,
+                    "player_type": assignment.player_type.value,
+                    "user_id": assignment.user_id,
+                    "strategy": assignment.strategy.value if assignment.strategy else None,
+                    "can_see_demand": assignment.can_see_demand,
+                    "llm_model": assignment.llm_model,
+                    "daybreak_override_pct": assignment.daybreak_override_pct,
+                }
+            )
+
+            db_role = PlayerRole[assignment.role.name]
+            is_ai = assignment.player_type == PlayerType.AGENT
+            strategy_value = (
+                assignment.strategy.value
+                if assignment.strategy is not None
+                else None
+            )
+
+            player = existing_players.get(role_key)
+            if player is None:
+                player = Player(
+                    game_id=game.id,
+                    role=db_role,
+                    name=f"{assignment.role.value.title()} ({'AI' if is_ai else 'Human'})",
+                    is_ai=is_ai,
+                    ai_strategy=strategy_value if is_ai else None,
+                    can_see_demand=assignment.can_see_demand,
+                    llm_model=assignment.llm_model if is_ai else None,
+                    user_id=assignment.user_id if not is_ai else None,
+                    type=PlayerTypeDB.AI if is_ai else PlayerTypeDB.HUMAN,
+                )
+                player.strategy = (
+                    PlayerStrategyDB.MANUAL if not is_ai else player.strategy
+                )
+                self.db.add(player)
+                self.db.flush()
+                existing_players[role_key] = player
+            else:
+                player.role = db_role
+                player.name = f"{assignment.role.value.title()} ({'AI' if is_ai else 'Human'})"
+                player.is_ai = is_ai
+                player.type = PlayerTypeDB.AI if is_ai else PlayerTypeDB.HUMAN
+                player.ai_strategy = strategy_value if is_ai else None
+                player.can_see_demand = assignment.can_see_demand
+                player.llm_model = assignment.llm_model if is_ai else None
+                player.user_id = assignment.user_id if not is_ai else None
+                if not is_ai:
+                    player.strategy = PlayerStrategyDB.MANUAL
+
+            if not player.inventory:
+                inventory = PlayerInventory(
+                    player=player,
+                    current_stock=12,
+                    incoming_shipments=[],
+                    backorders=0,
+                )
+                self.db.add(inventory)
+
+            role_assignments[role_key] = {
+                "player_id": player.id,
+                "player_type": assignment.player_type.value,
+                "strategy": strategy_value if is_ai else None,
+                "user_id": assignment.user_id if not is_ai else None,
+                "can_see_demand": assignment.can_see_demand,
+                "llm_model": assignment.llm_model if is_ai else None,
+                "daybreak_override_pct": assignment.daybreak_override_pct,
+            }
+
+            if is_ai:
+                agent_type = AgentType(role_key)
+                strategy_token = (strategy_value or "naive").lower()
+                try:
+                    strategy_enum = AgentStrategyEnum(strategy_token)
+                except ValueError:
+                    if strategy_token.startswith("llm"):
+                        strategy_enum = AgentStrategyEnum.LLM
+                    else:
+                        strategy_enum = AgentStrategyEnum.NAIVE
+
+                override_pct = (
+                    assignment.daybreak_override_pct
+                    if strategy_enum == AgentStrategyEnum.DAYBREAK_DTCE_CENTRAL
+                    else None
+                )
+                if override_pct is not None:
+                    overrides[role_key] = override_pct
+                else:
+                    overrides.pop(role_key, None)
+
+                self.agent_manager.set_agent_strategy(
+                    agent_type,
+                    strategy_enum,
+                    llm_model=assignment.llm_model,
+                    override_pct=override_pct,
+                )
+            else:
+                overrides.pop(role_key, None)
+
+        # Remove players no longer present (only for games not yet started)
+        for role_key, player in list(existing_players.items()):
+            if role_key in seen_roles:
+                continue
+            overrides.pop(role_key, None)
+            if game.status == GameStatusDB.CREATED:
+                self.db.delete(player)
+
+        cfg["player_assignments"] = config_assignments
+        if overrides:
+            cfg["daybreak_overrides"] = overrides
+        else:
+            cfg.pop("daybreak_overrides", None)
+
+        game.role_assignments = role_assignments
     
     def start_game(self, game_id: int) -> Game:
         """Start a game, initializing the first round."""

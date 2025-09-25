@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 from app.db.session import get_db
 from app.schemas.game import (
@@ -135,15 +135,9 @@ def update_game(
     current_user: User = Depends(get_current_user),
     game_service: MixedGameService = Depends(get_mixed_game_service)
 ):
-    """Update game configuration (node_policies, system_config, pricing_config, global_policy)."""
+    """Update a game's core configuration, demand pattern, and player assignments."""
     try:
-        game_service.update_game_config(
-            game_id,
-            node_policies=payload.get("node_policies"),
-            system_config=payload.get("system_config"),
-            pricing_config=payload.get("pricing_config"),
-            global_policy=payload.get("global_policy"),
-        )
+        game_service.update_game(game_id, payload)
         return game_service.get_game_state(game_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
