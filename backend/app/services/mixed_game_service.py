@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Any, Sequence, Set
+from typing import List, Dict, Optional, Any, Sequence, Set, Union
 from datetime import datetime, timedelta
 from enum import Enum
 import random
@@ -827,37 +827,56 @@ class MixedGameService:
         self.db.commit()
         return {"status": "deleted", "game_id": game_id}
     
-    def start_new_round(self, game: Game) -> GameRound:
-        """Start a new round of the game."""
+    def start_new_round(self, game: Union[int, Game]) -> Optional[GameRound]:
+        """Start a new round of the game.
+
+        The admin API sometimes calls this method with just a game ID, while
+        internal callers typically pass an instance. Supporting both keeps the
+        existing call sites working without duplicating logic.
+        """
+        if isinstance(game, Game):
+            game_obj = game
+        elif isinstance(game, int):
+            game_obj = self.db.query(Game).filter(Game.id == game).first()
+            if not game_obj:
+                raise ValueError("Game not found")
+        else:
+            raise ValueError("Invalid game reference")
+
+        # Ensure we have a baseline round counter for freshly created games
+        if game_obj.current_round is None:
+            game_obj.current_round = 0
+
         # Complete the current round if there is one
-        current_round = self.get_current_round(game.id)
+        current_round = self.get_current_round(game_obj.id)
         if current_round:
             self.complete_round(current_round)
-        
+
         # Increment round number
-        game.current_round += 1
-        
+        game_obj.current_round += 1
+
         # Check if game is over
-        if game.current_round > game.max_rounds:
-            game.status = GameStatus.COMPLETED
-            game.completed_at = datetime.utcnow()
+        max_rounds = int(game_obj.max_rounds or 0)
+        if max_rounds > 0 and game_obj.current_round > max_rounds:
+            game_obj.status = GameStatus.COMPLETED
+            game_obj.completed_at = datetime.utcnow()
             self.db.commit()
             return None
-        
+
         # Determine demand for the round (market nodes)
-        demand_value = self.calculate_demand(game, game.current_round)
+        demand_value = self.calculate_demand(game_obj, game_obj.current_round)
 
         # Create new round record
         round = GameRound(
-            game_id=game.id,
-            round_number=game.current_round,
+            game_id=game_obj.id,
+            round_number=game_obj.current_round,
             customer_demand=demand_value,
             started_at=datetime.utcnow(),
         )
         self.db.add(round)
         self.db.flush()
 
-        cfg = game.config or {}
+        cfg = game_obj.config or {}
         engine = cfg.get('engine_state', {})
         node_policies = cfg.get('node_policies', {})
         global_policy = cfg.get('global_policy', {})
