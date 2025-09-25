@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import (
@@ -76,7 +77,7 @@ class RegisterRequest(UserCreate):
     pass
 
 
-def ensure_default_setup(db: Session, user: User) -> None:
+def _ensure_default_setup_sync(db: Session, user: User) -> None:
     """Ensure a default configuration and game exist for admin users.
 
     If the admin has no supply chain configuration, one is created along with
@@ -217,6 +218,13 @@ def ensure_default_setup(db: Session, user: User) -> None:
     db.commit()
 
 
+async def ensure_default_setup(db: Session, user: User) -> None:
+    if isinstance(db, AsyncSession):
+        await db.run_sync(lambda sync_db: _ensure_default_setup_sync(sync_db, user))
+    else:
+        _ensure_default_setup_sync(db, user)
+
+
 @router.post("/login", response_model=Token)
 async def login(
     request: Request,
@@ -257,13 +265,16 @@ async def login(
 
     # Ensure default configuration and game exist for new admins
     try:
-        ensure_default_setup(db, user)
+        await ensure_default_setup(db, user)
     except Exception:
         pass
 
     if user.last_login is None:
         user.last_login = datetime.utcnow()
-        db.commit()
+        if isinstance(db, AsyncSession):
+            await db.commit()
+        else:
+            db.commit()
 
     # Set cookies: refresh (httpOnly) and access token (for header-less auth)
     response.set_cookie(
