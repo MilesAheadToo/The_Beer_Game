@@ -1301,6 +1301,10 @@ class MixedGameService:
                         getattr(inventory, "current_backlog", 0) if inventory else 0,
                     ),
                     "incoming_shipments": incoming_shipments,
+                    "node_label": getattr(player, "name", role_token.title()),
+                    "node_key": node_key,
+                    "node_type": node_type,
+                    "strategy": strategy_enum.value,
                 }
 
                 llm_payload = None

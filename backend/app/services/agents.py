@@ -1,5 +1,4 @@
 from typing import List, Dict, Optional, Any, Tuple
-import json
 import random
 import statistics
 from enum import Enum
@@ -314,6 +313,8 @@ class BeerGameAgent:
         # Optional global coordinator when a single agent manages all roles
         self.global_controller = global_controller
         self.last_explanation: Optional[str] = None
+        self._last_node_label: str = agent_type.value.title()
+        self._last_node_key: str = agent_type.value
         # PI controller state
         self._pi_state = PIControllerState()
         self._pi_alpha = 1.0
@@ -372,6 +373,12 @@ class BeerGameAgent:
         # Keep internal state aligned with the most recent observation
         self.inventory = inventory_level
         self.backlog = backlog_level
+        self._last_node_label = str(
+            local_state.get("node_label")
+            or local_state.get("node_name")
+            or self.agent_type.value.title()
+        )
+        self._last_node_key = str(local_state.get("node_key") or self.agent_type.value)
 
         prev_order = self.last_order
         self.last_explanation = None
@@ -478,51 +485,55 @@ class BeerGameAgent:
         else:
             ship_plan = int(round(min(inventory_val, float(previous_order))))
 
-        reasoning_payload = {
-            "order_upstream": int(order_qty),
-            "ship_to_downstream": max(0, ship_plan),
-            "rationale": {
-                "strategy": "naive_fill_rate",
-                "state": {
-                    "current_demand": demand,
-                    "backlog": backlog_val,
-                    "inventory": inventory_val,
-                    "previous_order": previous_order,
-                    "shortfall": shortfall,
-                    "target_order": max(0.0, float(target)),
-                    "used_previous_order": no_signal,
-                },
-            },
-        }
-
-        try:
-            self.last_explanation = json.dumps(reasoning_payload, separators=(",", ":"))
-        except (TypeError, ValueError):  # pragma: no cover - safety fallback
-            self.last_explanation = str(reasoning_payload)
+        self.last_explanation = (
+            "Naive fill-rate | "
+            f"demand={demand:.1f} backlog={backlog_val:.1f} inventory={inventory_val:.1f} | "
+            f"previous_order={previous_order} shortfall={shortfall:.1f} target={target:.1f} | "
+            f"ship_plan={ship_plan}"
+        )
 
         return order_qty
-    
+
     def _bullwhip_strategy(self, current_demand: Optional[int], upstream_data: Optional[Dict]) -> int:
         """Tend to over-order when demand increases."""
         if not self.demand_history:
+            self.last_explanation = (
+                "Bullwhip heuristic | insufficient history, repeat last order"
+            )
             return self.last_order
-            
+
         avg_demand = sum(self.demand_history) / len(self.demand_history)
         last_demand = self.demand_history[-1]
-        
+
         # If demand is increasing, over-order
         if last_demand > avg_demand * 1.2:  # 20% increase
-            return int(last_demand * 1.5)
-        return last_demand
-    
+            amplified = int(round(last_demand * 1.5))
+            self.last_explanation = (
+                "Bullwhip heuristic | demand spike "
+                f"{last_demand:.1f} vs avg {avg_demand:.1f}, amplify to {amplified}"
+            )
+            return amplified
+
+        self.last_explanation = (
+            "Bullwhip heuristic | demand stable, follow last observed demand "
+            f"{last_demand:.1f}"
+        )
+        return int(round(last_demand))
+
     def _conservative_strategy(self, current_demand: Optional[int]) -> int:
         """Maintain stable orders, avoid large fluctuations."""
         if not self.order_history:
+            self.last_explanation = "Conservative smoothing | no history, default to 4"
             return 4  # Default order
-            
+
         # Moving average of last 3 orders
         recent_orders = self.order_history[-3:] if len(self.order_history) >= 3 else self.order_history
-        return int(sum(recent_orders) / len(recent_orders))
+        avg_order = sum(recent_orders) / len(recent_orders)
+        self.last_explanation = (
+            "Conservative smoothing | average recent orders "
+            f"{[int(o) for o in recent_orders]} -> {avg_order:.1f}"
+        )
+        return int(round(avg_order))
 
     def _pi_strategy(
         self,
@@ -574,13 +585,17 @@ class BeerGameAgent:
         order = max(0.0, order)
         self.demand_history.append(observed_demand)
         self.last_explanation = (
-            f"PI heuristic | forecast {forecast:.1f} | error {error:.1f} | integral {self._pi_state.integral:.1f}"
+            "PI heuristic | "
+            f"demand_avg={forecast:.1f} error={error:.1f} integral={self._pi_state.integral:.1f} | "
+            f"inventory={inventory_level} backlog={backlog_level} inbound={inbound_sum:.1f}"
         )
         return int(round(order))
 
     def _random_strategy(self) -> int:
         """Make random orders for baseline testing."""
-        return random.randint(1, 8)
+        order_qty = random.randint(1, 8)
+        self.last_explanation = f"Random baseline | sampled uniform order {order_qty} (1-8)"
+        return order_qty
 
     def _llm_strategy(
         self,
@@ -605,7 +620,10 @@ class BeerGameAgent:
             )
 
         if LLMAgent is None:  # Daybreak LLM dependencies not available
-            return _fallback_to_pi()
+            qty = _fallback_to_pi()
+            if not self.last_explanation:
+                self.last_explanation = "LLM unavailable | fallback to PI heuristic"
+            return qty
 
         if self._llm_agent is None:
             try:
@@ -617,10 +635,12 @@ class BeerGameAgent:
                 )
             except Exception:
                 # Fallback to simple strategy if Daybreak LLM initialization fails
-                return _fallback_to_pi()
+                qty = _fallback_to_pi()
+                self.last_explanation = "LLM initialization failed | fallback to PI heuristic"
+                return qty
 
         try:
-            return self._llm_agent.make_decision(
+            decision = self._llm_agent.make_decision(
                 current_round=current_round,
                 current_inventory=self.inventory,
                 backorders=self.backlog,
@@ -630,9 +650,18 @@ class BeerGameAgent:
                 current_demand=current_demand,
                 upstream_data=upstream_data,
             )
+            rationale = getattr(self._llm_agent, "last_explanation", None)
+            if rationale:
+                self.last_explanation = f"Daybreak LLM | {rationale}"
+            else:
+                self.last_explanation = "Daybreak LLM | no rationale returned"
+            return decision
         except Exception:
             # Fallback if the Daybreak LLM call fails for any reason
-            return _fallback_to_pi()
+            qty = _fallback_to_pi()
+            if not self.last_explanation:
+                self.last_explanation = "LLM decision failure | fallback to PI heuristic"
+            return qty
 
     def _compute_daybreak_base(
         self,
@@ -939,13 +968,21 @@ class BeerGameAgent:
             whatifs["demand_scale"] = 0.8
         return whatifs or None
 
-    def get_last_explanation_comment(self) -> Optional[str]:
-        if not self.last_explanation:
-            return None
-        flattened = " | ".join(part.strip() for part in self.last_explanation.splitlines() if part.strip())
+    def get_last_explanation_comment(self) -> str:
+        label = self._last_node_label or self.agent_type.value.title()
+        explanation = self.last_explanation
+        if explanation:
+            flattened = " | ".join(
+                part.strip() for part in explanation.splitlines() if part.strip()
+            )
+        else:
+            flattened = (
+                f"{self.strategy.value} strategy | order={self.last_order} "
+                f"inventory={self.inventory} backlog={self.backlog}"
+            )
         if len(flattened) > 255:
-            return f"{flattened[:252]}..."
-        return flattened
+            flattened = f"{flattened[:252]}..."
+        return f"[{label}] {flattened}"
 
     def update_inventory(self, incoming_shipment: int, outgoing_shipment: int):
         """Update inventory and backlog based on incoming and outgoing shipments."""
