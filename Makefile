@@ -61,7 +61,7 @@ endif
 
 DOCKER_COMPOSE_CMD = $(strip $(COMPOSE_ENV) $(DOCKER_COMPOSE))
 
-.PHONY: up gpu-up up-dev down ps logs seed reset-admin help init-env proxy-up proxy-down proxy-restart proxy-recreate proxy-logs proxy-url seed-default-group build-create-users db-bootstrap db-reset
+.PHONY: up gpu-up up-dev down ps logs seed reset-admin help init-env proxy-up proxy-down proxy-restart proxy-recreate proxy-logs proxy-url seed-default-group build-create-users db-bootstrap db-reset rebuild-gpu
 
 # Default CPU target
 up:
@@ -164,6 +164,102 @@ gpu-bootstrap:
 	@$(MAKE) gpu-db-up
 	@$(MAKE) gpu-migrate
 	@$(MAKE) gpu-seed
+
+rebuild-gpu:
+	@echo "\n[+] Rebuilding GPU stack from scratch..."
+	@$(MAKE) --no-print-directory down
+	@echo "\n[+] Removing cached images for a clean GPU build..."
+	@$(DOCKER_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.gpu.yml down --rmi all 2>/dev/null || true
+	@$(DOCKER) image prune -f >/dev/null
+	@echo "\n[+] Starting GPU stack..."
+	@$(MAKE) --no-print-directory gpu-up
+	@echo "\n[+] Waiting for database to become available..."
+	@$(DOCKER_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.gpu.yml exec -T backend bash -lc 'cat <<"PY" | python3
+import time
+from sqlalchemy import create_engine, text
+from app.core.config import settings
+
+engine = create_engine(settings.SQLALCHEMY_DATABASE_URI, pool_pre_ping=True)
+try:
+    for attempt in range(60):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+        except Exception:
+            time.sleep(2)
+        else:
+            break
+    else:
+        raise SystemExit("Database not ready after waiting for 120 seconds")
+finally:
+    engine.dispose()
+PY'
+	@echo "\n[+] Seeding default data (humans, Naiive, LLM, Daybreak GNN)..."
+	@$(DOCKER_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.gpu.yml exec -T backend bash -lc 'python3 scripts/seed_default_group.py --reset-games --use-human-players'
+	@$(DOCKER_COMPOSE_CMD) -f docker-compose.yml -f docker-compose.gpu.yml exec -T backend bash -lc 'cat <<"PY" | python3
+from app.db.session import SessionLocal
+from app.models.game import Game, GameStatus
+from app.services.supply_chain_config_service import SupplyChainConfigService
+from backend.scripts.seed_default_group import (
+    ensure_group,
+    ensure_supply_chain_config,
+    ensure_ai_agents,
+    DEFAULT_LLM_MODEL,
+)
+
+session = SessionLocal()
+try:
+    group, _ = ensure_group(session)
+    config = ensure_supply_chain_config(session, group)
+    service = SupplyChainConfigService(session)
+
+    def ensure_agent_game(name: str, description: str, strategy: str, llm_model=None) -> None:
+        game = (
+            session.query(Game)
+            .filter(Game.group_id == group.id, Game.name == name)
+            .first()
+        )
+        if game is None:
+            base_config = service.create_game_from_config(
+                config.id,
+                {
+                    "name": name,
+                    "description": description,
+                    "max_rounds": 40,
+                    "is_public": True,
+                },
+            )
+            game = Game(
+                name=name,
+                description=description,
+                created_by=group.admin_id,
+                group_id=group.id,
+                status=GameStatus.CREATED,
+                max_rounds=base_config.get("max_rounds", 40),
+                config=base_config,
+                demand_pattern=base_config.get("demand_pattern", {}),
+            )
+            session.add(game)
+            session.flush()
+
+        ensure_ai_agents(session, game, strategy, llm_model)
+        session.commit()
+
+    ensure_agent_game(
+        "The Beer Game - Naiive",
+        "Baseline Beer Game using Naiive agent strategy for all roles.",
+        "naive",
+    )
+    ensure_agent_game(
+        "The Beer Game - LLM",
+        "Beer Game where all roles are controlled by the Daybreak LLM agent.",
+        "llm",
+        DEFAULT_LLM_MODEL,
+    )
+finally:
+    session.close()
+PY'
+	@echo "\n[✓] GPU rebuild complete. Default games are ready."
 
 down:
 	@echo "\n[+] Stopping and removing containers and volumes..."; \
