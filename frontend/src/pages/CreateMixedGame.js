@@ -221,6 +221,11 @@ const clampOverridePercent = (value) => {
   return Math.min(50, Math.max(5, numeric));
 };
 
+const toNumberOr = (value, fallback) => {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+};
+
 const normalizeStrategyForPayload = (strategy) => {
   if (!strategy) {
     return null;
@@ -257,6 +262,7 @@ const CreateMixedGame = () => {
     shared_history_weeks: DEFAULT_DAYBREAK_LLM_CONFIG.shared_history_weeks,
     volatility_window: DEFAULT_DAYBREAK_LLM_CONFIG.volatility_window,
   }));
+  const [savedSnapshot, setSavedSnapshot] = useState(null);
   const cardBg = useColorModeValue(CARD_BG_LIGHT, CARD_BG_DARK);
   const borderColor = useColorModeValue(BORDER_LIGHT, BORDER_DARK);
   const { user } = useAuth();
@@ -277,6 +283,15 @@ const CreateMixedGame = () => {
   const toast = useToast();
   const [initializing, setInitializing] = useState(isEditing);
 
+  const userLookup = useMemo(() => {
+    if (!Array.isArray(availableUsers)) {
+      return new Map();
+    }
+    return new Map(
+      availableUsers.map((entry) => [Number(entry?.id), entry?.username || `User #${entry?.id}`])
+    );
+  }, [availableUsers]);
+
   const usesDaybreakStrategist = useMemo(
     () =>
       players.some(
@@ -291,6 +306,15 @@ const CreateMixedGame = () => {
   }, [daybreakLlmConfig]);
 
   const showDaybreakSharingCard = usesDaybreakStrategist || hasDaybreakOverrides;
+
+  const summaryProgressionMode = isEditing && savedSnapshot
+    ? savedSnapshot.progressionMode || 'supervised'
+    : progressionMode;
+
+  const progressionLabel = useMemo(() => {
+    const option = progressionOptions.find((entry) => entry.value === summaryProgressionMode);
+    return option ? option.label : summaryProgressionMode;
+  }, [summaryProgressionMode]);
 
   const normalizeNodeName = useCallback((value) => String(value || '').trim().toLowerCase(), []);
   const normalizeNodeType = useCallback((value) => String(value || '').trim().toLowerCase(), []);
@@ -323,6 +347,74 @@ const CreateMixedGame = () => {
     if (!Number.isFinite(min)) return max;
     if (!Number.isFinite(max)) return min;
     return (min + max) / 2;
+  }, []);
+
+  const formatNumber = useCallback((value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return '—';
+    }
+    return numeric.toLocaleString();
+  }, []);
+
+  const formatCurrency = useCallback((value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return '—';
+    }
+    return `$${numeric.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }, []);
+
+  const formatRangeValue = useCallback((min, max, suffix = '') => {
+    const parsedMin = Number(min);
+    const parsedMax = Number(max);
+    const hasMin = Number.isFinite(parsedMin);
+    const hasMax = Number.isFinite(parsedMax);
+    const suffixText = suffix ? ` ${suffix}` : '';
+
+    if (hasMin && hasMax) {
+      if (parsedMin === parsedMax) {
+        return `${parsedMin}${suffixText}`;
+      }
+      return `${parsedMin}${suffixText} – ${parsedMax}${suffixText}`;
+    }
+    if (hasMin) {
+      return `≥ ${parsedMin}${suffixText}`;
+    }
+    if (hasMax) {
+      return `≤ ${parsedMax}${suffixText}`;
+    }
+    return '—';
+  }, []);
+
+  const formatCurrencyRange = useCallback((min, max) => {
+    const parsedMin = Number(min);
+    const parsedMax = Number(max);
+    const hasMin = Number.isFinite(parsedMin);
+    const hasMax = Number.isFinite(parsedMax);
+
+    if (hasMin && hasMax) {
+      if (parsedMin === parsedMax) {
+        return formatCurrency(parsedMin);
+      }
+      return `${formatCurrency(parsedMin)} – ${formatCurrency(parsedMax)}`;
+    }
+    if (hasMin) {
+      return `≥ ${formatCurrency(parsedMin)}`;
+    }
+    if (hasMax) {
+      return `≤ ${formatCurrency(parsedMax)}`;
+    }
+    return '—';
+  }, [formatCurrency]);
+
+  const formatWeeks = useCallback((value) => {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return '—';
+    }
+    const rounded = Math.round(numeric);
+    return `${rounded} week${rounded === 1 ? '' : 's'}`;
   }, []);
 
   const clampToRange = useCallback((value, range) => {
@@ -407,6 +499,162 @@ const CreateMixedGame = () => {
     return normalised;
   }, [normalizeNodeName]);
 
+  const buildGameSnapshot = useCallback((statePayload) => {
+    if (!statePayload) {
+      return null;
+    }
+
+    const game = statePayload?.game ?? statePayload ?? {};
+    const config = statePayload?.config ?? game?.config ?? {};
+
+    const demandBlock = statePayload?.demand_pattern ?? game?.demand_pattern ?? config?.demand_pattern ?? {};
+    const demandParams = demandBlock?.params ?? {};
+    const initialDemandValue = toNumberOr(
+      demandParams.initial_demand ?? demandParams.initialDemand,
+      DEFAULT_CLASSIC_PARAMS.initial_demand
+    );
+    const changeWeekValue = toNumberOr(
+      demandParams.change_week ?? demandParams.changeWeek,
+      DEFAULT_CLASSIC_PARAMS.change_week
+    );
+    const finalDemandValue = toNumberOr(
+      demandParams.final_demand ?? demandParams.new_demand ?? demandParams.finalDemand,
+      DEFAULT_CLASSIC_PARAMS.final_demand
+    );
+    const demandType = String(demandBlock?.type || 'classic').toLowerCase();
+
+    const pricing = statePayload?.pricing_config ?? game?.pricing_config ?? config?.pricing_config ?? {};
+    const pricingConfigSnapshot = {
+      retailer: {
+        selling_price: toNumberOr(pricing?.retailer?.selling_price, DEFAULT_PRICING_CONFIG.retailer.selling_price),
+        standard_cost: toNumberOr(pricing?.retailer?.standard_cost, DEFAULT_PRICING_CONFIG.retailer.standard_cost),
+      },
+      wholesaler: {
+        selling_price: toNumberOr(pricing?.wholesaler?.selling_price, DEFAULT_PRICING_CONFIG.wholesaler.selling_price),
+        standard_cost: toNumberOr(pricing?.wholesaler?.standard_cost, DEFAULT_PRICING_CONFIG.wholesaler.standard_cost),
+      },
+      distributor: {
+        selling_price: toNumberOr(pricing?.distributor?.selling_price, DEFAULT_PRICING_CONFIG.distributor.selling_price),
+        standard_cost: toNumberOr(pricing?.distributor?.standard_cost, DEFAULT_PRICING_CONFIG.distributor.standard_cost),
+      },
+      manufacturer: {
+        selling_price: toNumberOr(pricing?.manufacturer?.selling_price, DEFAULT_PRICING_CONFIG.manufacturer.selling_price),
+        standard_cost: toNumberOr(pricing?.manufacturer?.standard_cost, DEFAULT_PRICING_CONFIG.manufacturer.standard_cost),
+      },
+    };
+
+    const resolvedNodePolicies = statePayload?.node_policies ?? game?.node_policies ?? config?.node_policies ?? {};
+    const normalizedPolicies = normalizeLoadedPolicies(resolvedNodePolicies);
+    const nodePoliciesSnapshot = Object.entries(normalizedPolicies).reduce((acc, [key, value]) => {
+      acc[key] = { ...value };
+      return acc;
+    }, {});
+
+    const resolvedSystemConfig = statePayload?.system_config ?? game?.system_config ?? config?.system_config ?? {};
+    const systemConfigSnapshot = { ...DEFAULT_SYSTEM_CONFIG, ...resolvedSystemConfig };
+
+    const resolvedPolicy = statePayload?.global_policy ?? game?.global_policy ?? config?.global_policy ?? {};
+    const policySnapshot = { ...DEFAULT_POLICY, ...resolvedPolicy };
+
+    const daybreakBlock = statePayload?.daybreak_llm ?? game?.daybreak_llm ?? config?.daybreak_llm ?? {};
+    const toggles = daybreakBlock?.toggles ?? {};
+    const daybreakSnapshot = {
+      toggles: {
+        customer_demand_history_sharing: Boolean(toggles.customer_demand_history_sharing),
+        volatility_signal_sharing: Boolean(toggles.volatility_signal_sharing),
+        downstream_inventory_visibility: Boolean(toggles.downstream_inventory_visibility),
+      },
+      shared_history_weeks: daybreakBlock?.shared_history_weeks != null ? daybreakBlock.shared_history_weeks : null,
+      volatility_window: daybreakBlock?.volatility_window != null ? daybreakBlock.volatility_window : null,
+    };
+
+    const overrides = statePayload?.daybreak_overrides ?? game?.daybreak_overrides ?? config?.daybreak_overrides ?? {};
+
+    const rawPlayers = Array.isArray(statePayload?.players)
+      ? statePayload.players
+      : Array.isArray(game?.players)
+        ? game.players
+        : [];
+
+    const mappedPlayers = rawPlayers.reduce((acc, record) => {
+      const roleValue = String(record?.role || '').toLowerCase();
+      if (!roleValue) {
+        return acc;
+      }
+      const isAi = Boolean(record?.is_ai ?? record?.type === 'agent');
+      const rawStrategy = record?.ai_strategy ?? record?.strategy;
+      const normalizedStrategy = rawStrategy ? String(rawStrategy).toUpperCase() : 'NAIVE';
+      const overrideValue =
+        overrides?.[roleValue] ??
+        overrides?.[roleValue.toUpperCase()] ??
+        overrides?.[roleValue.toLowerCase()];
+      acc[roleValue] = {
+        role: roleValue,
+        playerType: isAi ? 'ai' : 'human',
+        strategy: isAi ? normalizedStrategy : 'NAIVE',
+        canSeeDemand:
+          record?.can_see_demand != null ? Boolean(record.can_see_demand) : roleValue === 'retailer',
+        userId: record?.user_id ?? null,
+        llmModel: record?.llm_model || 'gpt-4o-mini',
+        daybreakOverridePct:
+          overrideValue != null ? clampOverridePercent(Number(overrideValue) * 100) : undefined,
+        displayName: record?.name || record?.display_name || roleValue,
+      };
+      return acc;
+    }, {});
+
+    const playersSnapshot = playerRoles.map(({ value: roleValue, label }) => {
+      const entry = mappedPlayers[roleValue];
+      if (entry) {
+        return { ...entry, displayName: entry.displayName || label };
+      }
+      return {
+        role: roleValue,
+        playerType: 'ai',
+        strategy: 'NAIVE',
+        canSeeDemand: roleValue === 'retailer',
+        userId: null,
+        llmModel: 'gpt-4o-mini',
+        daybreakOverridePct: undefined,
+        displayName: label,
+      };
+    });
+
+    return {
+      gameName: game?.name || statePayload?.name || config?.name || '',
+      description: game?.description || config?.description || '',
+      maxRounds: toNumberOr(game?.max_rounds ?? statePayload?.max_rounds ?? config?.max_rounds, 20),
+      isPublic:
+        game?.is_public !== undefined
+          ? Boolean(game.is_public)
+          : Boolean(config?.is_public ?? statePayload?.is_public ?? true),
+      progressionMode:
+        statePayload?.progression_mode ??
+        game?.progression_mode ??
+        config?.progression_mode ??
+        'supervised',
+      demandPattern: demandType,
+      demandParams: {
+        initial_demand: initialDemandValue,
+        change_week: changeWeekValue,
+        final_demand: finalDemandValue,
+      },
+      pricingConfig: pricingConfigSnapshot,
+      nodePolicies: nodePoliciesSnapshot,
+      systemConfig: systemConfigSnapshot,
+      policy: policySnapshot,
+      players: playersSnapshot,
+      daybreakLlm: daybreakSnapshot,
+      daybreakOverrides: overrides,
+      supplyChainConfigId:
+        config?.supply_chain_config_id ??
+        game?.supply_chain_config_id ??
+        statePayload?.supply_chain_config_id ??
+        null,
+      supplyChainName: config?.name || statePayload?.supply_chain_name || '',
+    };
+  }, [normalizeLoadedPolicies]);
+
   const formatDemandPatternSummary = useCallback((pattern, params) => {
     if (!pattern) {
       return '—';
@@ -429,6 +677,42 @@ const CreateMixedGame = () => {
     }
   }, []);
 
+  const summaryGameName = isEditing && savedSnapshot ? savedSnapshot.gameName : gameName;
+  const summaryMaxRounds = isEditing && savedSnapshot ? savedSnapshot.maxRounds : maxRounds;
+  const summaryDemandPattern = isEditing && savedSnapshot ? savedSnapshot.demandPattern : demandPattern;
+
+  const summaryDemandParams = useMemo(() => {
+    if (isEditing && savedSnapshot) {
+      const params = savedSnapshot.demandParams || {};
+      return {
+        initial_demand: toNumberOr(
+          params.initial_demand ?? params.initialDemand,
+          DEFAULT_CLASSIC_PARAMS.initial_demand
+        ),
+        change_week: toNumberOr(
+          params.change_week ?? params.changeWeek,
+          DEFAULT_CLASSIC_PARAMS.change_week
+        ),
+        final_demand: toNumberOr(
+          params.final_demand ?? params.finalDemand ?? params.new_demand,
+          DEFAULT_CLASSIC_PARAMS.final_demand
+        ),
+      };
+    }
+    return {
+      initial_demand: initialDemand,
+      change_week: demandChangeWeek,
+      final_demand: finalDemand,
+    };
+  }, [isEditing, savedSnapshot, initialDemand, demandChangeWeek, finalDemand]);
+
+  const demandSummary = useMemo(() => (
+    formatDemandPatternSummary(
+      { type: summaryDemandPattern, params: summaryDemandParams },
+      summaryDemandParams
+    )
+  ), [summaryDemandPattern, summaryDemandParams, formatDemandPatternSummary]);
+
   const formatLeadTimeRange = useCallback((range) => {
     if (!range) {
       return '—';
@@ -450,9 +734,12 @@ const CreateMixedGame = () => {
     return '—';
   }, []);
 
-  const getPolicyValue = useCallback(
-    (nodeKey, field, fallback = 0) => {
-      const policy = nodePolicies[nodeKey];
+  const resolvePolicyValue = useCallback(
+    (policies, nodeKey, field, fallback = 0) => {
+      if (!nodeKey) {
+        return fallback;
+      }
+      const policy = policies?.[nodeKey];
       if (policy && policy[field] != null) {
         return policy[field];
       }
@@ -465,7 +752,12 @@ const CreateMixedGame = () => {
       }
       return fallback;
     },
-    [activeSupplyChainConfig, buildDefaultNodePolicy, nodePolicies, normalizeNodeName]
+    [activeSupplyChainConfig, buildDefaultNodePolicy, normalizeNodeName]
+  );
+
+  const getPolicyValue = useCallback(
+    (nodeKey, field, fallback = 0) => resolvePolicyValue(nodePolicies, nodeKey, field, fallback),
+    [nodePolicies, resolvePolicyValue]
   );
 
   const describeRange = useCallback((range, unit = '') => {
@@ -593,140 +885,72 @@ const CreateMixedGame = () => {
         const state = await mixedGameApi.getGameState(gameId);
         if (cancelled) return;
 
-        const game = state?.game ?? state ?? {};
-        const config = state?.config ?? game?.config ?? {};
+        const snapshot = buildGameSnapshot(state);
+        if (!snapshot) {
+          setInitializing(false);
+          return;
+        }
 
-        setGameName(game?.name || '');
-        setDescription(game?.description || '');
-        setMaxRounds(game?.max_rounds || 20);
-        setIsPublic(game?.is_public !== undefined ? Boolean(game.is_public) : true);
+        setGameName(snapshot.gameName || '');
+        setDescription(snapshot.description || '');
+        setMaxRounds(snapshot.maxRounds || 20);
+        setIsPublic(snapshot.isPublic !== undefined ? Boolean(snapshot.isPublic) : true);
+        setProgressionMode(snapshot.progressionMode || 'supervised');
 
-        const nextProgression =
-          state?.progression_mode || game?.progression_mode || config?.progression_mode || 'supervised';
-        setProgressionMode(nextProgression);
-
-        const demand =
-          state?.demand_pattern || game?.demand_pattern || config?.demand_pattern || {};
-        const demandType = String(demand.type || 'classic').toLowerCase();
-        setDemandPattern(demandType);
-        const demandParams = demand.params || {};
+        setDemandPattern(snapshot.demandPattern || 'classic');
+        const demandParams = snapshot.demandParams || {};
         setInitialDemand(
-          Number.isFinite(Number(demandParams.initial_demand))
-            ? Number(demandParams.initial_demand)
+          demandParams.initial_demand != null
+            ? toNumberOr(demandParams.initial_demand, DEFAULT_CLASSIC_PARAMS.initial_demand)
             : DEFAULT_CLASSIC_PARAMS.initial_demand
         );
         setDemandChangeWeek(
-          Number.isFinite(Number(demandParams.change_week))
-            ? Number(demandParams.change_week)
+          demandParams.change_week != null
+            ? toNumberOr(demandParams.change_week, DEFAULT_CLASSIC_PARAMS.change_week)
             : DEFAULT_CLASSIC_PARAMS.change_week
         );
         setFinalDemand(
-          Number.isFinite(Number(demandParams.final_demand))
-            ? Number(demandParams.final_demand)
+          demandParams.final_demand != null
+            ? toNumberOr(demandParams.final_demand, DEFAULT_CLASSIC_PARAMS.final_demand)
             : DEFAULT_CLASSIC_PARAMS.final_demand
         );
 
-        const pricing =
-          state?.pricing_config || game?.pricing_config || config?.pricing_config || {};
+        const snapshotPricing = snapshot.pricingConfig || DEFAULT_PRICING_CONFIG;
         setPricingConfig({
-          retailer: {
-            selling_price: Number(pricing.retailer?.selling_price ?? DEFAULT_PRICING_CONFIG.retailer.selling_price),
-            standard_cost: Number(pricing.retailer?.standard_cost ?? DEFAULT_PRICING_CONFIG.retailer.standard_cost),
-          },
-          wholesaler: {
-            selling_price: Number(pricing.wholesaler?.selling_price ?? DEFAULT_PRICING_CONFIG.wholesaler.selling_price),
-            standard_cost: Number(pricing.wholesaler?.standard_cost ?? DEFAULT_PRICING_CONFIG.wholesaler.standard_cost),
-          },
-          distributor: {
-            selling_price: Number(pricing.distributor?.selling_price ?? DEFAULT_PRICING_CONFIG.distributor.selling_price),
-            standard_cost: Number(pricing.distributor?.standard_cost ?? DEFAULT_PRICING_CONFIG.distributor.standard_cost),
-          },
-          manufacturer: {
-            selling_price: Number(pricing.manufacturer?.selling_price ?? DEFAULT_PRICING_CONFIG.manufacturer.selling_price),
-            standard_cost: Number(pricing.manufacturer?.standard_cost ?? DEFAULT_PRICING_CONFIG.manufacturer.standard_cost),
-          },
+          retailer: { ...snapshotPricing.retailer },
+          wholesaler: { ...snapshotPricing.wholesaler },
+          distributor: { ...snapshotPricing.distributor },
+          manufacturer: { ...snapshotPricing.manufacturer },
         });
 
-        const resolvedNodePolicies = state?.node_policies || game?.node_policies || config?.node_policies;
-        setNodePolicies(normalizeLoadedPolicies(resolvedNodePolicies));
-
-        const resolvedSystemConfig = state?.system_config || game?.system_config || config?.system_config || {};
-        setSystemConfig({ ...DEFAULT_SYSTEM_CONFIG, ...resolvedSystemConfig });
-
-        const resolvedPolicy = state?.global_policy || game?.global_policy || config?.global_policy || {};
-        setPolicy({ ...DEFAULT_POLICY, ...resolvedPolicy });
-
-        const rawDaybreak =
-          state?.daybreak_llm || game?.daybreak_llm || config?.daybreak_llm || {};
-        const toggleBlock = rawDaybreak.toggles || {};
-        setDaybreakLlmConfig({
-          toggles: {
-            customer_demand_history_sharing: Boolean(toggleBlock.customer_demand_history_sharing),
-            volatility_signal_sharing: Boolean(toggleBlock.volatility_signal_sharing),
-            downstream_inventory_visibility: Boolean(toggleBlock.downstream_inventory_visibility),
-          },
-          shared_history_weeks:
-            rawDaybreak.shared_history_weeks != null ? rawDaybreak.shared_history_weeks : null,
-          volatility_window:
-            rawDaybreak.volatility_window != null ? rawDaybreak.volatility_window : null,
-        });
-
-        const overrides =
-          state?.daybreak_overrides || game?.daybreak_overrides || config?.daybreak_overrides || {};
-        const statePlayers = Array.isArray(state?.players)
-          ? state.players
-          : Array.isArray(game?.players)
-            ? game.players
-            : [];
-        const mappedPlayers = statePlayers.reduce((acc, record) => {
-          const roleValue = String(record.role || '').toLowerCase();
-          if (!roleValue) {
-            return acc;
-          }
-          const isAi = Boolean(record.is_ai);
-          const rawStrategy = record.ai_strategy
-            ? String(record.ai_strategy).toUpperCase()
-            : 'NAIVE';
-          const overrideDecimal =
-            overrides?.[roleValue] ??
-            overrides?.[roleValue.toLowerCase()] ??
-            overrides?.[roleValue.toUpperCase()];
-          acc[roleValue] = {
-            role: roleValue,
-            playerType: isAi ? 'ai' : 'human',
-            strategy: isAi ? rawStrategy : 'NAIVE',
-            canSeeDemand: Boolean(record.can_see_demand),
-            userId: record.user_id || null,
-            llmModel: record.llm_model || 'gpt-4o-mini',
-            daybreakOverridePct:
-              overrideDecimal != null
-                ? clampOverridePercent(Number(overrideDecimal) * 100)
-                : undefined,
-          };
+        const snapshotPolicies = Object.entries(snapshot.nodePolicies || {}).reduce((acc, [key, value]) => {
+          acc[key] = { ...value };
           return acc;
         }, {});
-        const orderedPlayers = playerRoles.map(({ value: roleValue }) => {
-          const player = mappedPlayers[roleValue];
-          if (player) {
-            return player;
-          }
-          return {
-            role: roleValue,
-            playerType: 'ai',
-            strategy: 'NAIVE',
-            canSeeDemand: roleValue === 'retailer',
-            userId: roleValue === 'retailer' && user ? user.id : null,
-            llmModel: 'gpt-4o-mini',
-            daybreakOverridePct: undefined,
-          };
-        });
-        setPlayers(orderedPlayers);
+        setNodePolicies(snapshotPolicies);
 
-        const supplyChainConfigId =
-          config?.supply_chain_config_id ?? game?.supply_chain_config_id ?? null;
-        if (supplyChainConfigId) {
-          setActiveConfigId(supplyChainConfigId);
+        setSystemConfig({ ...DEFAULT_SYSTEM_CONFIG, ...(snapshot.systemConfig || {}) });
+        setPolicy({ ...DEFAULT_POLICY, ...(snapshot.policy || {}) });
+
+        const snapshotDaybreak = snapshot.daybreakLlm || {};
+        setDaybreakLlmConfig({
+          toggles: {
+            ...DEFAULT_DAYBREAK_LLM_CONFIG.toggles,
+            ...(snapshotDaybreak.toggles || {}),
+          },
+          shared_history_weeks:
+            snapshotDaybreak.shared_history_weeks != null ? snapshotDaybreak.shared_history_weeks : null,
+          volatility_window:
+            snapshotDaybreak.volatility_window != null ? snapshotDaybreak.volatility_window : null,
+        });
+
+        setPlayers((snapshot.players || []).map((player) => ({ ...player })));
+
+        if (snapshot.supplyChainConfigId) {
+          setActiveConfigId(snapshot.supplyChainConfigId);
         }
+
+        setSavedSnapshot(snapshot);
       } catch (error) {
         console.error('Failed to load game configuration', error);
         toast({
@@ -749,7 +973,7 @@ const CreateMixedGame = () => {
     return () => {
       cancelled = true;
     };
-  }, [isEditing, gameId, toast, navigate, user, normalizeLoadedPolicies]);
+  }, [isEditing, gameId, toast, navigate, buildGameSnapshot]);
 
   // Optional prefill via query params for node policies (JSON-encoded)
   useEffect(() => {
@@ -1267,6 +1491,72 @@ const CreateMixedGame = () => {
       const response = isEditing
         ? await mixedGameApi.updateGame(gameId, gameData)
         : await mixedGameApi.createGame(gameData);
+
+      if (isEditing && response) {
+        const snapshot = buildGameSnapshot(response);
+        if (snapshot) {
+          setSavedSnapshot(snapshot);
+          setGameName(snapshot.gameName || '');
+          setDescription(snapshot.description || '');
+          setMaxRounds(snapshot.maxRounds || 20);
+          setIsPublic(snapshot.isPublic !== undefined ? Boolean(snapshot.isPublic) : true);
+          setProgressionMode(snapshot.progressionMode || 'supervised');
+
+          setDemandPattern(snapshot.demandPattern || 'classic');
+          const params = snapshot.demandParams || {};
+          setInitialDemand(
+            params.initial_demand != null
+              ? toNumberOr(params.initial_demand, DEFAULT_CLASSIC_PARAMS.initial_demand)
+              : DEFAULT_CLASSIC_PARAMS.initial_demand
+          );
+          setDemandChangeWeek(
+            params.change_week != null
+              ? toNumberOr(params.change_week, DEFAULT_CLASSIC_PARAMS.change_week)
+              : DEFAULT_CLASSIC_PARAMS.change_week
+          );
+          setFinalDemand(
+            params.final_demand != null
+              ? toNumberOr(params.final_demand, DEFAULT_CLASSIC_PARAMS.final_demand)
+              : DEFAULT_CLASSIC_PARAMS.final_demand
+          );
+
+          const updatedPricing = snapshot.pricingConfig || DEFAULT_PRICING_CONFIG;
+          setPricingConfig({
+            retailer: { ...updatedPricing.retailer },
+            wholesaler: { ...updatedPricing.wholesaler },
+            distributor: { ...updatedPricing.distributor },
+            manufacturer: { ...updatedPricing.manufacturer },
+          });
+
+          const updatedPolicies = Object.entries(snapshot.nodePolicies || {}).reduce((acc, [key, value]) => {
+            acc[key] = { ...value };
+            return acc;
+          }, {});
+          setNodePolicies(updatedPolicies);
+
+          setSystemConfig({ ...DEFAULT_SYSTEM_CONFIG, ...(snapshot.systemConfig || {}) });
+          setPolicy({ ...DEFAULT_POLICY, ...(snapshot.policy || {}) });
+
+          const updatedDaybreak = snapshot.daybreakLlm || {};
+          setDaybreakLlmConfig({
+            toggles: {
+              ...DEFAULT_DAYBREAK_LLM_CONFIG.toggles,
+              ...(updatedDaybreak.toggles || {}),
+            },
+            shared_history_weeks:
+              updatedDaybreak.shared_history_weeks != null ? updatedDaybreak.shared_history_weeks : null,
+            volatility_window:
+              updatedDaybreak.volatility_window != null ? updatedDaybreak.volatility_window : null,
+          });
+
+          setPlayers((snapshot.players || []).map((player) => ({ ...player })));
+
+          if (snapshot.supplyChainConfigId) {
+            setActiveConfigId(snapshot.supplyChainConfigId);
+          }
+        }
+      }
+
       return response;
       
     } catch (error) {
@@ -1326,6 +1616,91 @@ const CreateMixedGame = () => {
       throw error;
     }
   };
+
+  const summarySupplyChainName = activeSupplyChainConfig?.name || (isEditing && savedSnapshot ? savedSnapshot.supplyChainName : null);
+
+  const overviewItems = useMemo(() => [
+    { label: 'Game Name', value: summaryGameName || '—' },
+    { label: 'Max Rounds', value: formatNumber(summaryMaxRounds) },
+    { label: 'Progression Mode', value: progressionLabel || '—' },
+    { label: 'Demand Pattern', value: demandSummary },
+    { label: 'Linked Supply Chain', value: summarySupplyChainName || '—' },
+  ], [summaryGameName, summaryMaxRounds, progressionLabel, demandSummary, summarySupplyChainName, formatNumber]);
+
+  const summaryPolicy = isEditing && savedSnapshot ? savedSnapshot.policy : policy;
+
+  const globalPolicyItems = useMemo(() => [
+    { label: 'Order Lead Time', value: formatWeeks(summaryPolicy?.info_delay) },
+    { label: 'Shipping Lead Time', value: formatWeeks(summaryPolicy?.ship_delay) },
+    { label: 'Initial Inventory', value: formatNumber(summaryPolicy?.init_inventory) },
+    { label: 'Holding Cost', value: formatCurrency(summaryPolicy?.holding_cost) },
+    { label: 'Backlog Cost', value: formatCurrency(summaryPolicy?.backlog_cost) },
+    { label: 'Max Order', value: formatNumber(summaryPolicy?.max_order) },
+    { label: 'Max Inbound / Link', value: formatNumber(summaryPolicy?.max_inbound_per_link) },
+  ], [summaryPolicy, formatWeeks, formatNumber, formatCurrency]);
+
+  const summarySystemConfig = isEditing && savedSnapshot ? savedSnapshot.systemConfig : systemConfig;
+
+  const systemConstraintItems = useMemo(() => [
+    { label: 'Order Quantity Range', value: formatRangeValue(summarySystemConfig?.min_order_quantity, summarySystemConfig?.max_order_quantity, 'units') },
+    { label: 'Starting Inventory Range', value: formatRangeValue(summarySystemConfig?.min_starting_inventory, summarySystemConfig?.max_starting_inventory, 'units') },
+    { label: 'Demand Range', value: formatRangeValue(summarySystemConfig?.min_demand, summarySystemConfig?.max_demand, 'units') },
+    { label: 'Lead Time Range', value: formatRangeValue(summarySystemConfig?.min_lead_time, summarySystemConfig?.max_lead_time, 'weeks') },
+    { label: 'Holding Cost Range', value: formatCurrencyRange(summarySystemConfig?.min_holding_cost, summarySystemConfig?.max_holding_cost) },
+    { label: 'Backlog Cost Range', value: formatCurrencyRange(summarySystemConfig?.min_backlog_cost, summarySystemConfig?.max_backlog_cost) },
+  ], [summarySystemConfig, formatRangeValue, formatCurrencyRange]);
+
+  const summaryPlayers = isEditing && savedSnapshot ? savedSnapshot.players : players;
+
+  const playerSummaryRows = useMemo(() =>
+    playerRoles.map(({ value, label }) => {
+      const player = (summaryPlayers || []).find((entry) => entry.role === value) || {};
+      const isHuman = player.playerType === 'human';
+      const assignmentLabel = isHuman
+        ? (player.userId ? userLookup.get(Number(player.userId)) || `User #${player.userId}` : 'Unassigned')
+        : 'AI Agent';
+      const strategyLabel = isHuman
+        ? 'Human Controlled'
+        : getStrategyLabel(player.strategy || 'NAIVE');
+      const llmModel = !isHuman && String(player.strategy || '').toUpperCase().startsWith('LLM_')
+        ? player.llmModel
+        : null;
+      const overridePct = !isHuman && Number.isFinite(Number(player.daybreakOverridePct))
+        ? `${clampOverridePercent(player.daybreakOverridePct)}%`
+        : null;
+
+      return {
+        roleKey: value,
+        roleLabel: label,
+        typeLabel: isHuman ? 'Human' : 'Agent',
+        assignmentLabel,
+        strategyLabel,
+        llmModel,
+        overridePct,
+        canSeeDemand: Boolean(player.canSeeDemand ?? (value === 'retailer')),
+      };
+    }),
+    [summaryPlayers, userLookup]
+  );
+
+  const summaryNodePolicies = isEditing && savedSnapshot ? savedSnapshot.nodePolicies : nodePolicies;
+  const summaryPricingConfig = isEditing && savedSnapshot ? savedSnapshot.pricingConfig : pricingConfig;
+
+  const roleParameterRows = useMemo(() =>
+    playerRoles.map(({ value, label }) => {
+      const nodeKey = normalizeNodeName(value);
+      return {
+        roleKey: value,
+        roleLabel: label,
+        infoDelay: resolvePolicyValue(summaryNodePolicies, nodeKey, 'info_delay', 0),
+        shipDelay: resolvePolicyValue(summaryNodePolicies, nodeKey, 'ship_delay', 0),
+        initInventory: resolvePolicyValue(summaryNodePolicies, nodeKey, 'init_inventory', 0),
+        price: summaryPricingConfig?.[value]?.selling_price ?? null,
+        standardCost: summaryPricingConfig?.[value]?.standard_cost ?? null,
+      };
+    }),
+    [normalizeNodeName, resolvePolicyValue, summaryNodePolicies, summaryPricingConfig]
+  );
 
   if (isEditing && initializing) {
     return (
@@ -1843,9 +2218,128 @@ const CreateMixedGame = () => {
                   </CardBody>
                 </Card>
               )}
+
+              {isEditing && (
+                <Card variant="outline" bg={cardBg} borderColor={borderColor} w="100%" className="card-surface pad-6">
+                  <CardHeader pb={2}>
+                    <Heading size="md" fontFamily="inherit">Current Game Snapshot</Heading>
+                    <Text color="gray.500" fontSize="sm">
+                      Review the configuration currently saved for this game.
+                    </Text>
+                  </CardHeader>
+                  <CardBody pt={0}>
+                    <VStack align="stretch" spacing={5}>
+                      <Box>
+                        <Heading size="sm" fontFamily="inherit" mb={2}>Game Overview</Heading>
+                        <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={3}>
+                          {overviewItems.map((item) => (
+                            <Box key={item.label}>
+                              <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="0.08em">
+                                {item.label}
+                              </Text>
+                              <Text fontSize="sm" fontWeight="medium">{item.value}</Text>
+                            </Box>
+                          ))}
+                        </Grid>
+                      </Box>
+
+                      <Box>
+                        <Heading size="sm" fontFamily="inherit" mb={2}>Global Policy</Heading>
+                        <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={3}>
+                          {globalPolicyItems.map((item) => (
+                            <Box key={item.label}>
+                              <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="0.08em">
+                                {item.label}
+                              </Text>
+                              <Text fontSize="sm" fontWeight="medium">{item.value}</Text>
+                            </Box>
+                          ))}
+                        </Grid>
+                      </Box>
+
+                      <Box>
+                        <Heading size="sm" fontFamily="inherit" mb={2}>System Constraints</Heading>
+                        <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={3}>
+                          {systemConstraintItems.map((item) => (
+                            <Box key={item.label}>
+                              <Text fontSize="xs" color="gray.500" textTransform="uppercase" letterSpacing="0.08em">
+                                {item.label}
+                              </Text>
+                              <Text fontSize="sm" fontWeight="medium">{item.value}</Text>
+                            </Box>
+                          ))}
+                        </Grid>
+                      </Box>
+
+                      <Box>
+                        <Heading size="sm" fontFamily="inherit" mb={2}>Players</Heading>
+                        <Table size="sm" variant="simple">
+                          <Thead>
+                            <Tr>
+                              <Th>Role</Th>
+                              <Th>Assignment</Th>
+                              <Th>Strategy</Th>
+                              <Th>Demand Visibility</Th>
+                            </Tr>
+                          </Thead>
+                          <Tbody>
+                            {playerSummaryRows.map((row) => (
+                              <Tr key={row.roleKey}>
+                                <Td>{row.roleLabel}</Td>
+                                <Td>
+                                  <Text fontWeight="medium">{row.assignmentLabel}</Text>
+                                  <Text fontSize="xs" color="gray.500">{row.typeLabel}</Text>
+                                </Td>
+                                <Td>
+                                  <Text fontWeight="medium">{row.strategyLabel}</Text>
+                                  {row.llmModel && (
+                                    <Text fontSize="xs" color="gray.500">LLM: {row.llmModel}</Text>
+                                  )}
+                                  {row.overridePct && (
+                                    <Text fontSize="xs" color="gray.500">Override ±{row.overridePct}</Text>
+                                  )}
+                                </Td>
+                                <Td>{row.canSeeDemand ? 'Yes' : 'No'}</Td>
+                              </Tr>
+                            ))}
+                          </Tbody>
+                        </Table>
+                      </Box>
+
+                      <Box>
+                        <Heading size="sm" fontFamily="inherit" mb={2}>Role Parameters</Heading>
+                        <Table size="sm" variant="simple">
+                          <Thead>
+                            <Tr>
+                              <Th>Role</Th>
+                              <Th>Info Delay</Th>
+                              <Th>Ship Delay</Th>
+                              <Th>Initial Inventory</Th>
+                              <Th>Price</Th>
+                              <Th>Standard Cost</Th>
+                            </Tr>
+                          </Thead>
+                          <Tbody>
+                            {roleParameterRows.map((row) => (
+                              <Tr key={row.roleKey}>
+                                <Td>{row.roleLabel}</Td>
+                                <Td>{formatWeeks(row.infoDelay)}</Td>
+                                <Td>{formatWeeks(row.shipDelay)}</Td>
+                                <Td>{formatNumber(row.initInventory)}</Td>
+                                <Td>{formatCurrency(row.price)}</Td>
+                                <Td>{formatCurrency(row.standardCost)}</Td>
+                              </Tr>
+                            ))}
+                          </Tbody>
+                        </Table>
+                      </Box>
+                    </VStack>
+                  </CardBody>
+                </Card>
+              )}
             </VStack>
           </TabPanel>
-            
+
             <TabPanel p={0}>
               <HStack justify="space-between" mb={3}>
                 <Box />
