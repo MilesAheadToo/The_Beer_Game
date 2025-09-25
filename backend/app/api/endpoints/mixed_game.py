@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 
@@ -43,12 +43,13 @@ def create_mixed_game(
 @router.post("/mixed-games/{game_id}/start", response_model=GameSchema)
 def start_game(
     game_id: int,
+    debug_logging: bool = Body(False, embed=True),
     current_user: User = Depends(get_current_user),
     game_service: MixedGameService = Depends(get_mixed_game_service)
 ):
     """Start a game that's in the 'created' state."""
     try:
-        return game_service.start_game(game_id)
+        return game_service.start_game(game_id, debug_logging=debug_logging)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

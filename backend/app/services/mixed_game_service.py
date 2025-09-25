@@ -743,7 +743,7 @@ class MixedGameService:
 
         game.role_assignments = role_assignments
     
-    def start_game(self, game_id: int) -> Game:
+    def start_game(self, game_id: int, debug_logging: bool = False) -> Game:
         """Start a game, initializing the first round."""
         game = self.db.query(Game).filter(Game.id == game_id).first()
         if not game:
@@ -759,6 +759,7 @@ class MixedGameService:
         
         # Initialize simple engine state if not present
         cfg = game.config or {}
+        cfg['debug_logging'] = {'enabled': bool(debug_logging)}
         raw_policies = cfg.get('node_policies', {})
         if not raw_policies:
             fallback_roles = ['retailer', 'wholesaler', 'distributor', 'manufacturer']
