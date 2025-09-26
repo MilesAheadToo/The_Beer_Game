@@ -77,6 +77,8 @@ DEFAULT_PASSWORD = "Daybreak@2025"
 DEFAULT_GAME_NAME = "The Beer Game"
 DEFAULT_AGENT_TYPE = "pi_heuristic"
 DEFAULT_LLM_MODEL = os.getenv("DAYBREAK_LLM_MODEL", "gpt-4o-mini")
+NAIVE_AGENT_GAME_NAME = "Naive Agent Showcase"
+NAIVE_AGENT_DESCRIPTION = "Unsupervised benchmark game using naive agents for every role."
 
 logger = logging.getLogger(__name__)
 if not logging.getLogger().handlers:
@@ -518,6 +520,69 @@ def ensure_default_game(session: Session, group: Group) -> Game:
     return game
 
 
+def ensure_naive_unsupervised_game(
+    session: Session,
+    group: Group,
+    config: SupplyChainConfig,
+) -> Game:
+    """Ensure a dedicated unsupervised game powered by naive agents exists."""
+
+    config_service = SupplyChainConfigService(session)
+
+    game = (
+        session.query(Game)
+        .filter(Game.group_id == group.id, Game.name == NAIVE_AGENT_GAME_NAME)
+        .first()
+    )
+
+    if game is None:
+        print(f"[info] Creating naive benchmark game '{NAIVE_AGENT_GAME_NAME}'...")
+        base_config = config_service.create_game_from_config(
+            config.id,
+            {
+                "name": NAIVE_AGENT_GAME_NAME,
+                "max_rounds": 40,
+                "is_public": False,
+                "description": NAIVE_AGENT_DESCRIPTION,
+            },
+        )
+        base_config["progression_mode"] = "unsupervised"
+
+        game = Game(
+            name=NAIVE_AGENT_GAME_NAME,
+            created_by=config.created_by or group.admin_id,
+            group_id=group.id,
+            status=GameStatus.CREATED,
+            max_rounds=base_config.get("max_rounds", 40),
+            config=base_config,
+            demand_pattern=base_config.get("demand_pattern", {}),
+            description=NAIVE_AGENT_DESCRIPTION,
+            supply_chain_config_id=config.id,
+        )
+        session.add(game)
+        session.flush()
+        print(f"[success] Created game '{NAIVE_AGENT_GAME_NAME}' (id={game.id}).")
+    else:
+        print(
+            f"[info] Updating naive benchmark game '{NAIVE_AGENT_GAME_NAME}' (id={game.id})."
+        )
+        game_config = game.config or {}
+        if isinstance(game_config, str):
+            try:
+                game_config = json.loads(game_config)
+            except json.JSONDecodeError:
+                game_config = {}
+        game_config["progression_mode"] = "unsupervised"
+        game_config["max_rounds"] = game_config.get("max_rounds", 40)
+        game.config = json.loads(json.dumps(game_config))
+        game.description = NAIVE_AGENT_DESCRIPTION
+        game.status = GameStatus.CREATED
+        game.supply_chain_config_id = config.id
+        session.add(game)
+
+    return game
+
+
 def configure_human_players_for_game(
     session: Session,
     group: Group,
@@ -884,14 +949,53 @@ def _run_post_seed_tasks(
         training_cmd.append("--force")
 
     print(f"[info] Train temporal GNN ({device}) (config_id={config_id})...")
-    training_completed = subprocess.run(
-        training_cmd,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    training_completed = None
+    training_stdout = ""
+    used_device = device
 
-    training_stdout = training_completed.stdout.strip()
+    try:
+        training_completed = subprocess.run(
+            training_cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        if device == "cuda":
+            print(f"[warn] CUDA training failed ({exc}); retrying on CPU.")
+            if exc.stdout:
+                print(exc.stdout.strip())
+            if exc.stderr:
+                print(exc.stderr.strip(), file=sys.stderr)
+            cpu_cmd = list(training_cmd)
+            if "--device" in cpu_cmd:
+                device_index = cpu_cmd.index("--device") + 1
+                cpu_cmd[device_index] = "cpu"
+            else:
+                cpu_cmd.extend(["--device", "cpu"])
+            used_device = "cpu"
+            artifacts["device"]["resolved"] = "cpu"
+            try:
+                training_completed = subprocess.run(
+                    cpu_cmd,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+            except subprocess.CalledProcessError as cpu_exc:
+                if cpu_exc.stdout:
+                    print(cpu_exc.stdout.strip())
+                if cpu_exc.stderr:
+                    print(cpu_exc.stderr.strip(), file=sys.stderr)
+                raise
+        else:
+            if exc.stdout:
+                print(exc.stdout.strip())
+            if exc.stderr:
+                print(exc.stderr.strip(), file=sys.stderr)
+            raise
+
+    training_stdout = training_completed.stdout.strip() if training_completed else ""
     training_payload: Optional[Dict[str, Any]] = None
     if training_stdout:
         try:
@@ -1164,6 +1268,11 @@ def seed_default_data(session: Session, options: Optional[SeedOptions] = None) -
         "device": None,
     }
     if config:
+        naive_game = ensure_naive_unsupervised_game(session, group, config)
+        _configure_game_agents(session, naive_game, "naive")
+        session.flush()
+        session.commit()
+
         artifacts = _run_post_seed_tasks(
             session,
             config,
