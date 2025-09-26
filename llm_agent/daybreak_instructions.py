@@ -3,14 +3,14 @@
 # The instruction block below is copied verbatim from the Daybreak Beer Game
 # Strategist documentation shared with the team.  It encodes all guard-rails
 # and behavioural expectations for the custom GPT that powers the Beer Game
-# agent.  The assistant API expects these instructions when the assistant is
+# agent.  The Responses API expects these instructions when the session is
 # created, so we expose them as a dedicated constant that can be imported by
 # any integration point (backend services, utilities, or ad-hoc scripts).
 
 DAYBREAK_STRATEGIST_INSTRUCTIONS = '''
 # Daybreak Beer Game Strategist — Ready-to-Paste Instructions
 
-Use this as the `instructions` for your Assistant when creating it via the OpenAI API. It encapsulates the rules, toggles, outputs, and safety rails so the model behaves like the Beer Game agent.
+Use this as the `instructions` when creating a Responses session (or other API integration) via the OpenAI API. It encapsulates the rules, toggles, outputs, and safety rails so the model behaves like the Beer Game agent.
 
 ---
 
@@ -106,82 +106,105 @@ The user will provide a JSON state snapshot like:
 
 # Tiny Python Turn API
 
-This helper lets you create the assistant once, then step the game week-by-week. It **does not** simulate the environment; it only structures calls and responses.
+This helper creates a Responses session once, then steps the game week-by-week. It **does not** simulate the environment; it only structures calls and responses.
 
 ````python
 # pip install openai
+import json
 import os
-from typing import Dict, Any
+from typing import Any, Dict
+
 from openai import OpenAI
 
-ASSISTANT_NAME = "Daybreak Beer Game Strategist"
 MODEL = "gpt-5-reasoning"  # choose any reasoning model available to your account
 
 INSTRUCTIONS = r"""
 [Paste the full instruction block above verbatim]
 """
 
+
 class BeerGameAgent:
-    def __init__(self, api_key: str | None = None, assistant_id: str | None = None):
+    def __init__(self, api_key: str | None = None, session_id: str | None = None):
         self.client = OpenAI(api_key=api_key or os.getenv("OPENAI_API_KEY"))
-        self.assistant_id = assistant_id or self._create_assistant()
-        self.thread_id = None
+        self.session_id = session_id
 
-    def _create_assistant(self) -> str:
-        asst = self.client.beta.assistants.create(
-            name=ASSISTANT_NAME,
-            model=MODEL,
-            instructions=INSTRUCTIONS,
-        )
-        return asst.id
+    def start(self) -> str:
+        """Start or resume a Responses session for a new game run."""
 
-    def start(self):
-        """Start a fresh conversation thread for a new game run."""
-        thread = self.client.beta.threads.create()
-        self.thread_id = thread.id
-        return self.thread_id
+        if not self.session_id:
+            session = self.client.responses.sessions.create(
+                model=MODEL,
+                instructions=INSTRUCTIONS,
+            )
+            self.session_id = session.id
+        return self.session_id
 
     def decide(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Send one turn's state and get the agent's JSON decision.
-        `state` must match the schema in the Instructions under 'Inputs You Will Receive Each Turn'.
-        Returns a dict with keys: order_upstream, ship_to_downstream, rationale.
-        """
-        assert self.thread_id, "Call start() before decide()."
+        """Send one turn's state and get the agent's JSON decision."""
 
-        # Post state as a fenced JSON block to help parsing
-        content = (
+        if not self.session_id:
+            self.start()
+
+        payload = json.dumps(state, separators=(",", ":"))
+        prompt = (
             "Here is the current state as JSON. Respond ONLY with the required JSON object.\n\n"
-            "```json\n" + __import__("json").dumps(state) + "\n```"
+            f"```json\n{payload}\n```"
         )
-        self.client.beta.threads.messages.create(
-            thread_id=self.thread_id,
-            role="user",
-            content=content,
-        )
-        run = self.client.beta.threads.runs.create_and_poll(
-            thread_id=self.thread_id,
-            assistant_id=self.assistant_id,
-        )
-        # Fetch latest assistant message
-        msgs = self.client.beta.threads.messages.list(thread_id=self.thread_id, limit=1)
-        text = msgs.data[0].content[0].text.value
 
-        # Parse JSON safely (assistant promised strict JSON)
-        import json
+        response = self.client.responses.create(
+            session=self.session_id,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": prompt,
+                        }
+                    ],
+                }
+            ],
+        )
+
+        # `response.output_text` concatenates all text segments for convenience.
+        text = getattr(response, "output_text", None)
+        if not text:
+            # Fallback for SDKs that expose structured output items.
+            text_chunks = []
+            for item in getattr(response, "output", []) or []:
+                for content in getattr(item, "content", []) or []:
+                    if getattr(content, "type", None) != "output_text":
+                        continue
+                    text_obj = getattr(content, "text", None)
+                    value = getattr(text_obj, "value", None)
+                    if value is None and isinstance(text_obj, str):
+                        value = text_obj
+                    elif value is None:
+                        value = getattr(text_obj, "text", None)
+                    if value:
+                        text_chunks.append(value)
+            if text_chunks:
+                text = "\n".join(text_chunks)
+
+        if not text:
+            raise RuntimeError("Daybreak strategist response did not include text output")
+
         try:
             decision = json.loads(text)
         except json.JSONDecodeError:
-            # Attempt to extract JSON object heuristically
             import re
+
             match = re.search(r"\{[\s\S]*\}", text)
             if not match:
-                raise ValueError(f"Assistant did not return JSON: {text}")
+                raise ValueError(f"Model did not return JSON: {text}")
             decision = json.loads(match.group(0))
-        # Basic validation
+
         for key in ("order_upstream", "ship_to_downstream", "rationale"):
             if key not in decision:
                 raise ValueError(f"Missing key '{key}' in decision: {decision}")
+
         return decision
+
 
 # --- Example usage ---
 if __name__ == "__main__":
@@ -195,24 +218,24 @@ if __name__ == "__main__":
         "toggles": {
             "customer_demand_history_sharing": False,
             "volatility_signal_sharing": False,
-            "downstream_inventory_visibility": False
+            "downstream_inventory_visibility": False,
         },
         "parameters": {
             "holding_cost": 0.5,
             "backlog_cost": 0.5,
             "L_order": 2,
             "L_ship": 2,
-            "L_prod": 4
+            "L_prod": 4,
         },
         "local_state": {
             "on_hand": 12,
             "backlog": 0,
-            "incoming_orders_this_week": 4,          # customer demand at retailer
+            "incoming_orders_this_week": 4,  # customer demand at retailer
             "received_shipment_this_week": 0,
             "pipeline_orders_upstream": [0, 0],     # length L_order
             "pipeline_shipments_inbound": [0, 0],   # length L_ship
-            "optional": {}
-        }
+            "optional": {},
+        },
     }
 
     decision = agent.decide(state)
@@ -222,6 +245,7 @@ if __name__ == "__main__":
 ## Notes
 
 * This helper **does not** maintain or update the environment. Use your sim to advance pipelines, resolve shipments, update backlogs/inventory, then call `decide()` again next week with the new snapshot.
-* To reuse the same assistant across runs, persist `assistant_id` and pass it back into `BeerGameAgent(api_key, assistant_id=...)`. Persisting the thread is optional; start a new one for new games.
-* If you later enable tools (e.g., code interpreter) or attach files, add them at assistant creation.
+* To reuse the same Responses session across runs, persist `session_id` (e.g., store `agent.start()`'s return value) and pass it back into `BeerGameAgent(api_key, session_id=...)` on the next run.
+* `response.output_text` is the quickest way to capture the strategist's reply; fall back to iterating `response.output` if your SDK version structures the data differently.
+* If you later enable tools (e.g., code interpreter) or attach files, include them when creating the Responses session.
 '''
