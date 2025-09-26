@@ -1899,12 +1899,7 @@ def _auto_advance_unsupervised_game_sync(
             logger.warning("Auto-advance aborted: no players for game %s", game_id)
             return
 
-        if any(not p.is_ai for p in players):
-            logger.info(
-                "Auto-advance skipped for game %s because at least one player is human",
-                game_id,
-            )
-            return
+        has_human_players = any(not p.is_ai for p in players)
 
         iteration = 0
 
@@ -1944,15 +1939,31 @@ def _auto_advance_unsupervised_game_sync(
             config = _coerce_game_config(game)
             _ensure_simulation_state(config)
             pending = _pending_orders(config)
-            pending.clear()
+            if not has_human_players:
+                pending.clear()
 
             session.flush()
             _save_game_config(session, game, config)
-            progressed = _finalize_round_if_ready(session, game, config, round_record, force=True)
+            progressed = _finalize_round_if_ready(
+                session,
+                game,
+                config,
+                round_record,
+                force=not has_human_players,
+            )
             session.add(game)
             session.commit()
 
             if not progressed:
+                if has_human_players:
+                    logger.debug(
+                        "Waiting for human submissions before advancing game %s round %s",
+                        game_id,
+                        round_record.round_number,
+                    )
+                    if sleep_seconds:
+                        time.sleep(sleep_seconds)
+                    continue
                 logger.debug(
                     "Auto-advance fallback triggered for game %s round %s",
                     game_id,

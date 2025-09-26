@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import PageLayout from '../components/PageLayout';
 import RoundTimer from '../components/RoundTimer';
@@ -55,19 +55,64 @@ const GameBoard = () => {
   const { user } = useAuth();
   const [gameState, setGameState] = useState(null);
   const [gameDetails, setGameDetails] = useState(null);
-  const [playerRole, setPlayerRole] = useState('');
-  const [playerId, setPlayerId] = useState(null);
+  const [assignedRole, setAssignedRole] = useState('');
+  const [viewingRole, setViewingRole] = useState('');
+  const [assignedPlayerId, setAssignedPlayerId] = useState(null);
+  const [viewingPlayerId, setViewingPlayerId] = useState(null);
+  const [isSpectatorMode, setIsSpectatorMode] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isPlayerTurn, setIsPlayerTurn] = useState(false);
-  const [myGames, setMyGames] = useState([]);
+  const [associatedGames, setAssociatedGames] = useState([]);
   const [orderComment, setOrderComment] = useState('');
   const [orderHistory, setOrderHistory] = useState([]);
   const [reportLoading, setReportLoading] = useState(false);
   const [gameReport, setGameReport] = useState(null);
   const [reportError, setReportError] = useState(null);
-  
+
   const { isOpen, onClose } = useDisclosure();
   const { gameStatus } = useWebSocket();
+
+  const playerOptions = useMemo(
+    () => (Array.isArray(gameDetails?.players) ? gameDetails.players : []),
+    [gameDetails?.players]
+  );
+  const isReadOnlyView = !assignedPlayerId || viewingPlayerId !== assignedPlayerId;
+
+  const handleRoleSelection = useCallback(
+    (playerIdValue) => {
+      const selected = playerOptions.find(
+        (player) => String(player.id) === String(playerIdValue)
+      );
+      if (selected) {
+        setViewingPlayerId(selected.id);
+        setViewingRole(selected.role);
+      } else {
+        setViewingPlayerId(null);
+        setViewingRole('');
+      }
+      setOrderComment('');
+    },
+    [playerOptions]
+  );
+
+  const formatRoleLabel = useCallback((role) => {
+    if (!role) {
+      return 'Unknown';
+    }
+    return role
+      .toString()
+      .toLowerCase()
+      .split('_')
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+  }, []);
+
+  const viewingIsCurrent = useMemo(() => {
+    if (!gameState || !viewingRole) {
+      return false;
+    }
+    return gameState.current_player_turn === viewingRole;
+  }, [gameState, viewingRole]);
   
   // Update game state when game ID changes
   useEffect(() => {
@@ -97,27 +142,52 @@ const GameBoard = () => {
     fetchGameState();
   }, [gameId, toast]);
 
+  useEffect(() => {
+    if (!viewingPlayerId) {
+      setViewingRole('');
+      return;
+    }
+    const selected = playerOptions.find((player) => player.id === viewingPlayerId);
+    if (selected && selected.role !== viewingRole) {
+      setViewingRole(selected.role);
+    }
+  }, [playerOptions, viewingPlayerId, viewingRole]);
+
   // Load list of games created by this admin to allow quick switch
   useEffect(() => {
     (async () => {
       try {
         const games = await mixedGameApi.getGames();
-        const mine = (games || []).filter(g => g.created_by === user?.id);
-        setMyGames(mine);
+        const associated = (games || []).filter((g) => {
+          const createdByUser = g.created_by === user?.id;
+          const isPlayer = Array.isArray(g.players)
+            ? g.players.some((p) => p.user_id === user?.id)
+            : false;
+          return createdByUser || isPlayer;
+        });
+        setAssociatedGames(associated);
       } catch (e) {
         // ignore
       }
     })();
   }, [user?.id]);
 
+  const dropdownGames = useMemo(() => {
+    const games = [...associatedGames];
+    if (gameDetails && !games.some((g) => g.id === gameDetails.id)) {
+      games.push({ id: gameDetails.id, name: gameDetails.name });
+    }
+    return games;
+  }, [associatedGames, gameDetails]);
+
   // Load order history and rounds data
   useEffect(() => {
     const fetchRounds = async () => {
-      if (gameId && playerId) {
+      if (gameId && viewingPlayerId) {
         try {
           const rounds = await mixedGameApi.getRounds(gameId);
           const history = rounds.map(r => {
-            const pr = (r.player_rounds || []).find(p => p.player_id === playerId);
+            const pr = (r.player_rounds || []).find(p => p.player_id === viewingPlayerId);
             if (!pr) return null;
             return {
               round: r.round_number,
@@ -134,7 +204,7 @@ const GameBoard = () => {
       }
     };
     fetchRounds();
-  }, [gameId, playerId, gameStatus]);
+  }, [gameId, viewingPlayerId, gameStatus]);
   
   // Fetch game details on component mount
   useEffect(() => {
@@ -143,20 +213,35 @@ const GameBoard = () => {
         setIsLoading(true);
         const game = await mixedGameApi.getGame(gameId);
         setGameDetails(game);
-        
-        // Get current user ID and player info from auth context
+
+        const players = Array.isArray(game.players) ? game.players : [];
         const currentUserId = user?.id;
-        const player = game.players.find(p => p.user_id === currentUserId);
-        if (player) {
-          setPlayerRole(player.role);
-          setPlayerId(player.id);
-          
-          // Check if it's the player's turn
-          if (game.current_player_turn === player.role) {
-            setIsPlayerTurn(true);
+        const assignedPlayer = players.find((p) => p.user_id === currentUserId) || null;
+
+        if (assignedPlayer) {
+          setAssignedRole(assignedPlayer.role);
+          setViewingRole(assignedPlayer.role);
+          setAssignedPlayerId(assignedPlayer.id);
+          setViewingPlayerId(assignedPlayer.id);
+          setIsSpectatorMode(false);
+          setIsPlayerTurn(game.current_player_turn === assignedPlayer.role);
+        } else {
+          const existingViewer = players.find((p) => p.id === viewingPlayerId) || players[0] || null;
+          setAssignedRole('');
+          setAssignedPlayerId(null);
+          setIsPlayerTurn(false);
+          setIsSpectatorMode(true);
+          if (existingViewer) {
+            setViewingRole(existingViewer.role);
+            setViewingPlayerId(existingViewer.id);
+          } else {
+            setViewingRole('');
+            setViewingPlayerId(null);
           }
         }
-        
+
+        setOrderComment('');
+
         setIsLoading(false);
       } catch (error) {
         console.error('Error fetching game details:', error);
@@ -172,7 +257,7 @@ const GameBoard = () => {
     };
     
     fetchGameDetails();
-  }, [gameId, navigate, toast, user?.id]);
+  }, [gameId, navigate, toast, user?.id, viewingPlayerId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -234,27 +319,37 @@ const GameBoard = () => {
   
   // Check if it's the player's turn
   useEffect(() => {
-    if (gameState && playerRole) {
-      const currentPlayerTurn = gameState.current_player_turn === playerRole;
-      setIsPlayerTurn(currentPlayerTurn);
-      
-      if (currentPlayerTurn) {
-        toast({
-          title: 'Your Turn!',
-          description: 'It\'s your turn to place an order.',
-          status: 'info',
-          duration: 5000,
-          isClosable: true,
-        });
+    if (!assignedRole || !gameState) {
+      if (isPlayerTurn) {
+        setIsPlayerTurn(false);
       }
+      return;
     }
-  }, [gameState, playerRole, toast]);
+
+    const currentPlayerTurn = gameState.current_player_turn === assignedRole;
+    if (currentPlayerTurn && !isPlayerTurn) {
+      toast({
+        title: 'Your Turn!',
+        description: 'It\'s your turn to place an order.',
+        status: 'info',
+        duration: 5000,
+        isClosable: true,
+      });
+    }
+    if (currentPlayerTurn !== isPlayerTurn) {
+      setIsPlayerTurn(currentPlayerTurn);
+    }
+  }, [assignedRole, gameState, isPlayerTurn, toast]);
   
   // Handle order submission
   const handleOrderSubmit = async (quantity, comment) => {
+    if (!assignedPlayerId) {
+      return;
+    }
+
     const qty = parseInt(quantity, 10) || 0;
     try {
-      await mixedGameApi.submitOrder(gameId, playerId, qty, comment);
+      await mixedGameApi.submitOrder(gameId, assignedPlayerId, qty, comment);
       toast({
         title: 'Order submitted!',
         description: `Order of ${qty} units has been placed.`,
@@ -265,7 +360,7 @@ const GameBoard = () => {
       setOrderComment('');
       const rounds = await mixedGameApi.getRounds(gameId);
       const history = rounds.map(r => {
-        const pr = (r.player_rounds || []).find(p => p.player_id === playerId);
+        const pr = (r.player_rounds || []).find(p => p.player_id === assignedPlayerId);
         if (!pr) return null;
         return {
           round: r.round_number,
@@ -290,7 +385,7 @@ const GameBoard = () => {
 
   // Render game board
   return (
-    <PageLayout title={`Game: ${gameDetails?.name || 'Loading...'}`}>
+    <PageLayout title={gameDetails?.supply_chain_name || gameDetails?.name || 'Game'}>
       <Box p={4}>
         {isLoading ? (
           <Center h="200px">
@@ -302,57 +397,75 @@ const GameBoard = () => {
               <HStack spacing={4} align="stretch">
                 {/* Game info card */}
                 <Box flex={1} p={4} bg={cardBg} borderRadius="lg" borderWidth="1px" borderColor={borderColor}>
-                  <VStack align="start" spacing={4}>
+                  <VStack align="start" spacing={4} width="100%">
                     <VStack align="start" spacing={0}>
-                      <Text fontSize="sm" color="gray.500">Game</Text>
-                      <Text fontSize="lg" fontWeight="bold">{gameDetails?.name || 'Untitled Game'}</Text>
+                      <Text fontSize="sm" color="gray.500">Supply Chain</Text>
+                      <Text fontSize="lg" fontWeight="bold">
+                        {gameDetails?.supply_chain_name || 'Unassigned Supply Chain'}
+                      </Text>
                     </VStack>
-                    {myGames.length > 0 && (
+                    <HStack spacing={3} width="100%" alignItems="center">
+                      <Text fontWeight="bold">Game:</Text>
                       <ChakraSelect
-                        placeholder="Switch to another of my games"
                         size="sm"
                         value={String(gameId)}
                         onChange={(e) => navigate(`/games/${e.target.value}`)}
                         maxW="sm"
                       >
-                        {myGames.map((g) => (
+                        {dropdownGames.map((g) => (
                           <option key={g.id} value={g.id}>{g.name}</option>
                         ))}
                       </ChakraSelect>
-                    )}
-                  
-                  <HStack spacing={6}>
-                    <VStack align="start" spacing={0}>
-                      <Text fontSize="sm" color="gray.500">Round</Text>
-                      <Text fontSize="xl" fontWeight="bold">{gameState?.current_round || 1}</Text>
-                    </VStack>
-                    
-                    <VStack align="start" spacing={0}>
-                      <Text fontSize="sm" color="gray.500">Status</Text>
-                      <Badge colorScheme={gameStatus === 'in_progress' ? 'green' : 'yellow'} px={2} py={1}>
-                        {gameStatus === 'in_progress' ? 'In Progress' : 'Waiting'}
-                      </Badge>
-                    </VStack>
-                    
-                    <VStack align="start" spacing={0}>
-                      <Text fontSize="sm" color="gray.500">Your Role</Text>
-                      <Badge colorScheme="blue" px={2} py={1} textTransform="capitalize">
-                        {playerRole || 'Unknown'}
-                      </Badge>
-                    </VStack>
-                  </HStack>
-                </VStack>
-              </Box>
+                    </HStack>
+
+                    <HStack spacing={6} width="100%">
+                      <VStack align="start" spacing={0}>
+                        <Text fontSize="sm" color="gray.500">Round</Text>
+                        <Text fontSize="xl" fontWeight="bold">{gameState?.current_round || 1}</Text>
+                      </VStack>
+
+                      <VStack align="start" spacing={0}>
+                        <Text fontSize="sm" color="gray.500">Status</Text>
+                        <Badge colorScheme={gameStatus === 'in_progress' ? 'green' : 'yellow'} px={2} py={1}>
+                          {gameStatus === 'in_progress' ? 'In Progress' : 'Waiting'}
+                        </Badge>
+                      </VStack>
+
+                      <VStack align="start" spacing={1} flex={1} maxW="240px" width="100%">
+                        <Text fontSize="sm" color="gray.500">Your Role</Text>
+                        {isSpectatorMode && playerOptions.length > 0 ? (
+                          <ChakraSelect
+                            size="sm"
+                            value={viewingPlayerId ? String(viewingPlayerId) : ''}
+                            onChange={(event) => handleRoleSelection(event.target.value)}
+                            placeholder="Select role"
+                          >
+                            {playerOptions.map((player) => (
+                              <option key={player.id} value={player.id}>{formatRoleLabel(player.role)}</option>
+                            ))}
+                          </ChakraSelect>
+                        ) : (
+                          <Badge colorScheme="blue" px={2} py={1} textTransform="capitalize">
+                            {formatRoleLabel(viewingRole)}
+                          </Badge>
+                        )}
+                      </VStack>
+                    </HStack>
+                  </VStack>
+                </Box>
               
               {/* Round timer component */}
-              {gameStatus === 'in_progress' && playerId && (
+              {gameStatus === 'in_progress' && viewingPlayerId && (
                 <Box width="400px">
                   <RoundTimer
                     gameId={gameId}
-                    playerId={playerId}
+                    playerId={viewingPlayerId}
                     roundNumber={gameState?.current_round || 1}
-                    onOrderSubmit={(q) => handleOrderSubmit(q, orderComment)}
-                    isPlayerTurn={isPlayerTurn}
+                    onOrderSubmit={handleOrderSubmit}
+                    isPlayerTurn={viewingIsCurrent}
+                    orderComment={orderComment}
+                    onCommentChange={setOrderComment}
+                    readOnly={isReadOnlyView}
                   />
                 </Box>
               )}
@@ -415,14 +528,6 @@ const GameBoard = () => {
             <Box p={4} bg={cardBg} borderRadius="lg" borderWidth="1px" borderColor={borderColor}>
               <VStack align="stretch" spacing={4}>
                 <Text fontWeight="bold">Round {gameState?.current_round || 1}</Text>
-                <FormControl>
-                  <FormLabel>Comment</FormLabel>
-                  <Input
-                    value={orderComment}
-                    onChange={(e) => setOrderComment(e.target.value)}
-                    placeholder="Why are you ordering this amount?"
-                  />
-                </FormControl>
                 <Box height="300px">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart data={orderHistory}>
@@ -439,9 +544,9 @@ const GameBoard = () => {
                 <Table size="sm">
                   <Thead>
                     <Tr>
-                      <Th>Round</Th>
-                      <Th>Order</Th>
-                      <Th>Comment</Th>
+                      <Th width="15%">Round</Th>
+                      <Th width="15%">Order</Th>
+                      <Th width="70%">Comment</Th>
                     </Tr>
                   </Thead>
                   <Tbody>
@@ -449,7 +554,7 @@ const GameBoard = () => {
                       <Tr key={h.round}>
                         <Td>{h.round}</Td>
                         <Td>{h.order}</Td>
-                        <Td>{h.comment}</Td>
+                        <Td whiteSpace="normal" wordBreak="break-word">{h.comment || '—'}</Td>
                       </Tr>
                     ))}
                   </Tbody>
