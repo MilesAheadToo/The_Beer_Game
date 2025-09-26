@@ -1437,7 +1437,7 @@ def _finalize_round_if_ready(
     incoming_orders_map = {}
     for node in all_nodes:
         state_node = engine[node]
-        policy = node_policies.get(node, {})
+        policy = MixedGameService._policy_for_node(node_policies, node)
         info_delay = max(0, int(policy.get("info_delay", 0)))
         new_demand = int(pending_demand.get(node, 0))
         if info_delay <= 0:
@@ -1495,7 +1495,7 @@ def _finalize_round_if_ready(
     arrivals_map = {}
     for node in all_nodes:
         state_node = engine[node]
-        policy = node_policies.get(node, {})
+        policy = MixedGameService._policy_for_node(node_policies, node)
         ship_delay = max(0, int(policy.get("ship_delay", 0)))
         planned = int(shipments_inbound.get(node, 0))
         if ship_delay <= 0:
@@ -2752,7 +2752,7 @@ async def reset_game(game_id: int, user: Dict[str, Any] = Depends(get_current_us
         players = db.query(Player).filter(Player.game_id == game.id).all()
         for player in players:
             role_key = _role_key(player)
-            policy_cfg = node_policies.get(role_key, {})
+            policy_cfg = MixedGameService._policy_for_node(node_policies, role_key)
             init_inventory = int(policy_cfg.get("init_inventory", sim_params.get("initial_inventory", 12)))
             ship_delay = int(policy_cfg.get("ship_delay", sim_params.get("shipping_lead_time", 2)))
             incoming = [0] * max(1, ship_delay)

@@ -86,9 +86,31 @@ class MixedGameService:
         )
         return record.name if record else None
 
+    ROLE_ALIASES: Dict[str, str] = {
+        "supplier": "wholesaler",
+        "factory": "manufacturer",
+    }
+
+    @staticmethod
+    def _canonical_role(value: Any) -> str:
+        token = str(value).strip().lower()
+        return MixedGameService.ROLE_ALIASES.get(token, token)
+
     @staticmethod
     def _normalise_key(value: Any) -> str:
-        return str(value).strip().lower()
+        return MixedGameService._canonical_role(value)
+
+    @staticmethod
+    def _policy_for_node(node_policies: Dict[str, Any], node: str) -> Dict[str, Any]:
+        canonical = MixedGameService._canonical_role(node)
+        if canonical in node_policies:
+            return node_policies.get(canonical, {})
+
+        for alias, target in MixedGameService.ROLE_ALIASES.items():
+            if target == canonical and alias in node_policies:
+                return node_policies.get(alias, {})
+
+        return node_policies.get(node, {})
 
     @staticmethod
     def _validate_lanes(node_policies: Dict[str, Any], lanes: List[Dict[str, Any]]) -> None:
@@ -197,7 +219,7 @@ class MixedGameService:
 
     @staticmethod
     def _ensure_engine_node(engine: Dict[str, Dict[str, Any]], node_policies: Dict[str, Any], node: str) -> Dict[str, Any]:
-        policy = node_policies.get(node, {})
+        policy = MixedGameService._policy_for_node(node_policies, node)
         info_delay = max(0, int(policy.get("info_delay", 0)))
         ship_delay = max(0, int(policy.get("ship_delay", 0)))
         state = engine.setdefault(node, {})
