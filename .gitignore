@@ -23,7 +23,7 @@ backend/debug_logs/*
 logs/
 
 # Env files
-.env
+.env*
 .env.local
 .env.prod
 .env.*
