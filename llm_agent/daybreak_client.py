@@ -1,4 +1,4 @@
-"""Shared assistant lifecycle utilities for the Daybreak Beer Game Strategist."""
+"""Shared session lifecycle utilities for the Daybreak Beer Game Strategist."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ from .daybreak_instructions import DAYBREAK_STRATEGIST_INSTRUCTIONS
 _CLIENT: Optional[OpenAI] = None
 _CLIENT_LOCK = Lock()
 
-_ASSISTANT_CACHE: Dict[Tuple[str, str], str] = {}
-_ASSISTANT_LOCK = Lock()
+_SESSION_CACHE: Dict[Tuple[str, str], str] = {}
+_SESSION_LOCK = Lock()
 
 
 def _get_client() -> OpenAI:
@@ -37,46 +37,38 @@ def _get_client() -> OpenAI:
         return _CLIENT
 
 
-def _resolve_assistant_id(model: str, instructions: str) -> str:
-    """Create (or reuse) the assistant backing the Daybreak strategist."""
+def _resolve_session_id(model: str, instructions: str) -> str:
+    """Create (or reuse) the session backing the Daybreak strategist."""
 
-    # Allow explicit override if the deployment already provisioned an assistant
-    # in the OpenAI dashboard (or exported one from the bootstrap helper).
     explicit = (
-        os.getenv("DAYBREAK_ASSISTANT_ID")
+        os.getenv("DAYBREAK_RESPONSES_SESSION_ID")
+        or os.getenv("DAYBREAK_SESSION_ID")
+        or os.getenv("DAYBREAK_ASSISTANT_ID")
         or os.getenv("DAYBREAK_STRATEGIST_ASSISTANT_ID")
         or os.getenv("GPT_ID")
     )
     if explicit:
         return explicit
 
-    # Custom GPT share links expose the assistant identifier directly. Users often
-    # set that ID as the "model" which should short-circuit the assistant creation
-    # path below – the platform will reject attempts to create a new assistant with
-    # a `g-` identifier. Accept both `g-` (custom GPT) and `asst_` prefixes.
-    if model.startswith("g-") or model.startswith("asst_"):
-        return model
-
     cache_key = (model, instructions)
-    if cache_key in _ASSISTANT_CACHE:
-        return _ASSISTANT_CACHE[cache_key]
+    if cache_key in _SESSION_CACHE:
+        return _SESSION_CACHE[cache_key]
 
-    with _ASSISTANT_LOCK:
-        if cache_key in _ASSISTANT_CACHE:
-            return _ASSISTANT_CACHE[cache_key]
+    with _SESSION_LOCK:
+        if cache_key in _SESSION_CACHE:
+            return _SESSION_CACHE[cache_key]
 
         client = _get_client()
-        assistant = client.beta.assistants.create(
-            name="Daybreak Beer Game Strategist",
+        session = client.responses.sessions.create(
             model=model,
             instructions=instructions,
         )
-        _ASSISTANT_CACHE[cache_key] = assistant.id
-        return assistant.id
+        _SESSION_CACHE[cache_key] = session.id
+        return session.id
 
 
 def _extract_json_block(text: str) -> Dict[str, Any]:
-    """Parse the JSON payload returned by the assistant."""
+    """Parse the JSON payload returned by the model."""
 
     try:
         return json.loads(text)
@@ -89,12 +81,11 @@ def _extract_json_block(text: str) -> Dict[str, Any]:
 
 @dataclass
 class DaybreakStrategistSession:
-    """Stateful helper that owns the assistant + thread lifecycle."""
+    """Stateful helper that owns the Responses session lifecycle."""
 
     model: str
     instructions: str = DAYBREAK_STRATEGIST_INSTRUCTIONS
-    thread_id: Optional[str] = None
-    _assistant_id: Optional[str] = None
+    session_id: Optional[str] = None
     _client: Optional[OpenAI] = None
     _last_decision: Optional[Dict[str, Any]] = None
 
@@ -104,32 +95,32 @@ class DaybreakStrategistSession:
             self._client = _get_client()
         return self._client
 
-    @property
-    def assistant_id(self) -> str:
-        if self._assistant_id is None:
-            self._assistant_id = _resolve_assistant_id(self.model, self.instructions)
-        return self._assistant_id
-
     def start(self) -> str:
-        """Initialise a thread for a new Beer Game run."""
+        """Initialise a Responses session for a new Beer Game run."""
 
-        thread = self.client.beta.threads.create()
-        self.thread_id = thread.id
-        return self.thread_id
+        if not self.session_id:
+            session_id = _resolve_session_id(self.model, self.instructions)
+            self.session_id = session_id
+        return self.session_id
 
     def reset(self) -> None:
-        """Discard the current conversation thread (start a fresh game)."""
+        """Discard the current conversation (start a fresh game)."""
 
-        self.thread_id = None
+        if self.session_id:
+            cache_key = (self.model, self.instructions)
+            with _SESSION_LOCK:
+                if _SESSION_CACHE.get(cache_key) == self.session_id:
+                    _SESSION_CACHE.pop(cache_key, None)
+        self.session_id = None
         self._last_decision = None
 
     def decide(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """Send one turn's state and capture the assistant's JSON decision."""
+        """Send one turn's state and capture the model's JSON decision."""
 
         if not isinstance(state, dict):
             raise TypeError("state must be a dictionary matching the strategist schema")
 
-        if not self.thread_id:
+        if not self.session_id:
             self.start()
 
         payload = json.dumps(state, separators=(",", ":"))
@@ -138,33 +129,42 @@ class DaybreakStrategistSession:
             f"```json\n{payload}\n```"
         )
 
-        self.client.beta.threads.messages.create(
-            thread_id=self.thread_id,
-            role="user",
-            content=prompt,
+        response = self.client.responses.create(
+            session=self.session_id,
+            input=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": prompt,
+                        }
+                    ],
+                }
+            ],
         )
 
-        run = self.client.beta.threads.runs.create_and_poll(
-            thread_id=self.thread_id,
-            assistant_id=self.assistant_id,
-        )
+        text_chunks = []
+        output_text = getattr(response, "output_text", None)
+        if output_text:
+            text_chunks.append(output_text)
+        else:
+            for item in getattr(response, "output", []) or []:
+                contents = getattr(item, "content", []) or []
+                for content in contents:
+                    if getattr(content, "type", None) not in {"output_text", "text"}:
+                        continue
+                    text_obj = getattr(content, "text", None)
+                    if text_obj is None:
+                        continue
+                    value = getattr(text_obj, "value", None)
+                    if value is None and isinstance(text_obj, str):
+                        value = text_obj
+                    elif value is None:
+                        value = getattr(text_obj, "text", None)
+                    if value:
+                        text_chunks.append(value)
 
-        if run.status != "completed":
-            raise RuntimeError(f"Daybreak LLM run failed with status '{run.status}'")
-
-        messages = self.client.beta.threads.messages.list(
-            thread_id=self.thread_id,
-            limit=1,
-        )
-
-        if not messages.data:
-            raise RuntimeError("Daybreak LLM did not return any messages")
-
-        content = messages.data[0].content
-        if not content:
-            raise RuntimeError("Daybreak LLM response was empty")
-
-        text_chunks = [block.text.value for block in content if getattr(block, "type", None) == "text"]
         if not text_chunks:
             raise RuntimeError("Daybreak LLM response did not include text output")
 
