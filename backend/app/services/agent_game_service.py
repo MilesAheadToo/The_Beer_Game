@@ -24,19 +24,14 @@ from .policy_factory import make_policy
 class AgentGameService:
     """Manage Beer Game simulations where every role is controlled by an agent."""
 
-    ROLE_SEQUENCE: List[PlayerRole] = [
-        PlayerRole.RETAILER,
-        PlayerRole.WHOLESALER,
-        PlayerRole.DISTRIBUTOR,
-        PlayerRole.MANUFACTURER,
-    ]
+    # The role labels come directly from the BeerLine's lane definition so that
+    # "Manufacturer" remains the sole upstream node sending material to the
+    # Distributor. Orders follow the reverse direction of these shipment lanes.
 
     ROLE_LABELS: Dict[PlayerRole, str] = {
-        PlayerRole.RETAILER: "Retailer",
-        PlayerRole.WHOLESALER: "Wholesaler",
-        PlayerRole.DISTRIBUTOR: "Distributor",
-        PlayerRole.MANUFACTURER: "Factory",
+        PlayerRole[label.upper()]: label for label in BeerLine.role_sequence_names()
     }
+    ROLE_SEQUENCE: List[PlayerRole] = list(ROLE_LABELS.keys())
     LABEL_TO_ROLE: Dict[str, PlayerRole] = {
         label: role for role, label in ROLE_LABELS.items()
     }
