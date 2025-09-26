@@ -1,22 +1,32 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { 
-  Text, 
-  Progress, 
-  VStack, 
+import {
+  Text,
+  Progress,
+  VStack,
   HStack,
-  Button, 
-  NumberInput, 
-  NumberInputField, 
-  NumberInputStepper, 
-  NumberIncrementStepper, 
+  Button,
+  NumberInput,
+  NumberInputField,
+  NumberInputStepper,
+  NumberIncrementStepper,
   NumberDecrementStepper,
   useToast,
-  Badge
+  Badge,
+  Textarea,
 } from '@chakra-ui/react';
 import { CheckCircleIcon, TimeIcon, WarningIcon } from '@chakra-ui/icons';
 import mixedGameApi from '../services/api';
 
-const RoundTimer = ({ gameId, playerId, roundNumber, onOrderSubmit, isPlayerTurn }) => {
+const RoundTimer = ({
+  gameId,
+  playerId,
+  roundNumber,
+  onOrderSubmit,
+  isPlayerTurn,
+  orderComment = '',
+  onCommentChange,
+  readOnly = false,
+}) => {
   const [timeLeft, setTimeLeft] = useState(60);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [orderQuantity, setOrderQuantity] = useState(0);
@@ -25,13 +35,21 @@ const RoundTimer = ({ gameId, playerId, roundNumber, onOrderSubmit, isPlayerTurn
   const toast = useToast();
   const timerRef = useRef(null);
 
+  const instructionText = readOnly
+    ? 'Viewing order entry details for this role'
+    : 'Place your order for the next round';
+
   // Handle order submission
   const handleSubmit = useCallback(async (quantity) => {
+    if (readOnly) {
+      return;
+    }
+
     if (quantity === null || quantity < 0) return;
-    
+
     setIsSubmitting(true);
     try {
-      await onOrderSubmit(quantity);
+      await onOrderSubmit(quantity, orderComment);
       setHasSubmitted(true);
       toast({
         title: 'Order submitted!',
@@ -51,7 +69,7 @@ const RoundTimer = ({ gameId, playerId, roundNumber, onOrderSubmit, isPlayerTurn
     } finally {
       setIsSubmitting(false);
     }
-  }, [onOrderSubmit, toast]);
+  }, [readOnly, onOrderSubmit, orderComment, toast]);
 
   // Fetch round status when component mounts or round changes
   useEffect(() => {
@@ -66,6 +84,9 @@ const RoundTimer = ({ gameId, playerId, roundNumber, onOrderSubmit, isPlayerTurn
           const playerOrder = status.submitted_players.find(p => p.id === playerId);
           if (playerOrder) {
             setOrderQuantity(playerOrder.quantity);
+            if (playerOrder.comment && onCommentChange) {
+              onCommentChange(playerOrder.comment);
+            }
           }
         }
       } catch (error) {
@@ -80,7 +101,7 @@ const RoundTimer = ({ gameId, playerId, roundNumber, onOrderSubmit, isPlayerTurn
         clearInterval(timerRef.current);
       }
     };
-  }, [gameId, playerId, roundNumber]);
+  }, [gameId, playerId, roundNumber, onCommentChange]);
 
   // Set up timer
   useEffect(() => {
@@ -138,7 +159,13 @@ const RoundTimer = ({ gameId, playerId, roundNumber, onOrderSubmit, isPlayerTurn
             </Badge>
           ) : (
             <Badge colorScheme={isPlayerTurn ? 'yellow' : 'gray'} p={1} borderRadius="md">
-              {isPlayerTurn ? 'Your Turn' : 'Waiting...'}
+              {readOnly
+                ? isPlayerTurn
+                  ? 'Active'
+                  : 'Waiting'
+                : isPlayerTurn
+                  ? 'Your Turn'
+                  : 'Waiting...'}
             </Badge>
           )}
         </HStack>
@@ -152,17 +179,18 @@ const RoundTimer = ({ gameId, playerId, roundNumber, onOrderSubmit, isPlayerTurn
         borderRadius="full"
       />
       
-      {isPlayerTurn && !hasSubmitted && (
+      {((isPlayerTurn && !hasSubmitted) || readOnly) && (
         <VStack width="100%" spacing={4} mt={4}>
           <Text fontSize="sm" color="gray.600">
-            Place your order for the next round
+            {instructionText}
           </Text>
-          <HStack>
-            <NumberInput 
-              min={0} 
-              value={orderQuantity} 
+          <HStack width="100%" alignItems="flex-start" spacing={3}>
+            <NumberInput
+              min={0}
+              value={orderQuantity}
               onChange={(value) => setOrderQuantity(parseInt(value) || 0)}
-              width="120px"
+              width="140px"
+              isDisabled={readOnly}
             >
               <NumberInputField />
               <NumberInputStepper>
@@ -170,16 +198,26 @@ const RoundTimer = ({ gameId, playerId, roundNumber, onOrderSubmit, isPlayerTurn
                 <NumberDecrementStepper />
               </NumberInputStepper>
             </NumberInput>
-            <Button 
-              colorScheme="blue" 
+            <Textarea
+              value={orderComment}
+              onChange={(event) => onCommentChange?.(event.target.value)}
+              placeholder="Why are you ordering this amount?"
+              resize="vertical"
+              flex="1"
+              minH="80px"
+              isDisabled={readOnly}
+            />
+            <Button
+              colorScheme="blue"
               onClick={() => handleSubmit(orderQuantity)}
               isLoading={isSubmitting}
               loadingText="Submitting..."
+              isDisabled={readOnly}
             >
               Submit Order
             </Button>
           </HStack>
-          {timeLeft < 10 && (
+          {!readOnly && timeLeft < 10 && (
             <HStack color="red.500" fontSize="sm">
               <WarningIcon />
               <Text>Time is running out! Submit your order soon.</Text>
@@ -187,16 +225,24 @@ const RoundTimer = ({ gameId, playerId, roundNumber, onOrderSubmit, isPlayerTurn
           )}
         </VStack>
       )}
-      
-      {!isPlayerTurn && !hasSubmitted && (
+
+      {!readOnly && !isPlayerTurn && !hasSubmitted && (
         <Text fontSize="sm" color="gray.500" textAlign="center">
           Waiting for your turn to place an order...
         </Text>
       )}
-      
+
+      {readOnly && !isPlayerTurn && !hasSubmitted && (
+        <Text fontSize="sm" color="gray.500" textAlign="center">
+          Waiting for this role to place an order...
+        </Text>
+      )}
+
       {hasSubmitted && (
-        <Text fontSize="sm" color="green.600" textAlign="center">
-          Your order of {orderQuantity} units has been submitted for this round.
+        <Text fontSize="sm" color={readOnly ? 'gray.600' : 'green.600'} textAlign="center">
+          {readOnly
+            ? `Submitted order: ${orderQuantity} units.`
+            : `Your order of ${orderQuantity} units has been submitted for this round.`}
         </Text>
       )}
     </VStack>
