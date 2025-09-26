@@ -486,7 +486,7 @@ def ensure_default_game(session: Session, group: Group) -> Game:
                 existing_config = json.loads(existing_config)
             except json.JSONDecodeError:
                 existing_config = {}
-        existing_config.setdefault("progression_mode", "supervised")
+        existing_config["progression_mode"] = "unsupervised"
         game.config = json.loads(json.dumps(existing_config))
         session.add(game)
         return game
@@ -498,7 +498,7 @@ def ensure_default_game(session: Session, group: Group) -> Game:
     game_config = config_service.create_game_from_config(
         sc_config.id, {"name": DEFAULT_GAME_NAME, "max_rounds": 40}
     )
-    game_config["progression_mode"] = "supervised"
+    game_config["progression_mode"] = "unsupervised"
 
     game = Game(
         name=game_config.get("name", DEFAULT_GAME_NAME),
@@ -589,7 +589,7 @@ def configure_human_players_for_game(
     except json.JSONDecodeError:
         config_payload = {}
 
-    config_payload["progression_mode"] = "supervised"
+    config_payload["progression_mode"] = "unsupervised"
     game.config = json.loads(json.dumps(config_payload))
     game.role_assignments = role_assignments
     session.add(game)

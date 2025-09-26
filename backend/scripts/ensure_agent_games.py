@@ -46,6 +46,7 @@ def ensure_agent_game(session, service: SupplyChainConfigService, group, config,
                 "is_public": True,
             },
         )
+        base_config["progression_mode"] = "unsupervised"
         game = Game(
             name=name,
             description=description,
