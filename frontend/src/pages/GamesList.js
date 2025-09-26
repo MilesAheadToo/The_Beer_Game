@@ -31,6 +31,7 @@ import {
   PersonOutline,
   RestartAlt,
   Autorenew,
+  Visibility,
 } from '@mui/icons-material';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -69,7 +70,29 @@ const GamesList = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const isGroupAdmin = isGroupAdminUser(user);
+  const restrictLifecycleActions = isGroupAdmin;
   const scConfigBasePath = isGroupAdmin ? '/admin/group/supply-chain-configs' : '/supply-chain-config';
+  const supervisionPathBase = '/admin?section=supervision';
+
+  const goToSupervision = useCallback(
+    (gameId) => {
+      const focusParam = gameId ? `&focusGameId=${gameId}` : '';
+      navigate(`${supervisionPathBase}${focusParam}`);
+    },
+    [navigate, supervisionPathBase],
+  );
+
+  const redirectLifecycleAction = useCallback(
+    (gameId) => {
+      if (!restrictLifecycleActions) {
+        return false;
+      }
+      goToSupervision(gameId);
+      showSnackbar('Use the Supervision tab to start, restart, or review this game.', 'info');
+      return true;
+    },
+    [restrictLifecycleActions, goToSupervision, showSnackbar],
+  );
 
   const showSnackbar = useCallback((message, severity = 'info') => {
     setSnackbar({ open: true, message, severity });
@@ -120,6 +143,9 @@ const GamesList = () => {
   }, [location, fetchGames, navigate]);
 
   const handleStartGame = async (gameId) => {
+    if (redirectLifecycleAction(gameId)) {
+      return;
+    }
     try {
       await mixedGameApi.startGame(gameId);
       showSnackbar('Game started successfully', 'success');
@@ -131,6 +157,9 @@ const GamesList = () => {
   };
 
   const handleResetGame = async (gameId) => {
+    if (redirectLifecycleAction(gameId)) {
+      return;
+    }
     try {
       await mixedGameApi.resetGame(gameId);
       showSnackbar('Game reset successfully', 'success');
@@ -142,6 +171,9 @@ const GamesList = () => {
   };
 
   const handleRestartGame = async (gameId) => {
+    if (redirectLifecycleAction(gameId)) {
+      return;
+    }
     try {
       await mixedGameApi.resetGame(gameId);
       await mixedGameApi.startGame(gameId);
@@ -303,6 +335,12 @@ const GamesList = () => {
       </Box>
       <Divider sx={{ mb: 2 }} />
 
+      {restrictLifecycleActions && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          Start, restart, and review controls are available from the Supervision tab.
+        </Alert>
+      )}
+
       <DaybreakAlert />
 
       <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 3 }}>
@@ -386,34 +424,48 @@ const GamesList = () => {
                     </TableCell>
                     <TableCell>
                       <Box display="flex" gap={1} flexWrap="wrap">
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          startIcon={<SportsEsports />}
-                          onClick={() => navigate(`/games/${game.id}`)}
-                        >
-                          Board
-                        </Button>
-                        {statusLower === 'finished' || statusLower === 'completed' ? (
+                        {!restrictLifecycleActions ? (
+                          <>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              startIcon={<SportsEsports />}
+                              onClick={() => navigate(`/games/${game.id}`)}
+                            >
+                              Board
+                            </Button>
+                            {statusLower === 'finished' || statusLower === 'completed' ? (
+                              <Button
+                                size="small"
+                                variant="contained"
+                                color="info"
+                                onClick={() => navigate(`/games/${game.id}/report`)}
+                              >
+                                Report
+                              </Button>
+                            ) : null}
+                            <Button
+                              size="small"
+                              variant="contained"
+                              color="primary"
+                              startIcon={<PlayArrow />}
+                              onClick={() => handleStartGame(game.id)}
+                              disabled={!canStart}
+                            >
+                              Start
+                            </Button>
+                          </>
+                        ) : (
                           <Button
                             size="small"
                             variant="contained"
-                            color="info"
-                            onClick={() => navigate(`/games/${game.id}/report`)}
+                            color="primary"
+                            startIcon={<Visibility />}
+                            onClick={() => goToSupervision(game.id)}
                           >
-                            Report
+                            Supervise
                           </Button>
-                        ) : null}
-                        <Button
-                          size="small"
-                          variant="contained"
-                          color="primary"
-                          startIcon={<PlayArrow />}
-                          onClick={() => handleStartGame(game.id)}
-                          disabled={!canStart}
-                        >
-                          Start
-                        </Button>
+                        )}
                         <Button
                           size="small"
                           variant="outlined"
@@ -424,31 +476,35 @@ const GamesList = () => {
                         >
                           Edit
                         </Button>
-                        <Tooltip title="Reset game back to round 0">
-                          <span>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              startIcon={<Autorenew />}
-                              onClick={() => handleResetGame(game.id)}
-                              disabled={statusLower === 'created'}
-                            >
-                              Reset
-                            </Button>
-                          </span>
-                        </Tooltip>
-                        <Tooltip title="Reset and immediately start the game">
-                          <span>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              startIcon={<RestartAlt />}
-                              onClick={() => handleRestartGame(game.id)}
-                            >
-                              Restart
-                            </Button>
-                          </span>
-                        </Tooltip>
+                        {!restrictLifecycleActions && (
+                          <>
+                            <Tooltip title="Reset game back to round 0">
+                              <span>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  startIcon={<Autorenew />}
+                                  onClick={() => handleResetGame(game.id)}
+                                  disabled={statusLower === 'created'}
+                                >
+                                  Reset
+                                </Button>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title="Reset and immediately start the game">
+                              <span>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  startIcon={<RestartAlt />}
+                                  onClick={() => handleRestartGame(game.id)}
+                                >
+                                  Restart
+                                </Button>
+                              </span>
+                            </Tooltip>
+                          </>
+                        )}
                         <Button
                           size="small"
                           variant="outlined"
