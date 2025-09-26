@@ -50,6 +50,13 @@ def _resolve_assistant_id(model: str, instructions: str) -> str:
     if explicit:
         return explicit
 
+    # Custom GPT share links expose the assistant identifier directly. Users often
+    # set that ID as the "model" which should short-circuit the assistant creation
+    # path below – the platform will reject attempts to create a new assistant with
+    # a `g-` identifier. Accept both `g-` (custom GPT) and `asst_` prefixes.
+    if model.startswith("g-") or model.startswith("asst_"):
+        return model
+
     cache_key = (model, instructions)
     if cache_key in _ASSISTANT_CACHE:
         return _ASSISTANT_CACHE[cache_key]
