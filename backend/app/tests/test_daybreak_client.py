@@ -19,78 +19,34 @@ from llm_agent.daybreak_instructions import DAYBREAK_STRATEGIST_INSTRUCTIONS
 from llm_agent import daybreak_client
 
 
-class DummyAssistants:
+class DummyResponsesSessions:
     def __init__(self):
         self.create_calls = []
 
     def create(self, **kwargs):
         self.create_calls.append(kwargs)
-        return SimpleNamespace(id=f"asst-{len(self.create_calls)}")
+        return SimpleNamespace(id=f"session-{len(self.create_calls)}")
 
 
-class DummyMessages:
+class DummyResponses:
     def __init__(self, response_text: str):
+        self.sessions = DummyResponsesSessions()
         self.response_text = response_text
         self.create_calls = []
-        self.list_calls = []
 
     def create(self, **kwargs):
         self.create_calls.append(kwargs)
-        return SimpleNamespace(id=f"msg-{len(self.create_calls)}")
-
-    def list(self, **kwargs):
-        self.list_calls.append(kwargs)
         text_block = SimpleNamespace(
-            type="text",
+            type="output_text",
             text=SimpleNamespace(value=self.response_text),
         )
-        message = SimpleNamespace(content=[text_block])
-        return SimpleNamespace(data=[message])
-
-
-class DummyRuns:
-    def __init__(self, status: str = "completed"):
-        self.status = status
-        self.create_calls = []
-
-    def create_and_poll(self, **kwargs):
-        self.create_calls.append(kwargs)
-        return SimpleNamespace(status=self.status)
-
-
-class DummyThreads:
-    def __init__(self, messages: DummyMessages, runs: DummyRuns):
-        self.messages = messages
-        self.runs = runs
-        self.create_calls = []
-
-    def create(self):
-        thread_id = f"thread-{len(self.create_calls) + 1}"
-        self.create_calls.append({"id": thread_id})
-        return SimpleNamespace(id=thread_id)
-
-
-class DummyBeta:
-    def __init__(self, response_text: str):
-        self.assistants = DummyAssistants()
-        self._messages = DummyMessages(response_text)
-        self._runs = DummyRuns()
-        self.threads = DummyThreads(self._messages, self._runs)
-
-    @property
-    def messages(self):  # pragma: no cover - compatibility shim
-        return self._messages
+        message = SimpleNamespace(type="message", content=[text_block])
+        return SimpleNamespace(output=[message], output_text=self.response_text)
 
 
 class DummyClient:
     def __init__(self, response_text: str):
-        beta = DummyBeta(response_text)
-        # The real client exposes resources under client.beta
-        self.beta = SimpleNamespace(
-            assistants=beta.assistants,
-            threads=beta.threads,
-        )
-        self._beta_resources = beta
+        self.responses = DummyResponses(response_text)
 
 
 def _minimal_state() -> dict:
@@ -125,8 +81,10 @@ def test_instructions_payload_contains_role_name():
     assert "Daybreak Beer Game Strategist" in DAYBREAK_STRATEGIST_INSTRUCTIONS
 
 
-def test_daybreak_session_decide_reuses_assistant(monkeypatch):
+def test_daybreak_session_decide_reuses_session(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("DAYBREAK_RESPONSES_SESSION_ID", raising=False)
+    monkeypatch.delenv("DAYBREAK_SESSION_ID", raising=False)
     monkeypatch.delenv("DAYBREAK_ASSISTANT_ID", raising=False)
     monkeypatch.delenv("DAYBREAK_STRATEGIST_ASSISTANT_ID", raising=False)
     monkeypatch.delenv("GPT_ID", raising=False)
@@ -141,7 +99,7 @@ def test_daybreak_session_decide_reuses_assistant(monkeypatch):
     client = DummyClient(response)
 
     monkeypatch.setattr(daybreak_client, "_CLIENT", None)
-    monkeypatch.setattr(daybreak_client, "_ASSISTANT_CACHE", {})
+    monkeypatch.setattr(daybreak_client, "_SESSION_CACHE", {})
     monkeypatch.setattr(daybreak_client, "_get_client", lambda: client)
 
     session = daybreak_client.DaybreakStrategistSession(model="gpt-test")
@@ -154,23 +112,50 @@ def test_daybreak_session_decide_reuses_assistant(monkeypatch):
         "rationale": "stub decision",
     }
     assert session.last_decision == result_one
-    # Assistant should be created exactly once with the expected instruction block
-    assert len(client.beta.assistants.create_calls) == 1
-    assert client.beta.assistants.create_calls[0]["instructions"] == DAYBREAK_STRATEGIST_INSTRUCTIONS
-    # Thread must be created for the first decision
-    assert len(client.beta.threads.create_calls) == 1
-    first_thread = client.beta.threads.create_calls[0]["id"]
-    assert session.thread_id == first_thread
+    # Session should be created exactly once with the expected instruction block
+    assert len(client.responses.sessions.create_calls) == 1
+    assert (
+        client.responses.sessions.create_calls[0]["instructions"]
+        == DAYBREAK_STRATEGIST_INSTRUCTIONS
+    )
+    first_session_id = session.session_id
+    assert first_session_id is not None
 
-    # Second decision should reuse the same assistant and thread
+    payload = json.dumps(state, separators=(",", ":"))
+    expected_prompt = (
+        "Here is the current state as JSON. Respond ONLY with the required JSON object.\n\n"
+        f"```json\n{payload}\n```"
+    )
+    assert len(client.responses.create_calls) == 1
+    assert client.responses.create_calls[0] == {
+        "session": first_session_id,
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": expected_prompt,
+                    }
+                ],
+            }
+        ],
+    }
+
+    # Second decision should reuse the same session
     result_two = session.decide(state)
     assert result_two == result_one
-    assert len(client.beta.assistants.create_calls) == 1
-    assert len(client.beta.threads.create_calls) == 1
+    assert len(client.responses.sessions.create_calls) == 1
+    assert len(client.responses.create_calls) == 2
+    for call in client.responses.create_calls:
+        assert call["session"] == first_session_id
+        assert call["input"][0]["content"][0]["text"] == expected_prompt
 
 
-def test_daybreak_session_reset_creates_new_thread(monkeypatch):
+def test_daybreak_session_reset_creates_new_session(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("DAYBREAK_RESPONSES_SESSION_ID", raising=False)
+    monkeypatch.delenv("DAYBREAK_SESSION_ID", raising=False)
 
     response = json.dumps(
         {
@@ -182,16 +167,19 @@ def test_daybreak_session_reset_creates_new_thread(monkeypatch):
     client = DummyClient(response)
 
     monkeypatch.setattr(daybreak_client, "_CLIENT", None)
-    monkeypatch.setattr(daybreak_client, "_ASSISTANT_CACHE", {})
+    monkeypatch.setattr(daybreak_client, "_SESSION_CACHE", {})
     monkeypatch.setattr(daybreak_client, "_get_client", lambda: client)
 
     session = daybreak_client.DaybreakStrategistSession(model="gpt-reset")
     state = _minimal_state()
 
     first = session.decide(state)
+    first_session_id = session.session_id
     session.reset()
+    assert session.session_id is None
     second = session.decide(state)
 
     assert first == second
-    # Thread creation should have been invoked twice due to reset
-    assert len(client.beta.threads.create_calls) == 2
+    # Session creation should have been invoked twice due to reset
+    assert len(client.responses.sessions.create_calls) == 2
+    assert session.session_id != first_session_id
