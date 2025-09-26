@@ -25,6 +25,16 @@ import { useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { useSnackbar } from 'notistack';
 import { mixedGameApi } from '../../services/api';
+import { useAuth } from '../../contexts/AuthContext';
+
+const SUPERVISION_BASE_PATH = '/admin?section=supervision';
+
+const buildSupervisionPath = (gameId) => {
+  if (!gameId) {
+    return SUPERVISION_BASE_PATH;
+  }
+  return `${SUPERVISION_BASE_PATH}&focusGameId=${gameId}`;
+};
 
 const formatDate = (value) => {
   if (!value) return '—';
@@ -54,6 +64,8 @@ const GroupGameConfigPanel = ({
 }) => {
   const navigate = useNavigate();
   const { enqueueSnackbar } = useSnackbar();
+  const { isGroupAdmin } = useAuth();
+  const restrictLifecycleActions = Boolean(isGroupAdmin);
 
   const filteredGames = useMemo(() => {
     if (!Array.isArray(games) || games.length === 0) {
@@ -80,6 +92,11 @@ const GroupGameConfigPanel = ({
   };
 
   const handleViewGame = (gameId, status) => {
+    if (restrictLifecycleActions) {
+      navigate(buildSupervisionPath(gameId));
+      return;
+    }
+
     if (String(status || '').toLowerCase() === 'completed') {
       navigate(`/games/${gameId}/report`);
     } else {
@@ -144,6 +161,13 @@ const GroupGameConfigPanel = ({
           </Button>
         </Stack>
       </Stack>
+
+      {restrictLifecycleActions && (
+        <Alert severity="info" sx={{ mb: 2 }}>
+          Start, restart, and review actions have moved to the Supervision tab. Open Supervision to
+          manage live games.
+        </Alert>
+      )}
 
       {error && (
         <Alert severity="error" sx={{ mb: 2 }}>
@@ -214,20 +238,22 @@ const GroupGameConfigPanel = ({
                   <TableCell sx={{ width: { xs: 90, md: 120 } }}>{formatDate(game.updated_at)}</TableCell>
                   <TableCell align="right">
                     <Stack direction="row" spacing={1} justifyContent="flex-end">
-                      <Tooltip title="View">
+                      <Tooltip title={restrictLifecycleActions ? 'Open in Supervision workspace' : 'View'}>
                         <span>
                           <IconButton size="small" onClick={() => handleViewGame(game.id, game.status)}>
                             <VisibilityIcon fontSize="small" />
                           </IconButton>
                         </span>
                       </Tooltip>
-                      <Tooltip title="Restart">
-                        <span>
-                          <IconButton size="small" onClick={() => handleRestart(game.id)}>
-                            <RestartAltIcon fontSize="small" />
-                          </IconButton>
-                        </span>
-                      </Tooltip>
+                      {!restrictLifecycleActions && (
+                        <Tooltip title="Restart">
+                          <span>
+                            <IconButton size="small" onClick={() => handleRestart(game.id)}>
+                              <RestartAltIcon fontSize="small" />
+                            </IconButton>
+                          </span>
+                        </Tooltip>
+                      )}
                       <Tooltip title="Edit">
                         <span>
                           <IconButton size="small" onClick={() => handleEdit(game)}>
