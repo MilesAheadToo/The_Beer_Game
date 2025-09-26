@@ -47,7 +47,12 @@ from app.models.supply_chain import (
 )
 from app.models.user import User, UserTypeEnum
 from app.core.security import verify_password
-from app.services.agents import AgentManager, AgentType, AgentStrategy as AgentStrategyEnum
+from app.services.agents import (
+    AgentDecision,
+    AgentManager,
+    AgentType,
+    AgentStrategy as AgentStrategyEnum,
+)
 from app.services.mixed_game_service import MixedGameService
 
 # ------------------------------------------------------------------------------
@@ -1617,13 +1622,24 @@ def _finalize_round_if_ready(
             "name": getattr(player, "name", None),
             "is_ai": bool(getattr(player, "is_ai", False)),
         }
-        order_qty = agent.make_decision(
+        decision = agent.make_decision(
             current_round=round_number,
             current_demand=current_demand_value,
             upstream_data=upstream_context,
             local_state=local_state,
         )
-        order_qty = max(0, int(round(order_qty)))
+        decision_comment: Optional[str] = None
+        if isinstance(decision, AgentDecision):
+            order_value = decision.quantity
+            decision_comment = decision.reason
+        else:
+            order_value = decision
+        try:
+            order_qty = max(0, int(round(order_value)))
+        except (TypeError, ValueError):
+            order_qty = 0
+        if not decision_comment:
+            decision_comment = agent.get_last_explanation_comment()
         node_orders_new[node_key] = order_qty
         node_state["last_order"] = order_qty
         node_state["on_order"] = max(
@@ -1639,6 +1655,8 @@ def _finalize_round_if_ready(
         entry["player_id"] = player.id
         entry["quantity"] = order_qty
         entry.setdefault("submitted_at", orders_timestamp_iso)
+        if decision_comment:
+            entry["comment"] = decision_comment
         orders_by_role[node_key] = entry
         reply_payload = {
             "type": "agent_decision",
