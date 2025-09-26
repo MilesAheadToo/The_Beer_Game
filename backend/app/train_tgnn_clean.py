@@ -3,6 +3,7 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 from datetime import datetime
+from pathlib import Path
 from torch.utils.data import DataLoader, Dataset
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
@@ -24,6 +25,46 @@ from app.utils.device import (
 
 # Set up logging
 logger = setup_logging(__name__)
+
+
+def _slugify_identifier(raw: str) -> str:
+    token = raw.strip().lower()
+    if not token:
+        return ""
+    sanitized = [ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in token]
+    slug = "".join(sanitized).strip("-_")
+    return slug
+
+
+def _derive_run_identifier(
+    config_identifier: Optional[str],
+    *,
+    data_path: Optional[str] = None,
+    default: Optional[str] = None,
+) -> str:
+    candidates = [
+        config_identifier,
+        os.getenv("SC_CONFIG_IDENTIFIER"),
+        os.getenv("SUPPLY_CHAIN_CONFIG"),
+        default,
+    ]
+    for candidate in candidates:
+        if candidate:
+            slug = _slugify_identifier(candidate)
+            if slug:
+                return slug
+
+    if data_path:
+        stem = Path(data_path).stem
+        for suffix in ("_dataset", "-dataset", "_data", "-data"):
+            if stem.endswith(suffix):
+                stem = stem[: -len(suffix)]
+                break
+        slug = _slugify_identifier(stem)
+        if slug:
+            return slug
+
+    return datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
 def load_synthetic_data(data_path: str, num_episodes: int = 100) -> List[dict]:
     """Load synthetic data from JSON file.
@@ -230,7 +271,8 @@ def train_agents(
     device: Optional[Union[str, torch.device]] = None,
     force_cpu: bool = False,
     clip_grad_norm: float = 1.0,
-    num_workers: Optional[int] = None
+    num_workers: Optional[int] = None,
+    config_identifier: Optional[str] = None,
 ) -> List[SupplyChainAgent]:
     """Train the TemporalGNN agents with enhanced device management.
     
@@ -275,8 +317,11 @@ def train_agents(
     # Create save directory if it doesn't exist
     os.makedirs(save_dir, exist_ok=True)
     
-    # Set up TensorBoard
-    log_dir = os.path.join("runs", f"tgnn_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+    identifier = _derive_run_identifier(
+        config_identifier,
+        data_path=data_path,
+    )
+    log_dir = os.path.join("runs", f"tgnn_{identifier}")
     writer = SummaryWriter(log_dir)
     
     # Determine number of workers for data loading
@@ -773,6 +818,12 @@ def parse_args():
     output_group.add_argument('--log-level', type=str, default='INFO',
                             choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
                             help='Logging level')
+    output_group.add_argument(
+        '--config-identifier',
+        type=str,
+        default=None,
+        help='Supply chain configuration identifier used to name run artifacts',
+    )
     
     return parser.parse_args()
 
@@ -833,7 +884,8 @@ def main():
             device=device,
             force_cpu=args.force_cpu,
             clip_grad_norm=args.clip_grad_norm,
-            num_workers=args.num_workers
+            num_workers=args.num_workers,
+            config_identifier=args.config_identifier,
         )
         
         return 0

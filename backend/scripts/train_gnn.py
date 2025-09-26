@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 
 def main():
     # Configuration
+    config_identifier = os.getenv('SC_CONFIG_IDENTIFIER', 'default-tbg')
+
     config = {
         'data_path': 'data/synthetic_games_20250903_211141.json',  # Path to synthetic data
         'num_episodes': 100,      # Number of episodes to use for training
@@ -29,7 +31,8 @@ def main():
         'num_epochs': 50,         # Number of training epochs
         'learning_rate': 0.001,    # Learning rate
         'save_dir': 'models/tgnn', # Directory to save trained models
-        'device': 'cuda' if torch.cuda.is_available() else 'cpu'  # Use GPU if available
+        'device': 'cuda' if torch.cuda.is_available() else 'cpu',  # Use GPU if available
+        'config_identifier': config_identifier,
     }
     
     # Create save directory if it doesn't exist
@@ -49,7 +52,8 @@ def main():
             num_epochs=config['num_epochs'],
             learning_rate=config['learning_rate'],
             save_dir=config['save_dir'],
-            device=config['device']
+            device=config['device'],
+            config_identifier=config['config_identifier'],
         )
         logger.info("GNN training completed successfully!")
     except Exception as e:

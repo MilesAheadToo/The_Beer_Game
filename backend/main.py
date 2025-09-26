@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.services.group_service import GroupService
 from app.services.bootstrap import build_default_group_payload, ensure_default_group_and_game
@@ -1195,7 +1196,10 @@ def _append_debug_round_log(
 
 
 def _save_game_config(db: Session, game: DbGame, config: Dict[str, Any]) -> None:
-    game.config = config
+    # Assign a shallow copy and flag the attribute as modified so SQLAlchemy
+    # persists JSON changes even when only nested keys are updated.
+    game.config = dict(config)
+    flag_modified(game, "config")
     db.add(game)
 
 
