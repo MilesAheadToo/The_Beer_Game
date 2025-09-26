@@ -105,6 +105,14 @@ class GameBase(BaseModel):
         default='supervised',
         description="Controls whether the Group Admin advances rounds manually (supervised) or the game auto-progresses once all orders are in (unsupervised)",
     )
+    supply_chain_config_id: Optional[int] = Field(
+        default=None,
+        description="Identifier of the linked supply chain configuration",
+    )
+    supply_chain_name: Optional[str] = Field(
+        default=None,
+        description="Friendly name of the linked supply chain configuration",
+    )
     pricing_config: PricingConfig = Field(
         default_factory=PricingConfig,
         description="Pricing configuration for different roles in the supply chain"
@@ -140,7 +148,9 @@ class GameUpdate(BaseModel):
     max_rounds: Optional[int] = Field(None, ge=1, le=1000)
     description: Optional[str] = Field(None, max_length=500)
     is_public: Optional[bool] = None
-    
+    supply_chain_config_id: Optional[int] = None
+    supply_chain_name: Optional[str] = None
+
     @validator('status')
     def validate_status_transition(cls, v, values, **kwargs):
         # Add any status transition validation here

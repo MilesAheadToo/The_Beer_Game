@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.models.game import Game, GameStatus as GameStatusDB
 from app.models.player import Player, PlayerRole, PlayerType as PlayerTypeDB, PlayerStrategy as PlayerStrategyDB
 from app.models.supply_chain import PlayerInventory, Order, GameRound, PlayerRound
+from app.models.supply_chain_config import SupplyChainConfig
 from app.models.user import User, UserTypeEnum
 from app.schemas.game import (
     GameCreate,
@@ -65,6 +66,20 @@ class MixedGameService:
             except json.JSONDecodeError:
                 return {}
         return {}
+
+    def _resolve_supply_chain_name(self, config_id: Optional[Any]) -> Optional[str]:
+        if not config_id:
+            return None
+        try:
+            config_id_int = int(config_id)
+        except (TypeError, ValueError):
+            return None
+        record = (
+            self.db.query(SupplyChainConfig)
+            .filter(SupplyChainConfig.id == config_id_int)
+            .first()
+        )
+        return record.name if record else None
 
     @staticmethod
     def _normalise_key(value: Any) -> str:
@@ -374,6 +389,18 @@ class MixedGameService:
         }
         if getattr(game_data, "daybreak_llm", None):
             config["daybreak_llm"] = game_data.daybreak_llm.model_dump()
+        supply_chain_id = getattr(game_data, "supply_chain_config_id", None)
+        if supply_chain_id is not None:
+            try:
+                config["supply_chain_config_id"] = int(supply_chain_id)
+            except (TypeError, ValueError):
+                raise ValueError("supply_chain_config_id must be an integer")
+            supply_chain_name = (
+                getattr(game_data, "supply_chain_name", None)
+                or self._resolve_supply_chain_name(config["supply_chain_config_id"])
+            )
+            if supply_chain_name:
+                config["supply_chain_name"] = supply_chain_name
         game = Game(
             name=game_data.name,
             max_rounds=game_data.max_rounds,
@@ -580,6 +607,31 @@ class MixedGameService:
             for key, value in global_policy.items():
                 _check_range(key, value)
             cfg["global_policy"] = global_policy
+
+        if "supply_chain_config_id" in payload:
+            supply_id = payload.get("supply_chain_config_id")
+            if supply_id is None:
+                cfg.pop("supply_chain_config_id", None)
+                cfg.pop("supply_chain_name", None)
+            else:
+                try:
+                    cfg["supply_chain_config_id"] = int(supply_id)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("supply_chain_config_id must be an integer") from exc
+                supply_name = (
+                    payload.get("supply_chain_name")
+                    or self._resolve_supply_chain_name(cfg["supply_chain_config_id"])
+                )
+                if supply_name:
+                    cfg["supply_chain_name"] = supply_name
+                else:
+                    cfg.pop("supply_chain_name", None)
+        elif "supply_chain_name" in payload and cfg.get("supply_chain_config_id") is not None:
+            supply_name = payload.get("supply_chain_name")
+            if supply_name:
+                cfg["supply_chain_name"] = supply_name
+            else:
+                cfg.pop("supply_chain_name", None)
 
         daybreak_llm = payload.get("daybreak_llm")
         if daybreak_llm is not None:
@@ -1601,6 +1653,8 @@ class MixedGameService:
         pricing_config = {}
         global_policy = {}
         progression_mode = "supervised"
+        supply_chain_config_id: Optional[int] = None
+        supply_chain_name: Optional[str] = None
         try:
             cfg = json.loads(game_result[8]) if len(game_result) > 8 and game_result[8] else {}
             if isinstance(cfg, dict):
@@ -1609,6 +1663,8 @@ class MixedGameService:
                 system_config = cfg.get('system_config', {})
                 pricing_config = cfg.get('pricing_config', {})
                 global_policy = cfg.get('global_policy', {})
+                supply_chain_config_id = cfg.get('supply_chain_config_id')
+                supply_chain_name = cfg.get('supply_chain_name')
             # Also surface nested in demand_pattern.params if present
             if not node_policies:
                 node_policies = demand_pattern.get('params', {}).get('node_policies', {}) if isinstance(demand_pattern, dict) else {}
@@ -1636,6 +1692,8 @@ class MixedGameService:
             is_public=False,  # Default value
             description="",  # Default value
             demand_pattern=demand_pattern,
+            supply_chain_config_id=supply_chain_config_id,
+            supply_chain_name=supply_chain_name,
             node_policies=node_policies,
             system_config=system_config,
             pricing_config=pricing_config,

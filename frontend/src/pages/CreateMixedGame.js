@@ -307,9 +307,7 @@ const CreateMixedGame = () => {
 
   const showDaybreakSharingCard = usesDaybreakStrategist || hasDaybreakOverrides;
 
-  const summaryProgressionMode = isEditing && savedSnapshot
-    ? savedSnapshot.progressionMode || 'supervised'
-    : progressionMode;
+  const summaryProgressionMode = progressionMode || 'supervised';
 
   const progressionLabel = useMemo(() => {
     const option = progressionOptions.find((entry) => entry.value === summaryProgressionMode);
@@ -651,7 +649,12 @@ const CreateMixedGame = () => {
         game?.supply_chain_config_id ??
         statePayload?.supply_chain_config_id ??
         null,
-      supplyChainName: config?.name || statePayload?.supply_chain_name || '',
+      supplyChainName:
+        config?.supply_chain_name ??
+        game?.supply_chain_name ??
+        statePayload?.supply_chain_name ??
+        config?.name ??
+        '',
     };
   }, [normalizeLoadedPolicies]);
 
@@ -677,34 +680,18 @@ const CreateMixedGame = () => {
     }
   }, []);
 
-  const summaryGameName = isEditing && savedSnapshot ? savedSnapshot.gameName : gameName;
-  const summaryMaxRounds = isEditing && savedSnapshot ? savedSnapshot.maxRounds : maxRounds;
-  const summaryDemandPattern = isEditing && savedSnapshot ? savedSnapshot.demandPattern : demandPattern;
+  const summaryGameName = gameName;
+  const summaryMaxRounds = maxRounds;
+  const summaryDemandPattern = demandPattern;
 
-  const summaryDemandParams = useMemo(() => {
-    if (isEditing && savedSnapshot) {
-      const params = savedSnapshot.demandParams || {};
-      return {
-        initial_demand: toNumberOr(
-          params.initial_demand ?? params.initialDemand,
-          DEFAULT_CLASSIC_PARAMS.initial_demand
-        ),
-        change_week: toNumberOr(
-          params.change_week ?? params.changeWeek,
-          DEFAULT_CLASSIC_PARAMS.change_week
-        ),
-        final_demand: toNumberOr(
-          params.final_demand ?? params.finalDemand ?? params.new_demand,
-          DEFAULT_CLASSIC_PARAMS.final_demand
-        ),
-      };
-    }
-    return {
-      initial_demand: initialDemand,
-      change_week: demandChangeWeek,
-      final_demand: finalDemand,
-    };
-  }, [isEditing, savedSnapshot, initialDemand, demandChangeWeek, finalDemand]);
+  const summaryDemandParams = useMemo(
+    () => ({
+      initial_demand: toNumberOr(initialDemand, DEFAULT_CLASSIC_PARAMS.initial_demand),
+      change_week: toNumberOr(demandChangeWeek, DEFAULT_CLASSIC_PARAMS.change_week),
+      final_demand: toNumberOr(finalDemand, DEFAULT_CLASSIC_PARAMS.final_demand),
+    }),
+    [initialDemand, demandChangeWeek, finalDemand]
+  );
 
   const demandSummary = useMemo(() => (
     formatDemandPatternSummary(
@@ -1426,6 +1413,7 @@ const CreateMixedGame = () => {
         system_config: systemConfig,
         global_policy: policy,
         supply_chain_config_id: activeSupplyChainConfig?.id || null,
+        supply_chain_name: activeSupplyChainConfig?.name || null,
         pricing_config: {
           retailer: {
             selling_price: parseFloat(pricingConfig.retailer.selling_price),
@@ -1617,7 +1605,7 @@ const CreateMixedGame = () => {
     }
   };
 
-  const summarySupplyChainName = activeSupplyChainConfig?.name || (isEditing && savedSnapshot ? savedSnapshot.supplyChainName : null);
+  const summarySupplyChainName = activeSupplyChainConfig?.name ?? savedSnapshot?.supplyChainName ?? null;
 
   const overviewItems = useMemo(() => [
     { label: 'Game Name', value: summaryGameName || '—' },
@@ -1627,7 +1615,7 @@ const CreateMixedGame = () => {
     { label: 'Linked Supply Chain', value: summarySupplyChainName || '—' },
   ], [summaryGameName, summaryMaxRounds, progressionLabel, demandSummary, summarySupplyChainName, formatNumber]);
 
-  const summaryPolicy = isEditing && savedSnapshot ? savedSnapshot.policy : policy;
+  const summaryPolicy = policy;
 
   const globalPolicyItems = useMemo(() => [
     { label: 'Order Lead Time', value: formatWeeks(summaryPolicy?.info_delay) },
@@ -1639,7 +1627,7 @@ const CreateMixedGame = () => {
     { label: 'Max Inbound / Link', value: formatNumber(summaryPolicy?.max_inbound_per_link) },
   ], [summaryPolicy, formatWeeks, formatNumber, formatCurrency]);
 
-  const summarySystemConfig = isEditing && savedSnapshot ? savedSnapshot.systemConfig : systemConfig;
+  const summarySystemConfig = systemConfig;
 
   const systemConstraintItems = useMemo(() => [
     { label: 'Order Quantity Range', value: formatRangeValue(summarySystemConfig?.min_order_quantity, summarySystemConfig?.max_order_quantity, 'units') },
@@ -1650,7 +1638,7 @@ const CreateMixedGame = () => {
     { label: 'Backlog Cost Range', value: formatCurrencyRange(summarySystemConfig?.min_backlog_cost, summarySystemConfig?.max_backlog_cost) },
   ], [summarySystemConfig, formatRangeValue, formatCurrencyRange]);
 
-  const summaryPlayers = isEditing && savedSnapshot ? savedSnapshot.players : players;
+  const summaryPlayers = players;
 
   const playerSummaryRows = useMemo(() =>
     playerRoles.map(({ value, label }) => {
@@ -1683,8 +1671,8 @@ const CreateMixedGame = () => {
     [summaryPlayers, userLookup]
   );
 
-  const summaryNodePolicies = isEditing && savedSnapshot ? savedSnapshot.nodePolicies : nodePolicies;
-  const summaryPricingConfig = isEditing && savedSnapshot ? savedSnapshot.pricingConfig : pricingConfig;
+  const summaryNodePolicies = nodePolicies;
+  const summaryPricingConfig = pricingConfig;
 
   const roleParameterRows = useMemo(() =>
     playerRoles.map(({ value, label }) => {
