@@ -7,9 +7,9 @@ from typing import Any, Deque, Dict, Iterable, List
 
 from .policies import NaiveEchoPolicy, OrderPolicy
 
-# Classic Beer Game lead times (can be made configurable in the future)
-SHIPMENT_LEAD_TIME = 2  # inbound shipment delay (periods)
-ORDER_LEAD_TIME = 2  # information / order transmission delay (periods)
+# Classic Beer Game lead times (can be made configurable via supply chain config)
+DEFAULT_SHIPMENT_LEAD_TIME = 2  # inbound shipment delay (periods)
+DEFAULT_ORDER_LEAD_TIME = 2  # information / order transmission delay (periods)
 
 
 class Node:
@@ -27,6 +27,8 @@ class Node:
         order_pipe: Iterable[int] | None = None,
         last_incoming_order: int = 0,
         cost: float = 0.0,
+        shipment_lead_time: int = DEFAULT_SHIPMENT_LEAD_TIME,
+        order_lead_time: int = DEFAULT_ORDER_LEAD_TIME,
     ) -> None:
         self.name = name
         self.policy = policy
@@ -34,18 +36,25 @@ class Node:
         self.inventory = int(inventory)
         self.backlog = int(backlog)
 
+        self.shipment_lead_time = max(1, int(shipment_lead_time) if shipment_lead_time is not None else 1)
+        self.order_lead_time = max(1, int(order_lead_time) if order_lead_time is not None else 1)
+
         self.pipeline_shipments: Deque[int] = deque(
-            list(pipeline_shipments) if pipeline_shipments is not None else [0] * SHIPMENT_LEAD_TIME,
-            maxlen=SHIPMENT_LEAD_TIME,
+            list(pipeline_shipments)
+            if pipeline_shipments is not None
+            else [0] * self.shipment_lead_time,
+            maxlen=self.shipment_lead_time,
         )
-        while len(self.pipeline_shipments) < SHIPMENT_LEAD_TIME:
+        while len(self.pipeline_shipments) < self.shipment_lead_time:
             self.pipeline_shipments.appendleft(0)
 
         self.order_pipe: Deque[int] = deque(
-            list(order_pipe) if order_pipe is not None else [0] * ORDER_LEAD_TIME,
-            maxlen=ORDER_LEAD_TIME,
+            list(order_pipe)
+            if order_pipe is not None
+            else [0] * self.order_lead_time,
+            maxlen=self.order_lead_time,
         )
-        while len(self.order_pipe) < ORDER_LEAD_TIME:
+        while len(self.order_pipe) < self.order_lead_time:
             self.order_pipe.appendleft(0)
 
         self.last_incoming_order = int(last_incoming_order)
@@ -137,6 +146,8 @@ class Node:
             "cost": self.cost,
             "base_stock": self.base_stock,
             "policy_state": self.policy.get_state(),
+            "shipment_lead_time": self.shipment_lead_time,
+            "order_lead_time": self.order_lead_time,
         }
 
     @classmethod
@@ -145,7 +156,12 @@ class Node:
         name: str,
         policy: OrderPolicy,
         state: Dict[str, Any],
+        *,
+        shipment_lead_time: int = DEFAULT_SHIPMENT_LEAD_TIME,
+        order_lead_time: int = DEFAULT_ORDER_LEAD_TIME,
     ) -> "Node":
+        state_shipment_lead = state.get("shipment_lead_time", shipment_lead_time)
+        state_order_lead = state.get("order_lead_time", order_lead_time)
         node = cls(
             name,
             policy,
@@ -156,6 +172,8 @@ class Node:
             order_pipe=state.get("order_pipe"),
             last_incoming_order=int(state.get("last_incoming_order", 0)),
             cost=float(state.get("cost", 0.0)),
+            shipment_lead_time=int(state_shipment_lead),
+            order_lead_time=int(state_order_lead),
         )
         policy.set_state(state.get("policy_state"))
         return node
@@ -181,19 +199,35 @@ class BeerLine:
         role_policies: Dict[str, OrderPolicy] | None = None,
         base_stocks: Dict[str, int] | None = None,
         state: Dict[str, Dict[str, Any]] | None = None,
+        shipment_lead_time: int = DEFAULT_SHIPMENT_LEAD_TIME,
+        order_lead_time: int = DEFAULT_ORDER_LEAD_TIME,
     ) -> None:
         role_policies = role_policies or {}
         base_stocks = base_stocks or {}
 
         self.role_names = self.role_sequence_names()
+        self.shipment_lead_time = max(1, int(shipment_lead_time) if shipment_lead_time is not None else 1)
+        self.order_lead_time = max(1, int(order_lead_time) if order_lead_time is not None else 1)
 
         self.nodes: List[Node] = []
         for role in self.role_names:
             policy = role_policies.get(role, NaiveEchoPolicy())
             if state and role in state:
-                node = Node.from_dict(role, policy, state[role])
+                node = Node.from_dict(
+                    role,
+                    policy,
+                    state[role],
+                    shipment_lead_time=self.shipment_lead_time,
+                    order_lead_time=self.order_lead_time,
+                )
             else:
-                node = Node(role, policy, base_stock=int(base_stocks.get(role, 20)))
+                node = Node(
+                    role,
+                    policy,
+                    base_stock=int(base_stocks.get(role, 20)),
+                    shipment_lead_time=self.shipment_lead_time,
+                    order_lead_time=self.order_lead_time,
+                )
             if base_stocks and role in base_stocks:
                 node.base_stock = int(base_stocks[role])
             self.nodes.append(node)
