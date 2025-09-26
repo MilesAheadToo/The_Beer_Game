@@ -13,7 +13,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declared_attr
 from enum import Enum as PyEnum
-from typing import List, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 import datetime
 from .base import Base
 
@@ -48,7 +48,7 @@ class SupplyChainConfig(Base):
     lanes = relationship("Lane", back_populates="config", cascade="all, delete-orphan")
     market_demands = relationship("MarketDemand", back_populates="config", cascade="all, delete-orphan")
     group = relationship("Group", back_populates="supply_chain_configs")
-    games: List["Game"] = relationship(
+    games = relationship(
         "Game",
         back_populates="supply_chain_config",
         passive_deletes=True,

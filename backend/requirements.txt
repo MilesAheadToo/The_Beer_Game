@@ -16,6 +16,7 @@ asyncmy==0.2.7  # Required for async MySQL/MariaDB connections
 
 # Authentication & Security
 passlib[bcrypt]==1.7.4
+bcrypt==3.2.0
 python-jose[cryptography]==3.3.0
 python-multipart==0.0.5
 python-jose==3.3.0
