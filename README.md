@@ -63,6 +63,21 @@ A comprehensive simulation of the Beer Distribution Game featuring AI-powered su
    cp frontend/.env.example frontend/.env
    ```
 
+   The `make init-env` helper materializes a root-level `.env` file from
+   `.env.example`. Populate the following OpenAI settings in that file so both
+   Docker Compose and the Daybreak client can reach your custom GPT:
+
+   ```env
+   OPENAI_API_KEY=sk-your-api-key
+   GPT_ID=g-xxxxxxxxxxxxxxxxxxxxxxxx
+   ```
+
+   * For local development, the `.env` file is automatically picked up by
+     Docker Compose. Keep real keys out of version control.
+   * For production deployments, start from `.env.prod` (or your hosting
+     provider's secret manager) and provide the same two variables so the
+     backend can authenticate against your custom GPT.
+
 3. Start the application using Docker Compose:
    ```bash
    docker compose up -d --build
