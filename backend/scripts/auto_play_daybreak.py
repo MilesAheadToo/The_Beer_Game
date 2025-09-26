@@ -23,7 +23,12 @@ except ImportError:  # pragma: no cover - fallback when executed from package ro
     from export_round_history import export_game as export_round_history
 from app.models.game import Game, GameStatus as DbGameStatus, PlayerAction
 from app.models.player import Player
-from app.services.agents import AgentManager, AgentType, AgentStrategy as AgentStrategyEnum
+from app.services.agents import (
+    AgentDecision,
+    AgentManager,
+    AgentType,
+    AgentStrategy as AgentStrategyEnum,
+)
 
 
 ROLES = ["retailer", "wholesaler", "distributor", "manufacturer"]
@@ -150,12 +155,22 @@ def auto_play_daybreak_games() -> None:
                     upstream_data = {'previous_orders': [previous_qty]}
                     visible_demand = demand if (player.can_see_demand or role_key == 'retailer' or full_visibility) else None
 
-                    quantity = int(max(0, agent.make_decision(
+                    decision = agent.make_decision(
                         current_round=round_record.round_number,
                         current_demand=visible_demand,
                         upstream_data=upstream_data,
                         local_state=local_state,
-                    )))
+                    )
+                    decision_comment = None
+                    if isinstance(decision, AgentDecision):
+                        quantity_value = decision.quantity
+                        decision_comment = decision.reason
+                    else:
+                        quantity_value = decision
+                    try:
+                        quantity = int(max(0, round(quantity_value)))
+                    except (TypeError, ValueError):
+                        quantity = 0
 
                     action = session.query(PlayerAction).filter(
                         PlayerAction.game_id == game.id,
@@ -177,7 +192,7 @@ def auto_play_daybreak_games() -> None:
                         )
                         session.add(action)
 
-                    explanation = agent.get_last_explanation_comment()
+                    explanation = decision_comment or agent.get_last_explanation_comment()
                     pending[role_key] = {
                         'player_id': player.id,
                         'quantity': quantity,
