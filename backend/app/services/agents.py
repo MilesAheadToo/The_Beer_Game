@@ -1,9 +1,9 @@
-from typing import List, Dict, Optional, Any, Tuple
 import random
 import statistics
 from enum import Enum
 from collections import deque
 from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional, Tuple
 
 from .beer_game_xai_explain import (
     Obs,
@@ -43,6 +43,14 @@ class AgentStrategy(Enum):
 class PIControllerState:
     history: deque = field(default_factory=lambda: deque(maxlen=4))
     integral: float = 0.0
+
+
+@dataclass
+class AgentDecision:
+    """Container for an agent's order decision and its rationale."""
+
+    quantity: int
+    reason: str
 
 
 class DaybreakCoordinator:
@@ -331,7 +339,7 @@ class BeerGameAgent:
         current_demand: Optional[int] = None,
         upstream_data: Optional[Dict] = None,
         local_state: Optional[Dict[str, Any]] = None,
-    ) -> int:
+    ) -> AgentDecision:
         """
         Make an order decision based on the agent's strategy and available information.
         
@@ -341,7 +349,7 @@ class BeerGameAgent:
             upstream_data: Data from upstream (e.g., orders from downstream)
             
         Returns:
-            int: The order quantity
+            AgentDecision: The finalized order quantity and explanation
         """
         # Update demand history if visible
         if current_demand is not None and (self.agent_type == AgentType.RETAILER or self.can_see_demand):
@@ -444,7 +452,8 @@ class BeerGameAgent:
         order = max(0, int(round(order)))
         self.last_order = order
         self.order_history.append(order)
-        return order
+        reason = self.get_last_explanation_comment()
+        return AgentDecision(quantity=order, reason=reason)
 
     def reset_for_strategy(self) -> None:
         self._pi_state = PIControllerState()
