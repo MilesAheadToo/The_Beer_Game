@@ -388,10 +388,7 @@ def ensure_supply_chain_config(session: Session, group: Group) -> SupplyChainCon
             upstream_node_id=nodes[upstream_type].id,
             downstream_node_id=nodes[downstream_type].id,
             capacity=9999,
-            lead_time_days={
-                "min": 0 if upstream_type == NodeType.MARKET_SUPPLY or downstream_type == NodeType.MARKET_DEMAND else 2,
-                "max": 0 if upstream_type == NodeType.MARKET_SUPPLY or downstream_type == NodeType.MARKET_DEMAND else 10,
-            },
+            lead_time_days={"min": 1, "max": 5},
         )
         session.add(lane)
 
@@ -454,7 +451,7 @@ def _apply_default_supply_chain_settings(session: Session, config: SupplyChainCo
     lanes = session.query(Lane).filter(Lane.config_id == config.id).all()
     for lane in lanes:
         lane.capacity = lane.capacity or 9999
-        lane.lead_time_days = {"min": 1, "max": 1}
+        lane.lead_time_days = {"min": 1, "max": 5}
         session.add(lane)
 
     market_demands = session.query(MarketDemand).filter(MarketDemand.config_id == config.id).all()

@@ -150,7 +150,7 @@ async def create_default_environment():
                         source_id=node_objs[i].id,
                         target_id=node_objs[i+1].id,
                         config_id=default_config.id,
-                        lead_time=0 if node_objs[i].node_type in {NodeType.MARKET_SUPPLY} or node_objs[i+1].node_type in {NodeType.MARKET_DEMAND} else 1,
+                        lead_time=1,
                         service_level=0.95
                     )
                     db.add(lane)

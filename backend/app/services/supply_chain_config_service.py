@@ -182,6 +182,14 @@ class SupplyChainConfigService:
             else 1.0
         )
 
+        if min_lead_time is None:
+            min_lead_time = 1.0
+        if max_lead_time is None:
+            max_lead_time = max(min_lead_time, 1.0)
+
+        shipping_lead_time = int(round(min_lead_time)) if min_lead_time is not None else 1
+        shipping_lead_time = max(shipping_lead_time, 1)
+
         min_demand: Optional[float] = None
         max_demand: Optional[float] = None
 
@@ -357,6 +365,12 @@ class SupplyChainConfigService:
             max_order_candidates.append(max_lane_capacity)
         max_order_quantity = int(round(max(max_order_candidates))) if max_order_candidates else 100
 
+        order_lead_range = {"min": 0, "max": 3}
+        supply_lead_range = {
+            "min": int(round(min_lead_time)) if min_lead_time is not None else 1,
+            "max": int(round(max_lead_time)) if max_lead_time is not None else shipping_lead_time,
+        }
+
         system_config = {
             "min_order_quantity": 0,
             "max_order_quantity": max_order_quantity,
@@ -366,16 +380,20 @@ class SupplyChainConfigService:
             "max_backlog_cost": round(float(max_backlog_cost) if max_backlog_cost is not None else 20.0, 2),
             "min_demand": int(round(min_demand)) if min_demand is not None else 0,
             "max_demand": int(round(max_demand)) if max_demand is not None else 100,
-            "min_lead_time": int(round(min_lead_time)) if min_lead_time is not None else 0,
-            "max_lead_time": int(round(max_lead_time)) if max_lead_time is not None else int(round(average_ship_delay)),
+            "min_lead_time": supply_lead_range["min"],
+            "max_lead_time": supply_lead_range["max"],
             "min_starting_inventory": int(round(min_init_inventory)) if min_init_inventory is not None else 0,
             "max_starting_inventory": int(round(max_init_inventory)) if max_init_inventory is not None else max_order_quantity,
         }
 
+        system_config["order_leadtime"] = dict(order_lead_range)
+        system_config["supply_leadtime"] = dict(supply_lead_range)
+        system_config["ship_order_leadtimedelay"] = dict(supply_lead_range)
+
         simulation_parameters = {
             "weeks": 40,
-            "order_lead_time": 1,
-            "shipping_lead_time": int(round(average_ship_delay)),
+            "order_lead_time": 0,
+            "shipping_lead_time": shipping_lead_time,
             "production_lead_time": 2,
             "initial_inventory": int(round(default_init_inventory)),
             "holding_cost_per_unit": round(default_holding_cost, 2),

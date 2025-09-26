@@ -109,7 +109,7 @@ class Lane(Base):
     capacity = Column(Integer, nullable=False)
     
     # Lead time in days (fixed or range for training)
-    lead_time_days = Column(JSON, default={"min": 1, "max": 3})
+    lead_time_days = Column(JSON, default={"min": 1, "max": 5})
     
     # Relationships
     config = relationship("SupplyChainConfig", back_populates="lanes")
