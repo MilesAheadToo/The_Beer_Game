@@ -53,9 +53,17 @@ class LLMAgent:
         if payload:
             try:
                 decision = self.session.decide(payload)
-                order_quantity = max(0, int(decision.get("order_upstream", 0)))
-                self._last_ship_plan = max(0, int(decision.get("ship_to_downstream", 0)))
-                rationale = decision.get("rationale", "")
+
+                def _safe_int(value: Any) -> int:
+                    try:
+                        return max(0, int(value))
+                    except (TypeError, ValueError):
+                        return 0
+
+                order_quantity = _safe_int(decision.get("order_upstream", 0))
+                self._last_ship_plan = _safe_int(decision.get("ship_to_downstream", 0))
+                rationale_raw = decision.get("rationale", "")
+                rationale = str(rationale_raw).strip() if rationale_raw is not None else ""
                 ship_fragment = (
                     f" | Proposed ship downstream: {self._last_ship_plan}"
                     if self._last_ship_plan is not None
