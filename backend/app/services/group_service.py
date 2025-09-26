@@ -169,6 +169,7 @@ class GroupService:
                 max_rounds=game_config.get("max_rounds", 52),
                 config=game_config,
                 demand_pattern=game_config.get("demand_pattern", {}),
+                supply_chain_config_id=sc_config.id,
             )
             self.db.add(game)
             self.db.flush()

@@ -53,6 +53,9 @@ class AgentGameService:
             else normalize_demand_pattern(DEFAULT_DEMAND_PATTERN)
         )
 
+        supply_chain_config_id = getattr(game_data, "supply_chain_config_id", None)
+        if supply_chain_config_id is None:
+            raise ValueError("supply_chain_config_id is required to create an agent-only game")
         game = Game(
             name=game_data.name,
             status=GameStatus.CREATED,
@@ -60,6 +63,7 @@ class AgentGameService:
             max_rounds=game_data.max_rounds,
             demand_pattern=pattern_config,
             config={"agent_policies": self._default_policy_config()},
+            supply_chain_config_id=int(supply_chain_config_id),
         )
         self.db.add(game)
         self.db.commit()

@@ -480,6 +480,7 @@ def ensure_default_game(session: Session, group: Group) -> Game:
         print(
             f"[info] Game '{DEFAULT_GAME_NAME}' already exists (id={game.id})."
         )
+        sc_config = ensure_supply_chain_config(session, group)
         existing_config = game.config or {}
         if isinstance(existing_config, str):
             try:
@@ -488,6 +489,7 @@ def ensure_default_game(session: Session, group: Group) -> Game:
                 existing_config = {}
         existing_config["progression_mode"] = "unsupervised"
         game.config = json.loads(json.dumps(existing_config))
+        game.supply_chain_config_id = sc_config.id
         session.add(game)
         return game
 
@@ -508,6 +510,7 @@ def ensure_default_game(session: Session, group: Group) -> Game:
         max_rounds=game_config.get("max_rounds", 52),
         config=game_config,
         demand_pattern=game_config.get("demand_pattern", {}),
+        supply_chain_config_id=sc_config.id,
     )
     session.add(game)
     session.flush()
@@ -1075,6 +1078,7 @@ def ensure_daybreak_games(
                 config=base_config,
                 demand_pattern=base_config.get("demand_pattern", {}),
                 description=spec["description"],
+                supply_chain_config_id=config.id,
             )
             session.add(game)
             session.flush()
@@ -1088,6 +1092,7 @@ def ensure_daybreak_games(
                     game_config = json.loads(game_config)
                 except json.JSONDecodeError:
                     game_config = {}
+            game.supply_chain_config_id = config.id
             game_config.setdefault("daybreak", {})
             game_config["daybreak"].update(
                 {

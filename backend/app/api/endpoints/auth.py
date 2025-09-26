@@ -201,6 +201,7 @@ def _ensure_default_setup_sync(db: Session, user: User) -> None:
         config=game_cfg,
         created_by=user.id,
         role_assignments={},
+        supply_chain_config_id=config.id,
     )
     db.add(game)
     db.commit()

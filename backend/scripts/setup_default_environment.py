@@ -219,7 +219,7 @@ async def create_default_environment():
                     max_rounds=50,
                     current_round=0,
                     status=GameStatus.CREATED,
-                    config_id=default_config.id,
+                    supply_chain_config_id=default_config.id,
                     group_id=default_group.id,
                     created_by=group_admin.id
                 )

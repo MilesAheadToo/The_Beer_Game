@@ -395,22 +395,24 @@ class MixedGameService:
         if getattr(game_data, "daybreak_llm", None):
             config["daybreak_llm"] = game_data.daybreak_llm.model_dump()
         supply_chain_id = getattr(game_data, "supply_chain_config_id", None)
-        if supply_chain_id is not None:
-            try:
-                config["supply_chain_config_id"] = int(supply_chain_id)
-            except (TypeError, ValueError):
-                raise ValueError("supply_chain_config_id must be an integer")
-            supply_chain_name = (
-                getattr(game_data, "supply_chain_name", None)
-                or self._resolve_supply_chain_name(config["supply_chain_config_id"])
-            )
-            if supply_chain_name:
-                config["supply_chain_name"] = supply_chain_name
+        if supply_chain_id is None:
+            raise ValueError("supply_chain_config_id is required to create a game from a supply chain configuration")
+        try:
+            config["supply_chain_config_id"] = int(supply_chain_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("supply_chain_config_id must be an integer") from exc
+        supply_chain_name = (
+            getattr(game_data, "supply_chain_name", None)
+            or self._resolve_supply_chain_name(config["supply_chain_config_id"])
+        )
+        if supply_chain_name:
+            config["supply_chain_name"] = supply_chain_name
         game = Game(
             name=game_data.name,
             max_rounds=game_data.max_rounds,
             status=GameStatus.CREATED,
             config=config,
+            supply_chain_config_id=config["supply_chain_config_id"],
         )
         self.db.add(game)
         self.db.flush()

@@ -46,7 +46,8 @@ import {
   Td,
   Tag,
   Wrap,
-  WrapItem
+  WrapItem,
+  Textarea
 } from '@chakra-ui/react';
 import PageLayout from '../components/PageLayout';
 import { getAllConfigs, getSupplyChainConfigById } from '../services/supplyChainConfigService';
@@ -1735,7 +1736,7 @@ const CreateMixedGame = () => {
           </Box>
         </Alert>
       )}
-      <VStack as="form" onSubmit={handleFormSubmit} spacing={6} align="stretch" maxW="4xl" mx="auto">
+      <VStack as="form" onSubmit={handleFormSubmit} spacing={6} align="stretch" maxW="6xl" mx="auto" w="full">
         <Tabs variant="enclosed" isFitted>
           <TabList mb="1em">
             <Tab>Game Settings</Tab>
@@ -1834,7 +1835,15 @@ const CreateMixedGame = () => {
                       </FormControl>
 
                       {progressionMode === 'unsupervised' && (
-                        <Alert status="info" variant="left-accent" borderRadius="md">
+                        <Alert
+                          status="info"
+                          variant="left-accent"
+                          borderRadius="md"
+                          alignItems="flex-start"
+                          px={4}
+                          py={3}
+                          w="full"
+                        >
                           <AlertIcon boxSize="1em" />
                           <Box>
                             <AlertTitle fontSize="sm">Unsupervised mode</AlertTitle>
@@ -1847,14 +1856,15 @@ const CreateMixedGame = () => {
 
                       <FormControl>
                         <StyledFormLabel>Description (Optional)</StyledFormLabel>
-                        <Input 
-                          as="textarea"
+                        <Textarea
                           value={description}
                           onChange={(e) => setDescription(e.target.value)}
                           placeholder="Enter a description for your game"
                           size="lg"
-                          minH="100px"
+                          minH="140px"
+                          resize="vertical"
                           p={3}
+                          w="full"
                         />
                       </FormControl>
                     </VStack>
