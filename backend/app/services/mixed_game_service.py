@@ -23,7 +23,12 @@ from app.schemas.game import (
     GameInDBBase,
 )
 from app.schemas.player import PlayerAssignment, PlayerType, PlayerStrategy
-from app.services.agents import AgentManager, AgentType, AgentStrategy as AgentStrategyEnum
+from app.services.agents import (
+    AgentDecision,
+    AgentManager,
+    AgentType,
+    AgentStrategy as AgentStrategyEnum,
+)
 from app.services.llm_payload import build_llm_decision_payload
 from app.api.endpoints.config import _read_cfg as read_system_cfg
 from app.core.demand_patterns import (
@@ -1403,12 +1408,14 @@ class MixedGameService:
                 if llm_payload is not None:
                     upstream_context["llm_payload"] = llm_payload
 
-                order_quantity = agent.make_decision(
+                decision: AgentDecision = agent.make_decision(
                     current_round=game_round.round_number,
                     current_demand=current_demand_value,
                     upstream_data=upstream_context,
                     local_state=local_state,
                 )
+                order_quantity = decision.quantity
+                decision_comment = decision.reason or agent.get_last_explanation_comment()
 
                 inventory_stock = getattr(inventory, "current_stock", 0) if inventory else 0
                 inventory_backorders = getattr(inventory, "backorders", 0) if inventory else 0
@@ -1422,7 +1429,7 @@ class MixedGameService:
                     inventory_after=inventory_stock,
                     backorders_before=inventory_backorders,
                     backorders_after=inventory_backorders,
-                    comment=agent.get_last_explanation_comment(),
+                    comment=decision_comment,
                 )
                 self.db.add(player_round)
 
@@ -1484,17 +1491,153 @@ class MixedGameService:
         game = self.db.query(Game).filter(Game.id == game_id).first()
         if not game:
             raise ValueError("Game not found")
+
         cfg = game.config or {}
-        engine = cfg.get('engine_state', {})
-        totals = {r: {
-            'inventory': st.get('inventory',0),
-            'backlog': st.get('backlog',0),
-            'holding_cost': st.get('holding_cost',0.0),
-            'backorder_cost': st.get('backorder_cost',0.0),
-            'total_cost': st.get('total_cost',0.0),
-        } for r, st in engine.items()}
-        total_cost = sum(v['total_cost'] for v in totals.values())
-        return {'game_id': game_id, 'status': str(game.status), 'totals': totals, 'total_cost': total_cost}
+
+        rounds = (
+            self.db.query(GameRound)
+            .filter(GameRound.game_id == game_id)
+            .order_by(GameRound.round_number.asc())
+            .all()
+        )
+
+        history_map: Dict[int, Dict[str, Any]] = {}
+        demand_series: List[Dict[str, Any]] = []
+        order_series: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        role_totals: Dict[str, Dict[str, Any]] = {}
+
+        for round_obj in rounds:
+            history_map[round_obj.round_number] = {
+                "round": round_obj.round_number,
+                "demand": round_obj.customer_demand,
+                "orders": {},
+                "inventory_positions": {},
+                "backlogs": {},
+                "total_cost": 0.0,
+            }
+            demand_series.append(
+                {"round": round_obj.round_number, "demand": round_obj.customer_demand}
+            )
+
+        player_round_records = (
+            self.db.query(PlayerRound, GameRound, Player)
+            .join(GameRound, PlayerRound.round_id == GameRound.id)
+            .join(Player, PlayerRound.player_id == Player.id)
+            .filter(GameRound.game_id == game_id)
+            .order_by(GameRound.round_number.asc())
+            .all()
+        )
+
+        for player_round, round_obj, player in player_round_records:
+            entry = history_map.setdefault(
+                round_obj.round_number,
+                {
+                    "round": round_obj.round_number,
+                    "demand": round_obj.customer_demand,
+                    "orders": {},
+                    "inventory_positions": {},
+                    "backlogs": {},
+                    "total_cost": 0.0,
+                },
+            )
+
+            role_key = str(player.role.value).lower()
+
+            comment_value = player_round.comment
+            if isinstance(comment_value, dict):
+                comment_text = comment_value.get("text")
+                if not comment_text:
+                    comment_text = json.dumps(comment_value)
+            elif comment_value is None:
+                comment_text = ""
+            else:
+                comment_text = str(comment_value)
+
+            order_info = {
+                "quantity": player_round.order_placed,
+                "received": player_round.order_received,
+                "inventory_before": player_round.inventory_before,
+                "inventory_after": player_round.inventory_after,
+                "backorders_before": player_round.backorders_before,
+                "backorders_after": player_round.backorders_after,
+                "holding_cost": float(player_round.holding_cost or 0.0),
+                "backorder_cost": float(player_round.backorder_cost or 0.0),
+                "total_cost": float(player_round.total_cost or 0.0),
+                "comment": comment_text,
+                "submitted_at": getattr(player_round, "updated_at", None),
+            }
+
+            entry["orders"][role_key] = order_info
+            entry["inventory_positions"][role_key] = player_round.inventory_after
+            entry["backlogs"][role_key] = player_round.backorders_after
+            entry["total_cost"] = float(entry.get("total_cost", 0.0)) + order_info["total_cost"]
+
+            order_series[role_key].append(
+                {"round": round_obj.round_number, "quantity": player_round.order_placed}
+            )
+
+            totals_entry = role_totals.setdefault(
+                role_key,
+                {
+                    "inventory": 0,
+                    "backlog": 0,
+                    "holding_cost": 0.0,
+                    "backorder_cost": 0.0,
+                    "total_cost": 0.0,
+                },
+            )
+            totals_entry["inventory"] = player_round.inventory_after
+            totals_entry["backlog"] = player_round.backorders_after
+            totals_entry["holding_cost"] += order_info["holding_cost"]
+            totals_entry["backorder_cost"] += order_info["backorder_cost"]
+            totals_entry["total_cost"] += order_info["total_cost"]
+
+        history = [history_map[round_no] for round_no in sorted(history_map.keys())]
+
+        # Merge any engine-derived totals so we retain upstream metrics if present.
+        engine = cfg.get("engine_state", {})
+        if engine:
+            for role_name, state in engine.items():
+                key = str(role_name).lower()
+                totals_entry = role_totals.setdefault(
+                    key,
+                    {
+                        "inventory": 0,
+                        "backlog": 0,
+                        "holding_cost": 0.0,
+                        "backorder_cost": 0.0,
+                        "total_cost": 0.0,
+                    },
+                )
+                totals_entry.setdefault("inventory", state.get("inventory", totals_entry.get("inventory", 0)))
+                totals_entry.setdefault("backlog", state.get("backlog", totals_entry.get("backlog", 0)))
+                totals_entry.setdefault(
+                    "holding_cost", float(state.get("holding_cost", totals_entry.get("holding_cost", 0.0)))
+                )
+                totals_entry.setdefault(
+                    "backorder_cost", float(state.get("backorder_cost", totals_entry.get("backorder_cost", 0.0)))
+                )
+                totals_entry.setdefault(
+                    "total_cost", float(state.get("total_cost", totals_entry.get("total_cost", 0.0)))
+                )
+
+        total_cost = sum(float(v.get("total_cost", 0.0)) for v in role_totals.values())
+
+        return {
+            "game_id": game_id,
+            "name": game.name,
+            "status": str(game.status),
+            "progression_mode": cfg.get("progression_mode", "supervised"),
+            "totals": role_totals,
+            "total_cost": total_cost,
+            "history": history,
+            "order_series": {
+                role: sorted(series, key=lambda item: item["round"])
+                for role, series in order_series.items()
+            },
+            "demand_series": demand_series,
+            "rounds_completed": len(history),
+        }
     
     def calculate_demand(self, game: Game, round_number: int) -> int:
         """Calculate demand for a given round based on the game's demand pattern."""

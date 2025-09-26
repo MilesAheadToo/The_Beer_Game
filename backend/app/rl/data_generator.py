@@ -22,7 +22,7 @@ from .config import (
     ORDER_EDGES,
     SHIPMENT_EDGES,
 )
-from app.services.agents import BeerGameAgent, AgentStrategy, AgentType
+from app.services.agents import AgentDecision, AgentStrategy, AgentType, BeerGameAgent
 
 logger = logging.getLogger(__name__)
 
@@ -476,12 +476,16 @@ def simulate_beer_game(
             }
             current_demand = in_ord[r][-1] if in_ord[r] else None
             try:
-                order_units = agent.make_decision(
+                decision = agent.make_decision(
                     current_round=t,
                     current_demand=current_demand,
                     upstream_data=upstream_data,
                     local_state=local_state,
                 )
+                if isinstance(decision, AgentDecision):
+                    order_units = decision.quantity
+                else:
+                    order_units = int(decision)
             except Exception:
                 target = params.init_inventory + params.ship_delay * 2
                 desired = target + back[r][-1] - inv[r][-1] - on_ord[r][-1]
