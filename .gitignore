@@ -18,6 +18,8 @@ frontend/.cache/
 
 # Logs
 *.log
+*.logs
+backend/debug_logs/*
 logs/
 
 # Env files
