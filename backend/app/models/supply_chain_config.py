@@ -19,6 +19,7 @@ from .base import Base
 
 if TYPE_CHECKING:
     from .group import Group
+    from .game import Game
 
 class NodeType(str, PyEnum):
     RETAILER = "RETAILER"
@@ -47,6 +48,11 @@ class SupplyChainConfig(Base):
     lanes = relationship("Lane", back_populates="config", cascade="all, delete-orphan")
     market_demands = relationship("MarketDemand", back_populates="config", cascade="all, delete-orphan")
     group = relationship("Group", back_populates="supply_chain_configs")
+    games: List["Game"] = relationship(
+        "Game",
+        back_populates="supply_chain_config",
+        passive_deletes=True,
+    )
 
     # Training metadata
     needs_training = Column(Boolean, nullable=False, default=True)

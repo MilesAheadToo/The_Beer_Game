@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from .user import User
     from .agent_config import AgentConfig
     from .supply_chain import GameRound
+    from .supply_chain_config import SupplyChainConfig
 
 class GameStatus(str, Enum):
     CREATED = "CREATED"
@@ -40,6 +41,11 @@ class Game(Base):
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     config: Mapped[dict] = mapped_column(JSON, default=dict)  # Store game configuration
     group_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), nullable=True)
+    supply_chain_config_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("supply_chain_configs.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     
     # Role assignments: {role: {'is_ai': bool, 'agent_config_id': Optional[int], 'user_id': Optional[int]}}
     role_assignments: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -54,6 +60,10 @@ class Game(Base):
     supervisor_actions = relationship("SupervisorAction", back_populates="game", lazy="selectin")
     agent_configs = relationship("AgentConfig", back_populates="game", lazy="selectin")
     group: Mapped[Optional["Group"]] = relationship("Group", back_populates="games")
+    supply_chain_config: Mapped["SupplyChainConfig"] = relationship(
+        "SupplyChainConfig",
+        back_populates="games",
+    )
     
     def get_role_assignment(self, role: str) -> Dict[str, Any]:
         """Get the assignment for a specific role"""

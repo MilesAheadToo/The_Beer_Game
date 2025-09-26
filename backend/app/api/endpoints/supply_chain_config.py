@@ -217,11 +217,14 @@ def _ensure_user_can_manage_config(
         return
 
     admin_group_id = _get_user_admin_group_id(db, user)
-    if not admin_group_id or config.group_id != admin_group_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have access to this configuration",
-        )
+    if config.group_id is None:
+        return
+    if admin_group_id and config.group_id == admin_group_id:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="You do not have access to this configuration",
+    )
 
 
 def _json_default(value: Any) -> str:

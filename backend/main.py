@@ -2151,6 +2151,8 @@ async def create_mixed_game(payload: GameCreate, user: Dict[str, Any] = Depends(
         group_id = _extract_group_id(user)
         if group_id is None and not _is_system_admin_user(user):
             raise HTTPException(status_code=403, detail="Group membership required to create games")
+        if payload.supply_chain_config_id is None:
+            raise HTTPException(status_code=400, detail="supply_chain_config_id is required to create a mixed game")
 
         config: Dict[str, Any] = {
             "demand_pattern": payload.demand_pattern.dict() if payload.demand_pattern else {},
@@ -2175,6 +2177,7 @@ async def create_mixed_game(payload: GameCreate, user: Dict[str, Any] = Depends(
             is_public=payload.is_public,
             demand_pattern=config.get("demand_pattern", {}),
             config=config,
+            supply_chain_config_id=int(payload.supply_chain_config_id),
         )
         db.add(game)
         db.flush()

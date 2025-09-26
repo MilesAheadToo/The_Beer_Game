@@ -56,6 +56,7 @@ def ensure_agent_game(session, service: SupplyChainConfigService, group, config,
             max_rounds=base_config.get("max_rounds", 40),
             config=base_config,
             demand_pattern=base_config.get("demand_pattern", {}),
+            supply_chain_config_id=config.id,
         )
         session.add(game)
         session.flush()

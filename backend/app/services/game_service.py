@@ -89,12 +89,16 @@ class GameService:
         else:
             demand_pattern = normalize_demand_pattern(DEFAULT_DEMAND_PATTERN)
 
+        supply_chain_config_id = getattr(game_data, "supply_chain_config_id", None)
+        if supply_chain_config_id is None:
+            raise ValueError("supply_chain_config_id is required to create a game")
         game = Game(
             name=game_data.name,
             status=GameStatus.CREATED,
             current_round=0,
             max_rounds=game_data.max_rounds or 52,
-            demand_pattern=demand_pattern
+            demand_pattern=demand_pattern,
+            supply_chain_config_id=int(supply_chain_config_id),
         )
         self.db.add(game)
         self.db.commit()

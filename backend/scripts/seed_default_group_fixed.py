@@ -48,11 +48,10 @@ try:
         User,
     )
     from app.models.agent_config import AgentConfig
-    from app.models.supply_chain_config import SupplyChainConfig
     from app.schemas.group import GroupCreate
     from app.schemas.user import UserCreate
     from app.services.group_service import GroupService
-    from app.services.supply_chain_config_service import SupplyChainConfigService
+    from scripts.seed_default_group import ensure_supply_chain_config
 except ImportError as e:
     print(f"Error importing application modules: {e}")
     print("Make sure you're running this script from the backend directory and all dependencies are installed.")
@@ -154,17 +153,20 @@ def ensure_group(session: Session) -> Tuple[Group, bool]:
 
 def ensure_default_game(session: Session, group: Group) -> Game:
     """Ensure the default game exists for the supplied group."""
+    sc_config = ensure_supply_chain_config(session, group)
     existing_game = session.query(Game).filter(
         Game.name == DEFAULT_GAME_NAME,
         Game.group_id == group.id
     ).first()
-    
+
     if existing_game:
         print(f"Game '{DEFAULT_GAME_NAME}' already exists with ID: {existing_game.id}")
+        existing_game.supply_chain_config_id = sc_config.id
+        session.add(existing_game)
         return existing_game
     
     print(f"Creating new game: {DEFAULT_GAME_NAME}")
-    
+
     # Create the game
     game = Game(
         name=DEFAULT_GAME_NAME,
@@ -172,6 +174,7 @@ def ensure_default_game(session: Session, group: Group) -> Game:
         group_id=group.id,
         created_by=group.created_by,
         max_rounds=52,  # Default number of rounds
+        supply_chain_config_id=sc_config.id,
     )
     session.add(game)
     session.flush()
