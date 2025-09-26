@@ -17,8 +17,9 @@ from app.models.player import Player, PlayerRole
 from app.models.supply_chain import GameRound, PlayerInventory, PlayerRound
 from app.schemas.game import GameCreate, DemandPattern
 
-from .engine import BeerLine
+from .engine import BeerLine, DEFAULT_ORDER_LEAD_TIME, DEFAULT_SHIPMENT_LEAD_TIME
 from .policy_factory import make_policy
+from .supply_chain_config_service import SupplyChainConfigService
 
 
 class AgentGameService:
@@ -39,6 +40,7 @@ class AgentGameService:
     def __init__(self, db_session: Session) -> None:
         self.db = db_session
         self._demand_visible = False
+        self._supply_chain_service: SupplyChainConfigService | None = None
 
     # ------------------------------------------------------------------
     # Game lifecycle helpers
@@ -78,9 +80,16 @@ class AgentGameService:
             raise ValueError("Game is already in progress or finished")
 
         config = self._ensure_agent_config(game)
+        sim_params = self._load_simulation_parameters(game, config)
+        order_lead, ship_lead = self._extract_lead_times(sim_params)
         policies = self._build_policy_map(config)
         base_stocks = self._extract_base_stocks(config)
-        line = BeerLine(role_policies=policies, base_stocks=base_stocks)
+        line = BeerLine(
+            role_policies=policies,
+            base_stocks=base_stocks,
+            order_lead_time=order_lead,
+            shipment_lead_time=ship_lead,
+        )
 
         config["agent_engine_state"] = line.to_dict()
         game.config = config
@@ -111,9 +120,17 @@ class AgentGameService:
         demand_pattern = DemandPattern(**game.demand_pattern)
         current_demand = self._get_current_demand(game.current_round, demand_pattern)
 
+        sim_params = self._load_simulation_parameters(game, config)
+        order_lead, ship_lead = self._extract_lead_times(sim_params)
         policies = self._build_policy_map(config)
         base_stocks = self._extract_base_stocks(config)
-        line = BeerLine(role_policies=policies, base_stocks=base_stocks, state=state)
+        line = BeerLine(
+            role_policies=policies,
+            base_stocks=base_stocks,
+            state=state,
+            order_lead_time=order_lead,
+            shipment_lead_time=ship_lead,
+        )
 
         tick_stats = line.tick(current_demand)
         config["agent_engine_state"] = line.to_dict()
@@ -288,6 +305,52 @@ class AgentGameService:
         config["agent_policies"] = policies
         game.config = config
         return config
+
+    def _load_simulation_parameters(self, game: Game, config: Dict[str, Any]) -> Dict[str, Any]:
+        sim_params = config.get("simulation_parameters")
+        if isinstance(sim_params, dict) and sim_params:
+            return sim_params
+
+        params: Dict[str, Any] = {}
+        service = self._get_supply_chain_service()
+        if service and game.supply_chain_config_id:
+            try:
+                snapshot = service.create_game_from_config(
+                    game.supply_chain_config_id,
+                    {"name": game.name or "Agent Game", "description": game.description or ""},
+                )
+                params = snapshot.get("simulation_parameters", {}) or {}
+            except Exception:
+                params = {}
+
+        if params:
+            config["simulation_parameters"] = params
+            game.config = config
+        return params
+
+    def _extract_lead_times(self, sim_params: Dict[str, Any]) -> tuple[int, int]:
+        order_lead = sim_params.get("order_lead_time") or sim_params.get("info_delay")
+        ship_lead = sim_params.get("shipping_lead_time") or sim_params.get("ship_delay")
+
+        try:
+            order_val = int(order_lead) if order_lead is not None else DEFAULT_ORDER_LEAD_TIME
+        except (TypeError, ValueError):
+            order_val = DEFAULT_ORDER_LEAD_TIME
+
+        try:
+            ship_val = int(ship_lead) if ship_lead is not None else DEFAULT_SHIPMENT_LEAD_TIME
+        except (TypeError, ValueError):
+            ship_val = DEFAULT_SHIPMENT_LEAD_TIME
+
+        return max(1, order_val), max(1, ship_val)
+
+    def _get_supply_chain_service(self) -> SupplyChainConfigService | None:
+        if self._supply_chain_service is None:
+            try:
+                self._supply_chain_service = SupplyChainConfigService(self.db)
+            except Exception:
+                self._supply_chain_service = None
+        return self._supply_chain_service
 
     def _build_policy_map(self, config: Dict[str, Any]) -> Dict[str, Any]:
         policy_map: Dict[str, Any] = {}

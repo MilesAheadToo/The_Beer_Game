@@ -654,8 +654,8 @@ const CreateMixedGame = () => {
         config?.supply_chain_name ??
         game?.supply_chain_name ??
         statePayload?.supply_chain_name ??
-        config?.name ??
         '',
+      supplyChainConfig: statePayload?.supply_chain_config ?? null,
     };
   }, [normalizeLoadedPolicies]);
 
@@ -834,7 +834,6 @@ const CreateMixedGame = () => {
         if (!ignore) {
           console.error('Failed to load supply chain configuration', error);
           setSupplyChainError('Unable to load supply chain configuration.');
-          setActiveSupplyChainConfig(null);
         }
       } finally {
         if (!ignore) {
@@ -933,6 +932,10 @@ const CreateMixedGame = () => {
         });
 
         setPlayers((snapshot.players || []).map((player) => ({ ...player })));
+
+        if (snapshot.supplyChainConfig) {
+          setActiveSupplyChainConfig(snapshot.supplyChainConfig);
+        }
 
         if (snapshot.supplyChainConfigId) {
           setActiveConfigId(snapshot.supplyChainConfigId);
@@ -1540,6 +1543,10 @@ const CreateMixedGame = () => {
 
           setPlayers((snapshot.players || []).map((player) => ({ ...player })));
 
+          if (snapshot.supplyChainConfig) {
+            setActiveSupplyChainConfig(snapshot.supplyChainConfig);
+          }
+
           if (snapshot.supplyChainConfigId) {
             setActiveConfigId(snapshot.supplyChainConfigId);
           }
@@ -1606,7 +1613,11 @@ const CreateMixedGame = () => {
     }
   };
 
-  const summarySupplyChainName = activeSupplyChainConfig?.name ?? savedSnapshot?.supplyChainName ?? null;
+  const summarySupplyChainName =
+    activeSupplyChainConfig?.name ??
+    savedSnapshot?.supplyChainName ??
+    savedSnapshot?.supplyChainConfig?.name ??
+    null;
 
   const overviewItems = useMemo(() => [
     { label: 'Game Name', value: summaryGameName || '—' },

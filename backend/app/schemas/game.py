@@ -286,6 +286,10 @@ class GameState(GameInDBBase):
     current_demand: Optional[int] = Field(None, description="Current round's customer demand")
     round_started_at: Optional[datetime] = Field(None, description="When the current round started")
     round_ends_at: Optional[datetime] = Field(None, description="When the current round will end")
+    supply_chain_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Snapshot of the linked supply chain configuration (items, nodes, lanes)",
+    )
     
     class Config:
         schema_extra = {

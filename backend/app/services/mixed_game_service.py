@@ -8,7 +8,7 @@ from collections import defaultdict, deque
 from types import SimpleNamespace
 from pydantic import ValidationError
 from sqlalchemy import inspect
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.game import Game, GameStatus as GameStatusDB
 from app.models.player import Player, PlayerRole, PlayerType as PlayerTypeDB, PlayerStrategy as PlayerStrategyDB
@@ -85,6 +85,107 @@ class MixedGameService:
             .first()
         )
         return record.name if record else None
+
+    def _supply_chain_snapshot(self, config_id: Optional[Any]) -> Optional[Dict[str, Any]]:
+        if not config_id:
+            return None
+        try:
+            config_id_int = int(config_id)
+        except (TypeError, ValueError):
+            return None
+
+        config = (
+            self.db.query(SupplyChainConfig)
+            .options(
+                selectinload(SupplyChainConfig.items),
+                selectinload(SupplyChainConfig.nodes).selectinload("item_configs"),
+                selectinload(SupplyChainConfig.lanes),
+                selectinload(SupplyChainConfig.market_demands),
+            )
+            .filter(SupplyChainConfig.id == config_id_int)
+            .first()
+        )
+        if not config:
+            return None
+
+        def _normalise_range(payload: Any) -> Optional[Dict[str, Any]]:
+            if isinstance(payload, dict):
+                return {"min": payload.get("min"), "max": payload.get("max")}
+            return None
+
+        items = [
+            {
+                "id": item.id,
+                "name": item.name,
+                "description": item.description,
+                "unit_cost_range": _normalise_range(item.unit_cost_range),
+            }
+            for item in getattr(config, "items", [])
+        ]
+
+        nodes = []
+        for node in getattr(config, "nodes", []):
+            node_payload: Dict[str, Any] = {
+                "id": node.id,
+                "name": node.name,
+                "type": getattr(node.type, "value", node.type),
+            }
+            item_cfgs = []
+            for inc in getattr(node, "item_configs", []) or []:
+                item_cfgs.append(
+                    {
+                        "id": inc.id,
+                        "item_id": inc.item_id,
+                        "node_id": inc.node_id,
+                        "inventory_target_range": _normalise_range(inc.inventory_target_range),
+                        "initial_inventory_range": _normalise_range(inc.initial_inventory_range),
+                        "holding_cost_range": _normalise_range(inc.holding_cost_range),
+                        "backlog_cost_range": _normalise_range(inc.backlog_cost_range),
+                        "selling_price_range": _normalise_range(inc.selling_price_range),
+                    }
+                )
+            node_payload["item_configs"] = item_cfgs
+            nodes.append(node_payload)
+
+        lanes = [
+            {
+                "id": lane.id,
+                "upstream_node_id": lane.upstream_node_id,
+                "downstream_node_id": lane.downstream_node_id,
+                "capacity": lane.capacity,
+                "lead_time_days": _normalise_range(lane.lead_time_days),
+            }
+            for lane in getattr(config, "lanes", [])
+        ]
+
+        market_demands = [
+            {
+                "id": md.id,
+                "item_id": md.item_id,
+                "retailer_id": md.retailer_id,
+                "demand_pattern": md.demand_pattern,
+            }
+            for md in getattr(config, "market_demands", [])
+        ]
+
+        return {
+            "id": config.id,
+            "name": config.name,
+            "description": config.description,
+            "group_id": config.group_id,
+            "is_active": bool(config.is_active),
+            "created_at": config.created_at,
+            "updated_at": config.updated_at,
+            "needs_training": getattr(config, "needs_training", True),
+            "training_status": getattr(config, "training_status", None),
+            "trained_at": getattr(config, "trained_at", None),
+            "trained_model_path": getattr(config, "trained_model_path", None),
+            "last_trained_config_hash": getattr(config, "last_trained_config_hash", None),
+            "items": items,
+            "nodes": nodes,
+            "lanes": lanes,
+            "market_demands": market_demands,
+        }
 
     ROLE_ALIASES: Dict[str, str] = {
         "supplier": "wholesaler",
@@ -1840,6 +1941,8 @@ class MixedGameService:
         except Exception:
             pass
 
+        supply_chain_snapshot = self._supply_chain_snapshot(supply_chain_config_id)
+
         return GameState(
             id=game_result[0],
             name=game_result[1],
@@ -1864,7 +1967,8 @@ class MixedGameService:
             node_policies=node_policies,
             system_config=system_config,
             pricing_config=pricing_config,
-            global_policy=global_policy
+            global_policy=global_policy,
+            supply_chain_config=supply_chain_snapshot,
         )
         # Validate optional global policy if provided
         if getattr(game_data, 'global_policy', None):
