@@ -7,10 +7,9 @@ from typing import Any, Deque, Dict, Iterable, List
 
 from .policies import NaiveEchoPolicy, OrderPolicy
 
-# Lead times are kept constant for now.  They can be made configurable in the
-# future if needed.
-LEAD_TIME = 2  # inbound shipment delay (periods)
-ORDER_LEAD = 2  # order transmission delay upstream (periods)
+# Classic Beer Game lead times (can be made configurable in the future)
+SHIPMENT_LEAD_TIME = 2  # inbound shipment delay (periods)
+ORDER_LEAD_TIME = 2  # information / order transmission delay (periods)
 
 
 class Node:
@@ -32,56 +31,105 @@ class Node:
         self.name = name
         self.policy = policy
         self.base_stock = int(base_stock)
-        self.inv = int(inventory)
+        self.inventory = int(inventory)
         self.backlog = int(backlog)
+
         self.pipeline_shipments: Deque[int] = deque(
-            pipeline_shipments or [0] * LEAD_TIME, maxlen=LEAD_TIME
+            list(pipeline_shipments) if pipeline_shipments is not None else [0] * SHIPMENT_LEAD_TIME,
+            maxlen=SHIPMENT_LEAD_TIME,
         )
-        if len(self.pipeline_shipments) < LEAD_TIME:
-            while len(self.pipeline_shipments) < LEAD_TIME:
-                self.pipeline_shipments.appendleft(0)
-        self.order_pipe: Deque[int] = deque(order_pipe or [0] * ORDER_LEAD, maxlen=ORDER_LEAD)
-        if len(self.order_pipe) < ORDER_LEAD:
-            while len(self.order_pipe) < ORDER_LEAD:
-                self.order_pipe.appendleft(0)
+        while len(self.pipeline_shipments) < SHIPMENT_LEAD_TIME:
+            self.pipeline_shipments.appendleft(0)
+
+        self.order_pipe: Deque[int] = deque(
+            list(order_pipe) if order_pipe is not None else [0] * ORDER_LEAD_TIME,
+            maxlen=ORDER_LEAD_TIME,
+        )
+        while len(self.order_pipe) < ORDER_LEAD_TIME:
+            self.order_pipe.appendleft(0)
+
         self.last_incoming_order = int(last_incoming_order)
         self.cost = float(cost)
 
+    # ------------------------------------------------------------------
+    # Convenience properties
+    # ------------------------------------------------------------------
     @property
     def pipeline_on_order(self) -> int:
+        """Total inventory scheduled to arrive in future periods."""
+
         return sum(self.pipeline_shipments)
 
-    def receive_shipments(self) -> int:
+    @property
+    def inventory_position(self) -> int:
+        """Inventory position used by classic Beer Game policies."""
+
+        return self.inventory + self.pipeline_on_order - self.backlog
+
+    # ------------------------------------------------------------------
+    # State transition helpers
+    # ------------------------------------------------------------------
+    def receive_shipment(self) -> int:
+        """Advance the shipment pipeline and add arrivals to on-hand inventory."""
+
         arrived = self.pipeline_shipments.popleft()
-        self.inv += arrived
         self.pipeline_shipments.append(0)
+        self.inventory += arrived
         return arrived
 
-    def fulfill(self, demand: int) -> int:
-        shipped = min(self.inv, demand)
-        self.inv -= shipped
-        unmet = demand - shipped
-        self.backlog += unmet
-        return shipped
+    def shift_order_pipe(self) -> int:
+        """Advance the outbound order pipeline (orders travelling upstream)."""
 
-    def step_order(self) -> int:
+        due_upstream = self.order_pipe.popleft()
+        self.order_pipe.append(0)
+        return due_upstream
+
+    def schedule_inbound_shipment(self, quantity: int) -> None:
+        """Queue a shipment that will arrive after the shipment lead time."""
+
+        qty = int(quantity)
+        if qty > 0:
+            self.pipeline_shipments[-1] += qty
+
+    def schedule_order(self, quantity: int) -> None:
+        """Queue an order that will reach the upstream partner after the delay."""
+
+        qty = int(quantity)
+        if qty > 0:
+            self.order_pipe[-1] += qty
+
+    def decide_order(self) -> int:
+        """Call the node's policy to determine the order for this week."""
+
         observation = {
-            "inventory": self.inv,
+            "inventory": self.inventory,
             "backlog": self.backlog,
             "pipeline_on_order": self.pipeline_on_order,
             "last_incoming_order": self.last_incoming_order,
             "base_stock": self.base_stock,
+            "inventory_position": self.inventory_position,
         }
-        return max(0, int(self.policy.order(observation)))
+        try:
+            quantity = self.policy.order(observation)
+        except Exception:
+            quantity = 0
+        return max(0, int(round(quantity)))
 
     def accrue_costs(self, holding_cost: float = 1.0, backlog_cost: float = 2.0) -> float:
+        """Accrue weekly holding and backlog costs."""
+
         previous = self.cost
-        self.cost += holding_cost * max(self.inv, 0) + backlog_cost * self.backlog
+        holding = holding_cost * max(self.inventory, 0)
+        backlog_penalty = backlog_cost * max(self.backlog, 0)
+        self.cost += holding + backlog_penalty
         return self.cost - previous
 
+    # ------------------------------------------------------------------
+    # Serialisation helpers
+    # ------------------------------------------------------------------
     def to_dict(self) -> Dict[str, Any]:
         return {
-            "inventory": self.inv,
+            "inventory": self.inventory,
             "backlog": self.backlog,
             "pipeline_shipments": list(self.pipeline_shipments),
             "order_pipe": list(self.order_pipe),
@@ -116,7 +164,16 @@ class Node:
 class BeerLine:
     """Beer Game supply chain consisting of four sequential roles."""
 
-    ROLES = ["Retailer", "Wholesaler", "Distributor", "Factory"]
+    #: Material flows downstream following these lanes.
+    #: Each tuple represents (from_node, to_node) for shipments. Orders travel
+    #: back upstream, i.e. the opposite direction of these edges.
+    MATERIAL_LANES: List[tuple[str, str]] = [
+        ("Manufacturer", "Distributor"),
+        ("Distributor", "Wholesaler"),
+        ("Wholesaler", "Retailer"),
+    ]
+
+    _ROLE_CACHE: List[str] | None = None
 
     def __init__(
         self,
@@ -128,8 +185,10 @@ class BeerLine:
         role_policies = role_policies or {}
         base_stocks = base_stocks or {}
 
+        self.role_names = self.role_sequence_names()
+
         self.nodes: List[Node] = []
-        for role in self.ROLES:
+        for role in self.role_names:
             policy = role_policies.get(role, NaiveEchoPolicy())
             if state and role in state:
                 node = Node.from_dict(role, policy, state[role])
@@ -142,61 +201,129 @@ class BeerLine:
     def to_dict(self) -> Dict[str, Dict[str, Any]]:
         return {node.name: node.to_dict() for node in self.nodes}
 
+    # ------------------------------------------------------------------
+    # Lane/role helpers
+    # ------------------------------------------------------------------
+    @classmethod
+    def _derive_role_sequence(cls) -> List[str]:
+        """Return the downstream-to-upstream role order implied by the lanes."""
+
+        nodes = set()
+        adjacency: Dict[str, List[str]] = {}
+        indegree: Dict[str, int] = {}
+        for upstream, downstream in cls.MATERIAL_LANES:
+            nodes.add(upstream)
+            nodes.add(downstream)
+            adjacency.setdefault(upstream, []).append(downstream)
+            indegree.setdefault(upstream, 0)
+            indegree[downstream] = indegree.get(downstream, 0) + 1
+
+        queue: Deque[str] = deque(sorted(node for node in nodes if indegree.get(node, 0) == 0))
+        topo: List[str] = []
+        while queue:
+            current = queue.popleft()
+            topo.append(current)
+            for neighbour in adjacency.get(current, []):
+                indegree[neighbour] -= 1
+                if indegree[neighbour] == 0:
+                    queue.append(neighbour)
+
+        if len(topo) != len(nodes):
+            raise ValueError("Material lanes contain a cycle; cannot derive role order")
+
+        # The topological order walks with shipments (upstream -> downstream);
+        # we keep nodes indexed from downstream -> upstream because customer
+        # demand enters at index 0 (Retailer) in the classic Beer Game.
+        return list(reversed(topo))
+
+    @classmethod
+    def role_sequence_names(cls) -> List[str]:
+        if cls._ROLE_CACHE is None:
+            cls._ROLE_CACHE = cls._derive_role_sequence()
+        # Return a shallow copy to avoid accidental mutation by callers.
+        return list(cls._ROLE_CACHE)
+
+    # ------------------------------------------------------------------
+    # Simulation step
+    # ------------------------------------------------------------------
     def tick(self, customer_demand: int) -> Dict[str, Dict[str, Any]]:
+        """Advance the supply chain by one week following the Beer Game cookbook."""
+
+        demand = max(0, int(customer_demand))
         stats: Dict[str, Dict[str, Any]] = {}
 
-        # 1) Incoming shipments arrive
+        # Step 1 – Receive inbound shipments (advance shipment pipelines)
         for node in self.nodes:
-            arrived = node.receive_shipments()
+            inventory_previous = node.inventory
+            arrived = node.receive_shipment()
             stats[node.name] = {
                 "incoming_shipment": arrived,
-                "inventory_before": node.inv,
+                "inventory_previous": inventory_previous,
+                "inventory_before": node.inventory,
                 "backlog_before": node.backlog,
             }
 
-        # 2) Determine demand each node must satisfy this period
-        demands: List[int] = [0] * len(self.nodes)
-        demands[0] = customer_demand + self.nodes[0].backlog
-        for idx in range(1, len(self.nodes)):
-            due = self.nodes[idx - 1].order_pipe[0]
-            demands[idx] = self.nodes[idx].backlog + due
-            stats[self.nodes[idx].name]["order_due"] = due
-        stats[self.nodes[0].name]["order_due"] = customer_demand
+        # Step 2 – Observe inbound orders and advance outbound order pipelines
+        incoming_orders: List[int] = [0] * len(self.nodes)
+        incoming_orders[0] = demand
+        self.nodes[0].last_incoming_order = demand
+        stats[self.nodes[0].name]["incoming_order"] = demand
+        stats[self.nodes[0].name]["order_due"] = demand
+        stats[self.nodes[0].name]["last_incoming_order"] = demand
 
-        # 3) Ship downstream and queue shipments for delivery after lead time
-        for idx, node in enumerate(self.nodes):
-            shipped = node.fulfill(demands[idx])
-            stats[node.name]["demand"] = demands[idx]
-            stats[node.name]["shipped"] = shipped
-            stats[node.name]["inventory_after"] = node.inv
-            stats[node.name]["backlog_after"] = node.backlog
-            if idx > 0:
-                self.nodes[idx - 1].pipeline_shipments[-1] += shipped
-            stats[node.name]["outgoing_shipment"] = shipped
-
-        # 4) Advance order pipelines upstream
         for idx in range(len(self.nodes) - 1):
-            due_upstream = self.nodes[idx].order_pipe.popleft()
-            self.nodes[idx].order_pipe.append(0)
-            self.nodes[idx + 1].last_incoming_order = due_upstream
-            stats[self.nodes[idx + 1].name]["last_incoming_order"] = due_upstream
+            downstream = self.nodes[idx]
+            upstream = self.nodes[idx + 1]
+            due_upstream = downstream.shift_order_pipe()
+            incoming_orders[idx + 1] = due_upstream
+            upstream.last_incoming_order = due_upstream
+            stats[upstream.name]["incoming_order"] = due_upstream
+            stats[upstream.name]["order_due"] = due_upstream
+            stats[upstream.name]["last_incoming_order"] = due_upstream
+            stats[downstream.name]["order_pipe"] = list(downstream.order_pipe)
 
-        self.nodes[0].last_incoming_order = customer_demand
-        stats[self.nodes[0].name]["last_incoming_order"] = customer_demand
+        # Ensure the manufacturer has order_pipe stats even though it has no upstream
+        stats[self.nodes[-1].name]["order_pipe"] = list(self.nodes[-1].order_pipe)
 
-        # 5) Place new orders
+        # Step 3 – Ship to downstream partner, prioritising backlog first
         for idx, node in enumerate(self.nodes):
-            quantity = node.step_order()
-            stats[node.name]["order_placed"] = quantity
-            if idx < len(self.nodes) - 1:
-                node.order_pipe[-1] += quantity
-            else:
-                # Factory "produces" goods that will arrive after the shipment lead
-                node.pipeline_shipments[-1] += quantity
-            stats[node.name]["pipeline_on_order"] = node.pipeline_on_order
-            stats[node.name]["order_pipe"] = list(node.order_pipe)
+            need = node.backlog + incoming_orders[idx]
+            shipped = min(node.inventory, need)
+            node.inventory -= shipped
+            node.backlog = max(need - shipped, 0)
 
-        # 6) Accrue costs
+            stats[node.name].update(
+                {
+                    "demand": need,
+                    "shipped": shipped,
+                    "outgoing_shipment": shipped,
+                    "inventory_after": node.inventory,
+                    "backlog_after": node.backlog,
+                    "inventory_position": node.inventory - node.backlog,
+                }
+            )
+
+            if idx > 0:
+                downstream = self.nodes[idx - 1]
+                downstream.schedule_inbound_shipment(shipped)
+
+        # Step 4/5 – Decide new orders and queue them in the outbound pipelines
+        for idx, node in enumerate(self.nodes):
+            order_qty = node.decide_order()
+            stats[node.name]["order_placed"] = order_qty
+
+            if idx < len(self.nodes) - 1:
+                node.schedule_order(order_qty)
+                stats[node.name]["order_pipe"] = list(node.order_pipe)
+            else:
+                # Manufacturer starts production that feeds its own shipment pipeline
+                node.schedule_inbound_shipment(order_qty)
+
+            stats[node.name]["pipeline_on_order"] = node.pipeline_on_order
+            stats[node.name]["inventory_position_with_pipeline"] = node.inventory_position
+            stats[node.name]["inventory_position"] = node.inventory - node.backlog
+
+        # Step 6/7 – Accrue costs and expose pipeline snapshots
         for node in self.nodes:
             cost_added = node.accrue_costs()
             stats[node.name]["cost_added"] = cost_added
@@ -208,7 +335,7 @@ class BeerLine:
     def summary(self) -> Dict[str, Dict[str, Any]]:
         return {
             node.name: {
-                "inventory": node.inv,
+                "inventory": node.inventory,
                 "backlog": node.backlog,
                 "pipeline": list(node.pipeline_shipments),
                 "orders_in_transit": list(node.order_pipe),
@@ -216,4 +343,3 @@ class BeerLine:
             }
             for node in self.nodes
         }
-
