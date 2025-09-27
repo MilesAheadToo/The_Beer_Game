@@ -26,6 +26,7 @@ class Node:
         pipeline_shipments: Iterable[int] | None = None,
         order_pipe: Iterable[int] | None = None,
         last_incoming_order: int = 0,
+        immediate_order_buffer: int = 0,
         cost: float = 0.0,
         shipment_lead_time: int = DEFAULT_SHIPMENT_LEAD_TIME,
         order_lead_time: int = DEFAULT_ORDER_LEAD_TIME,
@@ -36,28 +37,45 @@ class Node:
         self.inventory = int(inventory)
         self.backlog = int(backlog)
 
-        self.shipment_lead_time = max(1, int(shipment_lead_time) if shipment_lead_time is not None else 1)
-        self.order_lead_time = max(1, int(order_lead_time) if order_lead_time is not None else 1)
-
-        self.pipeline_shipments: Deque[int] = deque(
-            list(pipeline_shipments)
-            if pipeline_shipments is not None
-            else [0] * self.shipment_lead_time,
-            maxlen=self.shipment_lead_time,
+        self.shipment_lead_time = max(
+            0, int(shipment_lead_time) if shipment_lead_time is not None else 0
         )
-        while len(self.pipeline_shipments) < self.shipment_lead_time:
-            self.pipeline_shipments.appendleft(0)
-
-        self.order_pipe: Deque[int] = deque(
-            list(order_pipe)
-            if order_pipe is not None
-            else [0] * self.order_lead_time,
-            maxlen=self.order_lead_time,
+        self.order_lead_time = max(
+            0, int(order_lead_time) if order_lead_time is not None else 0
         )
-        while len(self.order_pipe) < self.order_lead_time:
-            self.order_pipe.appendleft(0)
+
+        if self.shipment_lead_time > 0:
+            self.pipeline_shipments: Deque[int] = deque(
+                list(pipeline_shipments)
+                if pipeline_shipments is not None
+                else [0] * self.shipment_lead_time,
+                maxlen=self.shipment_lead_time,
+            )
+            while len(self.pipeline_shipments) < self.shipment_lead_time:
+                self.pipeline_shipments.appendleft(0)
+        else:
+            self.pipeline_shipments = deque()
+
+        if self.order_lead_time > 0:
+            self.order_pipe: Deque[int] = deque(
+                list(order_pipe)
+                if order_pipe is not None
+                else [0] * self.order_lead_time,
+                maxlen=self.order_lead_time,
+            )
+            while len(self.order_pipe) < self.order_lead_time:
+                self.order_pipe.appendleft(0)
+        else:
+            initial = 0
+            if order_pipe:
+                try:
+                    initial = int(next(iter(order_pipe)))
+                except StopIteration:
+                    initial = 0
+            self.order_pipe = deque([initial], maxlen=1)
 
         self.last_incoming_order = int(last_incoming_order)
+        self._immediate_order_buffer = max(0, int(immediate_order_buffer))
         self.cost = float(cost)
 
     # ------------------------------------------------------------------
@@ -81,6 +99,9 @@ class Node:
     def receive_shipment(self) -> int:
         """Advance the shipment pipeline and add arrivals to on-hand inventory."""
 
+        if self.shipment_lead_time <= 0:
+            return 0
+
         arrived = self.pipeline_shipments.popleft()
         self.pipeline_shipments.append(0)
         self.inventory += arrived
@@ -88,6 +109,13 @@ class Node:
 
     def shift_order_pipe(self) -> int:
         """Advance the outbound order pipeline (orders travelling upstream)."""
+
+        if self.order_lead_time <= 0:
+            due_upstream = self._immediate_order_buffer
+            self._immediate_order_buffer = 0
+            if self.order_pipe:
+                self.order_pipe[0] = 0
+            return due_upstream
 
         due_upstream = self.order_pipe.popleft()
         self.order_pipe.append(0)
@@ -97,15 +125,29 @@ class Node:
         """Queue a shipment that will arrive after the shipment lead time."""
 
         qty = int(quantity)
-        if qty > 0:
-            self.pipeline_shipments[-1] += qty
+        if qty <= 0:
+            return
+
+        if self.shipment_lead_time <= 0:
+            self.inventory += qty
+            return
+
+        self.pipeline_shipments[-1] += qty
 
     def schedule_order(self, quantity: int) -> None:
         """Queue an order that will reach the upstream partner after the delay."""
 
         qty = int(quantity)
-        if qty > 0:
-            self.order_pipe[-1] += qty
+        if qty <= 0:
+            return
+
+        if self.order_lead_time <= 0:
+            self._immediate_order_buffer += qty
+            if self.order_pipe:
+                self.order_pipe[0] = self._immediate_order_buffer
+            return
+
+        self.order_pipe[-1] += qty
 
     def decide_order(self) -> int:
         """Call the node's policy to determine the order for this week."""
@@ -142,6 +184,7 @@ class Node:
             "backlog": self.backlog,
             "pipeline_shipments": list(self.pipeline_shipments),
             "order_pipe": list(self.order_pipe),
+            "immediate_order_buffer": self._immediate_order_buffer,
             "last_incoming_order": self.last_incoming_order,
             "cost": self.cost,
             "base_stock": self.base_stock,
@@ -170,6 +213,7 @@ class Node:
             backlog=int(state.get("backlog", 0)),
             pipeline_shipments=state.get("pipeline_shipments"),
             order_pipe=state.get("order_pipe"),
+            immediate_order_buffer=int(state.get("immediate_order_buffer", 0)),
             last_incoming_order=int(state.get("last_incoming_order", 0)),
             cost=float(state.get("cost", 0.0)),
             shipment_lead_time=int(state_shipment_lead),
@@ -206,8 +250,12 @@ class BeerLine:
         base_stocks = base_stocks or {}
 
         self.role_names = self.role_sequence_names()
-        self.shipment_lead_time = max(1, int(shipment_lead_time) if shipment_lead_time is not None else 1)
-        self.order_lead_time = max(1, int(order_lead_time) if order_lead_time is not None else 1)
+        self.shipment_lead_time = max(
+            0, int(shipment_lead_time) if shipment_lead_time is not None else 0
+        )
+        self.order_lead_time = max(
+            0, int(order_lead_time) if order_lead_time is not None else 0
+        )
 
         self.nodes: List[Node] = []
         for role in self.role_names:
@@ -297,31 +345,30 @@ class BeerLine:
                 "backlog_before": node.backlog,
             }
 
-        # Step 2 – Observe inbound orders and advance outbound order pipelines
+        # Step 2 – Check incoming orders travelling upstream (previous commitments)
         incoming_orders: List[int] = [0] * len(self.nodes)
-        incoming_orders[0] = demand
-        self.nodes[0].last_incoming_order = demand
-        stats[self.nodes[0].name]["incoming_order"] = demand
-        stats[self.nodes[0].name]["order_due"] = demand
-        stats[self.nodes[0].name]["last_incoming_order"] = demand
+        if self.nodes:
+            incoming_orders[0] = demand
+            stats[self.nodes[0].name]["order_due"] = demand
 
         for idx in range(len(self.nodes) - 1):
-            downstream = self.nodes[idx]
-            upstream = self.nodes[idx + 1]
-            due_upstream = downstream.shift_order_pipe()
-            incoming_orders[idx + 1] = due_upstream
-            upstream.last_incoming_order = due_upstream
-            stats[upstream.name]["incoming_order"] = due_upstream
-            stats[upstream.name]["order_due"] = due_upstream
-            stats[upstream.name]["last_incoming_order"] = due_upstream
-            stats[downstream.name]["order_pipe"] = list(downstream.order_pipe)
+            due_upstream = self.nodes[idx].shift_order_pipe()
+            if due_upstream:
+                incoming_orders[idx + 1] += due_upstream
+            upstream_stats = stats[self.nodes[idx + 1].name]
+            upstream_stats["order_due"] = incoming_orders[idx + 1]
+            upstream_stats["incoming_order"] = incoming_orders[idx + 1]
+            upstream_stats["last_incoming_order"] = incoming_orders[idx + 1]
 
-        # Ensure the manufacturer has order_pipe stats even though it has no upstream
-        stats[self.nodes[-1].name]["order_pipe"] = list(self.nodes[-1].order_pipe)
-
-        # Step 3 – Ship to downstream partner, prioritising backlog first
+        # Step 3/4/5 – Walk nodes downstream → upstream applying the Beer Game steps
         for idx, node in enumerate(self.nodes):
-            need = node.backlog + incoming_orders[idx]
+            incoming = incoming_orders[idx]
+            node.last_incoming_order = incoming
+            stats[node.name]["incoming_order"] = incoming
+            stats[node.name]["last_incoming_order"] = incoming
+            stats[node.name]["order_due"] = incoming
+
+            need = node.backlog + incoming
             shipped = min(node.inventory, need)
             node.inventory -= shipped
             node.backlog = max(need - shipped, 0)
@@ -340,19 +387,31 @@ class BeerLine:
             if idx > 0:
                 downstream = self.nodes[idx - 1]
                 downstream.schedule_inbound_shipment(shipped)
+                downstream_stats = stats[downstream.name]
+                downstream_stats["inventory_after"] = downstream.inventory
+                downstream_stats["inventory_position"] = downstream.inventory - downstream.backlog
 
-        # Step 4/5 – Decide new orders and queue them in the outbound pipelines
-        for idx, node in enumerate(self.nodes):
             order_qty = node.decide_order()
             stats[node.name]["order_placed"] = order_qty
 
             if idx < len(self.nodes) - 1:
                 node.schedule_order(order_qty)
                 stats[node.name]["order_pipe"] = list(node.order_pipe)
+
+                if node.order_lead_time == 0:
+                    due_now = node.shift_order_pipe()
+                    if due_now:
+                        incoming_orders[idx + 1] += due_now
+                        upstream_stats = stats[self.nodes[idx + 1].name]
+                        upstream_stats["order_due"] = incoming_orders[idx + 1]
+                        upstream_stats["incoming_order"] = incoming_orders[idx + 1]
+                        upstream_stats["last_incoming_order"] = incoming_orders[idx + 1]
             else:
                 # Manufacturer starts production that feeds its own shipment pipeline
                 node.schedule_inbound_shipment(order_qty)
+                stats[node.name]["order_pipe"] = list(node.order_pipe)
 
+        for node in self.nodes:
             stats[node.name]["pipeline_on_order"] = node.pipeline_on_order
             stats[node.name]["inventory_position_with_pipeline"] = node.inventory_position
             stats[node.name]["inventory_position"] = node.inventory - node.backlog
