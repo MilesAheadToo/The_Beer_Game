@@ -1760,6 +1760,40 @@ def _finalize_round_if_ready(
             },
         )
 
+    debug_info_queues: Dict[str, List[int]] = {
+        node: list(post_info_queues.get(node, [])) for node in all_nodes
+    }
+    orders_to_display: Dict[str, int] = {}
+    for node in all_nodes:
+        if node in node_orders_new:
+            orders_to_display[node] = int(node_orders_new.get(node, 0))
+        else:
+            entry = orders_by_role.get(node)
+            if entry is not None:
+                orders_to_display[node] = int(entry.get("quantity") or 0)
+            else:
+                orders_to_display[node] = 0
+    for market_node in market_demand_nodes:
+        orders_to_display[market_node] = orders_to_display.get(market_node, 0) + int(
+            external_demand
+        )
+    orders_map = lane_views.get("orders_map", {})
+    for downstream, upstream_list in orders_map.items():
+        order_qty = int(orders_to_display.get(downstream, 0))
+        if order_qty <= 0:
+            continue
+        for upstream in upstream_list:
+            queue_snapshot = debug_info_queues.get(upstream)
+            if queue_snapshot is None:
+                queue_snapshot = list(post_info_queues.get(upstream, []))
+            queue_snapshot = list(queue_snapshot)
+            policy_up = MixedGameService._policy_for_node(node_policies, upstream)
+            info_delay_up = max(0, int(policy_up.get("info_delay", 0)))
+            if info_delay_up > 0 and len(queue_snapshot) < info_delay_up:
+                queue_snapshot.extend([0] * (info_delay_up - len(queue_snapshot)))
+            queue_snapshot.append(order_qty)
+            debug_info_queues[upstream] = queue_snapshot
+
     for node in all_nodes:
         if node in round_debug_entries:
             continue
@@ -1872,7 +1906,7 @@ def _finalize_round_if_ready(
             {
                 "step": "Incoming orders this step",
                 "incoming_orders": int(demand_here),
-                "order_queue": post_info_queues.get(role, []),
+                "order_queue": debug_info_queues.get(role, post_info_queues.get(role, [])),
             },
             {
                 "step": "Shipment this step",
@@ -1883,13 +1917,13 @@ def _finalize_round_if_ready(
             {
                 "step": "Orders this step",
                 "order_quantity": int(order_qty),
-                "order_queue": post_info_queues.get(role, []),
+                "order_queue": debug_info_queues.get(role, post_info_queues.get(role, [])),
             },
             {
                 "step": "Ending state",
                 "inventory": int(inv_after),
                 "backlog": int(backlog_after),
-                "order_queue": post_info_queues.get(role, []),
+                "order_queue": debug_info_queues.get(role, post_info_queues.get(role, [])),
                 "arrival_queue": post_ship_queues.get(role, []),
             },
         ]
@@ -1925,14 +1959,14 @@ def _finalize_round_if_ready(
             )
             ending_state.update(
                 {
-                    "order_queue": post_info_queues.get(node, []),
+                    "order_queue": debug_info_queues.get(node, post_info_queues.get(node, [])),
                     "arrival_queue": post_ship_queues.get(node, []),
                 }
             )
         else:
             ending_state.update(
                 {
-                    "order_queue": post_info_queues.get(node, []),
+                    "order_queue": debug_info_queues.get(node, post_info_queues.get(node, [])),
                     "arrival_queue": post_ship_queues.get(node, []),
                 }
             )
