@@ -21,8 +21,17 @@ def get_order():
     else:
         pipeline_shipments = [int(expected_deliveries or 0)]
 
-    order_lead = int(data.get("order_lead_time", 2))
-    ship_lead = int(data.get("shipping_lead_time", 2))
+    try:
+        order_lead = int(data.get("order_lead_time", 2))
+    except (TypeError, ValueError):
+        order_lead = 2
+    try:
+        ship_lead = int(data.get("shipping_lead_time", 2))
+    except (TypeError, ValueError):
+        ship_lead = 2
+
+    order_lead = max(order_lead, 0)
+    ship_lead = max(ship_lead, 0)
 
     while len(pipeline_shipments) < max(ship_lead, 0):
         pipeline_shipments.append(0)
