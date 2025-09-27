@@ -436,6 +436,35 @@ const CreateMixedGame = () => {
     return result;
   }, []);
 
+  const normalizeRange = useCallback((range) => {
+    if (!range) {
+      return { min: null, max: null };
+    }
+    const parsedMin = Number(range.min);
+    const parsedMax = Number(range.max);
+    return {
+      min: Number.isFinite(parsedMin) ? parsedMin : null,
+      max: Number.isFinite(parsedMax) ? parsedMax : null,
+    };
+  }, []);
+
+  const formatRangeIndicator = useCallback((range, { decimals } = {}) => {
+    const { min, max } = normalizeRange(range);
+    const formatValue = (value) => {
+      if (value == null) {
+        return '—';
+      }
+      if (decimals != null) {
+        return value.toFixed(decimals);
+      }
+      if (Math.abs(value - Math.round(value)) < 1e-6) {
+        return String(Math.round(value));
+      }
+      return value.toFixed(2).replace(/\.0+$/, '').replace(/\.$/, '');
+    };
+    return `[${formatValue(min)}, ${formatValue(max)}]`;
+  }, [normalizeRange]);
+
   const buildDefaultNodePolicy = useCallback(
     (node, config) => {
       const key = normalizeNodeName(node?.name);
@@ -2077,102 +2106,139 @@ const CreateMixedGame = () => {
                                 {nodes.map((node) => {
                                   const nodeKey = normalizeNodeName(node?.name);
                                   const bounds = nodePolicyBounds[nodeKey] || {};
+                                  const infoRange = normalizeRange(bounds.info_delay);
+                                  const shipRange = normalizeRange(bounds.ship_delay);
+                                  const initInventoryRange = normalizeRange(bounds.init_inventory);
+                                  const minOrderRange = normalizeRange(bounds.min_order_qty);
+                                  const variableCostRange = normalizeRange(bounds.variable_cost);
+                                  const infoRangeLabel = formatRangeIndicator(bounds.info_delay, { decimals: 0 });
+                                  const shipRangeLabel = formatRangeIndicator(bounds.ship_delay, { decimals: 0 });
+                                  const initInventoryRangeLabel = formatRangeIndicator(bounds.init_inventory, { decimals: 0 });
+                                  const minOrderRangeLabel = formatRangeIndicator(bounds.min_order_qty, { decimals: 0 });
+                                  const variableCostRangeLabel = formatRangeIndicator(bounds.variable_cost, { decimals: 2 });
+                                  const rangeLabelProps = {
+                                    fontSize: 'sm',
+                                    color: 'gray.500',
+                                    minW: '84px',
+                                    textAlign: 'right',
+                                    whiteSpace: 'nowrap',
+                                  };
                                   return (
                                     <Box key={node.id} p={4} borderWidth="1px" borderRadius="md" borderColor={borderColor}>
                                       <Text fontWeight="semibold" mb={2}>{node.name}</Text>
                                       <Grid templateColumns={{ base: '1fr', md: 'repeat(2, 1fr)' }} gap={4}>
                                         <FormControl>
                                           <StyledFormLabel>Information Delay (weeks)</StyledFormLabel>
-                                          <NumberInput
-                                            min={bounds.info_delay?.min ?? 0}
-                                            max={bounds.info_delay?.max ?? 12}
-                                            step={1}
-                                            value={getPolicyValue(nodeKey, 'info_delay')}
-                                            onChange={handleNodePolicyNumberChange(nodeKey, 'info_delay')}
-                                          >
-                                            <NumberInputField />
-                                            <NumberInputStepper>
-                                              <NumberIncrementStepper />
-                                              <NumberDecrementStepper />
-                                            </NumberInputStepper>
-                                          </NumberInput>
+                                          <HStack spacing={3} align="center">
+                                            <NumberInput
+                                              flex={1}
+                                              min={infoRange.min ?? 0}
+                                              max={infoRange.max ?? 12}
+                                              step={1}
+                                              value={getPolicyValue(nodeKey, 'info_delay')}
+                                              onChange={handleNodePolicyNumberChange(nodeKey, 'info_delay')}
+                                            >
+                                              <NumberInputField />
+                                              <NumberInputStepper>
+                                                <NumberIncrementStepper />
+                                                <NumberDecrementStepper />
+                                              </NumberInputStepper>
+                                            </NumberInput>
+                                            <Text {...rangeLabelProps}>{infoRangeLabel}</Text>
+                                          </HStack>
                                           {describeRange(bounds.info_delay, 'weeks') && (
                                             <HelperText>Allowed: {describeRange(bounds.info_delay, 'weeks')}</HelperText>
                                           )}
                                         </FormControl>
                                         <FormControl>
                                           <StyledFormLabel>Shipment Delay (weeks)</StyledFormLabel>
-                                          <NumberInput
-                                            min={bounds.ship_delay?.min ?? 0}
-                                            max={bounds.ship_delay?.max ?? 12}
-                                            step={1}
-                                            value={getPolicyValue(nodeKey, 'ship_delay')}
-                                            onChange={handleNodePolicyNumberChange(nodeKey, 'ship_delay')}
-                                          >
-                                            <NumberInputField />
-                                            <NumberInputStepper>
-                                              <NumberIncrementStepper />
-                                              <NumberDecrementStepper />
-                                            </NumberInputStepper>
-                                          </NumberInput>
+                                          <HStack spacing={3} align="center">
+                                            <NumberInput
+                                              flex={1}
+                                              min={shipRange.min ?? 0}
+                                              max={shipRange.max ?? 12}
+                                              step={1}
+                                              value={getPolicyValue(nodeKey, 'ship_delay')}
+                                              onChange={handleNodePolicyNumberChange(nodeKey, 'ship_delay')}
+                                            >
+                                              <NumberInputField />
+                                              <NumberInputStepper>
+                                                <NumberIncrementStepper />
+                                                <NumberDecrementStepper />
+                                              </NumberInputStepper>
+                                            </NumberInput>
+                                            <Text {...rangeLabelProps}>{shipRangeLabel}</Text>
+                                          </HStack>
                                           {describeRange(bounds.ship_delay, 'weeks') && (
                                             <HelperText>Allowed: {describeRange(bounds.ship_delay, 'weeks')}</HelperText>
                                           )}
                                         </FormControl>
                                         <FormControl>
                                           <StyledFormLabel>Initial Inventory</StyledFormLabel>
-                                          <NumberInput
-                                            min={bounds.init_inventory?.min ?? 0}
-                                            max={bounds.init_inventory?.max ?? 9999}
-                                            step={1}
-                                            value={getPolicyValue(nodeKey, 'init_inventory')}
-                                            onChange={handleNodePolicyNumberChange(nodeKey, 'init_inventory')}
-                                          >
-                                            <NumberInputField />
-                                            <NumberInputStepper>
-                                              <NumberIncrementStepper />
-                                              <NumberDecrementStepper />
-                                            </NumberInputStepper>
-                                          </NumberInput>
+                                          <HStack spacing={3} align="center">
+                                            <NumberInput
+                                              flex={1}
+                                              min={initInventoryRange.min ?? 0}
+                                              max={initInventoryRange.max ?? 9999}
+                                              step={1}
+                                              value={getPolicyValue(nodeKey, 'init_inventory')}
+                                              onChange={handleNodePolicyNumberChange(nodeKey, 'init_inventory')}
+                                            >
+                                              <NumberInputField />
+                                              <NumberInputStepper>
+                                                <NumberIncrementStepper />
+                                                <NumberDecrementStepper />
+                                              </NumberInputStepper>
+                                            </NumberInput>
+                                            <Text {...rangeLabelProps}>{initInventoryRangeLabel}</Text>
+                                          </HStack>
                                           {describeRange(bounds.init_inventory, 'units') && (
                                             <HelperText>Allowed: {describeRange(bounds.init_inventory, 'units')}</HelperText>
                                           )}
                                         </FormControl>
                                         <FormControl>
                                           <StyledFormLabel>Minimum Order Quantity</StyledFormLabel>
-                                          <NumberInput
-                                            min={bounds.min_order_qty?.min ?? 0}
-                                            max={bounds.min_order_qty?.max ?? 9999}
-                                            step={1}
-                                            value={getPolicyValue(nodeKey, 'min_order_qty')}
-                                            onChange={handleNodePolicyNumberChange(nodeKey, 'min_order_qty')}
-                                          >
-                                            <NumberInputField />
-                                            <NumberInputStepper>
-                                              <NumberIncrementStepper />
-                                              <NumberDecrementStepper />
-                                            </NumberInputStepper>
-                                          </NumberInput>
+                                          <HStack spacing={3} align="center">
+                                            <NumberInput
+                                              flex={1}
+                                              min={minOrderRange.min ?? 0}
+                                              max={minOrderRange.max ?? 9999}
+                                              step={1}
+                                              value={getPolicyValue(nodeKey, 'min_order_qty')}
+                                              onChange={handleNodePolicyNumberChange(nodeKey, 'min_order_qty')}
+                                            >
+                                              <NumberInputField />
+                                              <NumberInputStepper>
+                                                <NumberIncrementStepper />
+                                                <NumberDecrementStepper />
+                                              </NumberInputStepper>
+                                            </NumberInput>
+                                            <Text {...rangeLabelProps}>{minOrderRangeLabel}</Text>
+                                          </HStack>
                                           {describeRange(bounds.min_order_qty, 'units') && (
                                             <HelperText>Allowed: {describeRange(bounds.min_order_qty, 'units')}</HelperText>
                                           )}
                                         </FormControl>
                                         <FormControl>
                                           <StyledFormLabel>Variable Cost</StyledFormLabel>
-                                          <NumberInput
-                                            min={bounds.variable_cost?.min ?? 0}
-                                            max={bounds.variable_cost?.max ?? 1000}
-                                            step={0.1}
-                                            precision={2}
-                                            value={getPolicyValue(nodeKey, 'variable_cost')}
-                                            onChange={handleNodePolicyNumberChange(nodeKey, 'variable_cost')}
-                                          >
-                                            <NumberInputField />
-                                            <NumberInputStepper>
-                                              <NumberIncrementStepper />
-                                              <NumberDecrementStepper />
-                                            </NumberInputStepper>
-                                          </NumberInput>
+                                          <HStack spacing={3} align="center">
+                                            <NumberInput
+                                              flex={1}
+                                              min={variableCostRange.min ?? 0}
+                                              max={variableCostRange.max ?? 1000}
+                                              step={0.1}
+                                              precision={2}
+                                              value={getPolicyValue(nodeKey, 'variable_cost')}
+                                              onChange={handleNodePolicyNumberChange(nodeKey, 'variable_cost')}
+                                            >
+                                              <NumberInputField />
+                                              <NumberInputStepper>
+                                                <NumberIncrementStepper />
+                                                <NumberDecrementStepper />
+                                              </NumberInputStepper>
+                                            </NumberInput>
+                                            <Text {...rangeLabelProps}>{variableCostRangeLabel}</Text>
+                                          </HStack>
                                           {describeRange(bounds.variable_cost, 'cost') && (
                                             <HelperText>Suggested range: {describeRange(bounds.variable_cost)}</HelperText>
                                           )}
