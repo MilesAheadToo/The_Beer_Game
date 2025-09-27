@@ -345,23 +345,23 @@ class BeerLine:
                 "backlog_before": node.backlog,
             }
 
-        # Step 2/3/4/5 – Traverse nodes downstream → upstream within the same tick
+        # Step 2 – Check incoming orders travelling upstream (previous commitments)
         incoming_orders: List[int] = [0] * len(self.nodes)
         if self.nodes:
             incoming_orders[0] = demand
             stats[self.nodes[0].name]["order_due"] = demand
 
-        for idx, node in enumerate(self.nodes):
-            # Advance any outstanding orders travelling upstream from this node.
-            if idx < len(self.nodes) - 1:
-                due_upstream = node.shift_order_pipe()
-                if due_upstream:
-                    incoming_orders[idx + 1] += due_upstream
-                upstream_stats = stats[self.nodes[idx + 1].name]
-                upstream_stats["order_due"] = incoming_orders[idx + 1]
-                upstream_stats["incoming_order"] = incoming_orders[idx + 1]
-                upstream_stats["last_incoming_order"] = incoming_orders[idx + 1]
+        for idx in range(len(self.nodes) - 1):
+            due_upstream = self.nodes[idx].shift_order_pipe()
+            if due_upstream:
+                incoming_orders[idx + 1] += due_upstream
+            upstream_stats = stats[self.nodes[idx + 1].name]
+            upstream_stats["order_due"] = incoming_orders[idx + 1]
+            upstream_stats["incoming_order"] = incoming_orders[idx + 1]
+            upstream_stats["last_incoming_order"] = incoming_orders[idx + 1]
 
+        # Step 3/4/5 – Walk nodes downstream → upstream applying the Beer Game steps
+        for idx, node in enumerate(self.nodes):
             incoming = incoming_orders[idx]
             node.last_incoming_order = incoming
             stats[node.name]["incoming_order"] = incoming
@@ -402,10 +402,10 @@ class BeerLine:
                     due_now = node.shift_order_pipe()
                     if due_now:
                         incoming_orders[idx + 1] += due_now
-                upstream_stats = stats[self.nodes[idx + 1].name]
-                upstream_stats["order_due"] = incoming_orders[idx + 1]
-                upstream_stats["incoming_order"] = incoming_orders[idx + 1]
-                upstream_stats["last_incoming_order"] = incoming_orders[idx + 1]
+                        upstream_stats = stats[self.nodes[idx + 1].name]
+                        upstream_stats["order_due"] = incoming_orders[idx + 1]
+                        upstream_stats["incoming_order"] = incoming_orders[idx + 1]
+                        upstream_stats["last_incoming_order"] = incoming_orders[idx + 1]
             else:
                 # Manufacturer starts production that feeds its own shipment pipeline
                 node.schedule_inbound_shipment(order_qty)
