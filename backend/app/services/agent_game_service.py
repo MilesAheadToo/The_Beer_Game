@@ -342,7 +342,7 @@ class AgentGameService:
         except (TypeError, ValueError):
             ship_val = DEFAULT_SHIPMENT_LEAD_TIME
 
-        return max(1, order_val), max(1, ship_val)
+        return max(0, order_val), max(0, ship_val)
 
     def _get_supply_chain_service(self) -> SupplyChainConfigService | None:
         if self._supply_chain_service is None:
