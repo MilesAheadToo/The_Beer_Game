@@ -1245,6 +1245,36 @@ def _snapshot_queue(values: Any) -> List[int]:
     return snapshot
 
 
+def _ensure_queue_length(queue: List[int], length: int) -> List[int]:
+    if length <= 0:
+        return []
+    if not isinstance(queue, list):
+        queue = []
+    queue = [int(x) for x in queue if isinstance(x, (int, float))]
+    if len(queue) < length:
+        queue = [0] * (length - len(queue)) + queue
+    elif len(queue) > length:
+        queue = queue[-length:]
+    return queue
+
+
+def _ensure_detail_queue(queue: List[Dict[str, int]], length: int) -> List[Dict[str, int]]:
+    if length <= 0:
+        return []
+    detail: List[Dict[str, int]] = []
+    if isinstance(queue, list):
+        for entry in queue:
+            if isinstance(entry, dict):
+                detail.append({str(k): int(v) for k, v in entry.items() if isinstance(v, (int, float))})
+            else:
+                detail.append({})
+    while len(detail) < length:
+        detail.insert(0, {})
+    if len(detail) > length:
+        detail = detail[-length:]
+    return detail
+
+
 def _save_game_config(db: Session, game: DbGame, config: Dict[str, Any]) -> None:
     # Assign a shallow copy and flag the attribute as modified so SQLAlchemy
     # persists JSON changes even when only nested keys are updated.
@@ -1760,6 +1790,86 @@ def _finalize_round_if_ready(
             },
         )
 
+    debug_info_queues: Dict[str, List[int]] = {
+        node: list(post_info_queues.get(node, [])) for node in all_nodes
+    }
+    orders_to_display: Dict[str, int] = {}
+    for node in all_nodes:
+        if node in node_orders_new:
+            orders_to_display[node] = int(node_orders_new.get(node, 0))
+        else:
+            entry = orders_by_role.get(node)
+            if entry is not None:
+                orders_to_display[node] = int(entry.get("quantity") or 0)
+            else:
+                orders_to_display[node] = 0
+    for market_node in market_demand_nodes:
+        orders_to_display[market_node] = orders_to_display.get(market_node, 0) + int(
+            external_demand
+        )
+    orders_map = lane_views.get("orders_map", {})
+    immediate_demand_updates: Dict[str, int] = {}
+    for downstream, upstream_list in orders_map.items():
+        order_qty = int(orders_to_display.get(downstream, 0))
+        if order_qty <= 0:
+            continue
+        downstream_key = MixedGameService._normalise_key(downstream)
+        for upstream in upstream_list:
+            upstream_key = MixedGameService._normalise_key(upstream)
+            state_upstream = engine.setdefault(upstream_key, {})
+            policy_up = MixedGameService._policy_for_node(node_policies, upstream_key)
+            info_delay_up = max(0, int(policy_up.get("info_delay", 0)))
+            if info_delay_up <= 0:
+                queue_now = state_upstream.get("info_queue") or [0]
+                queue_now = [int(queue_now[0]) if queue_now else 0]
+                queue_now[0] += order_qty
+                state_upstream["info_queue"] = queue_now
+                state_upstream.setdefault("info_detail_queue", [])
+                immediate_demand_updates[upstream_key] = (
+                    immediate_demand_updates.get(upstream_key, 0) + order_qty
+                )
+            else:
+                queue_now = _ensure_queue_length(state_upstream.get("info_queue"), info_delay_up)
+                detail_queue = _ensure_detail_queue(
+                    state_upstream.get("info_detail_queue"), info_delay_up
+                )
+                queue_now[-1] += order_qty
+                detail_slot = detail_queue[-1]
+                detail_key = str(downstream_key)
+                detail_slot[detail_key] = detail_slot.get(detail_key, 0) + order_qty
+                state_upstream["info_queue"] = queue_now
+                state_upstream["info_detail_queue"] = detail_queue
+            post_info_queues[upstream_key] = _snapshot_queue(
+                state_upstream.get("info_queue")
+            )
+            debug_info_queues[upstream_key] = list(state_upstream.get("info_queue", []))
+
+    if immediate_demand_updates:
+        for node_key, demand_delta in immediate_demand_updates.items():
+            if demand_delta <= 0:
+                continue
+            incoming_orders_map[node_key] = incoming_orders_map.get(node_key, 0) + demand_delta
+            state_node = engine.get(node_key, {})
+            state_node["incoming_orders"] = state_node.get("incoming_orders", 0) + demand_delta
+            stats_entry = role_stats.get(node_key)
+            if stats_entry:
+                stats_entry["demand"] = int(stats_entry.get("demand", 0)) + demand_delta
+                backlog_after = int(state_node.get("backlog", stats_entry.get("backlog_after", 0)))
+                backlog_after += demand_delta
+                state_node["backlog"] = backlog_after
+                stats_entry["backlog_after"] = backlog_after
+                backlog_cost_delta = round(back_cost * demand_delta, 2)
+                stats_entry["backlog_cost"] = round(
+                    stats_entry.get("backlog_cost", 0.0) + backlog_cost_delta,
+                    2,
+                )
+                stats_entry["total_cost"] = round(
+                    stats_entry.get("total_cost", 0.0) + backlog_cost_delta,
+                    2,
+                )
+                state_node["backorder_cost"] = state_node.get("backorder_cost", 0.0) + backlog_cost_delta
+                state_node["total_cost"] = state_node.get("total_cost", 0.0) + backlog_cost_delta
+
     for node in all_nodes:
         if node in round_debug_entries:
             continue
@@ -1872,7 +1982,7 @@ def _finalize_round_if_ready(
             {
                 "step": "Incoming orders this step",
                 "incoming_orders": int(demand_here),
-                "order_queue": post_info_queues.get(role, []),
+                "order_queue": debug_info_queues.get(role, post_info_queues.get(role, [])),
             },
             {
                 "step": "Shipment this step",
@@ -1883,13 +1993,13 @@ def _finalize_round_if_ready(
             {
                 "step": "Orders this step",
                 "order_quantity": int(order_qty),
-                "order_queue": post_info_queues.get(role, []),
+                "order_queue": debug_info_queues.get(role, post_info_queues.get(role, [])),
             },
             {
                 "step": "Ending state",
                 "inventory": int(inv_after),
                 "backlog": int(backlog_after),
-                "order_queue": post_info_queues.get(role, []),
+                "order_queue": debug_info_queues.get(role, post_info_queues.get(role, [])),
                 "arrival_queue": post_ship_queues.get(role, []),
             },
         ]
@@ -1925,14 +2035,14 @@ def _finalize_round_if_ready(
             )
             ending_state.update(
                 {
-                    "order_queue": post_info_queues.get(node, []),
+                    "order_queue": debug_info_queues.get(node, post_info_queues.get(node, [])),
                     "arrival_queue": post_ship_queues.get(node, []),
                 }
             )
         else:
             ending_state.update(
                 {
-                    "order_queue": post_info_queues.get(node, []),
+                    "order_queue": debug_info_queues.get(node, post_info_queues.get(node, [])),
                     "arrival_queue": post_ship_queues.get(node, []),
                 }
             )
