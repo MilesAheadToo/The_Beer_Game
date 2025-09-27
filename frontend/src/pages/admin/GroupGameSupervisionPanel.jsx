@@ -31,6 +31,7 @@ import {
   SkipNext as NextRoundIcon,
   Visibility as ViewIcon,
   CheckCircleOutline as CompleteIcon,
+  RestartAlt as ResetIcon,
 } from '@mui/icons-material';
 import { useSnackbar } from 'notistack';
 import { useNavigate } from 'react-router-dom';
@@ -152,6 +153,30 @@ const GroupGameSupervisionPanel = ({
     runAction(gameId, 'next_round', mixedGameApi.nextRound, 'Advanced to next round');
   const handleFinish = (gameId) =>
     runAction(gameId, 'finish', mixedGameApi.finishGame, 'Game marked as finished');
+  const handleReset = async (game) => {
+    if (!game) return;
+    const targetLabel = game?.name ? `"${game.name}"` : 'this game';
+    const confirmMessage = `Reset ${targetLabel}? This will clear all recorded rounds and return the game to its initial setup.`;
+    if (typeof window !== 'undefined' && !window.confirm(confirmMessage)) {
+      return;
+    }
+
+    const result = await runAction(
+      game.id,
+      'reset',
+      mixedGameApi.resetGame,
+      'Game reset to initial state',
+    );
+
+    if (result !== undefined) {
+      setAutoProgress((prev) => {
+        if (prev?.gameId === game.id) {
+          return null;
+        }
+        return prev;
+      });
+    }
+  };
 
   const monitoringGameId = autoProgress?.gameId;
   const monitoringDone = autoProgress?.done;
@@ -249,13 +274,31 @@ const GroupGameSupervisionPanel = ({
 
     if (status === 'completed') {
       return (
-        <Tooltip title="View game">
-          <span>
-            <IconButton color="primary" onClick={() => navigate(viewTarget)}>
-              <ViewIcon fontSize="small" />
-            </IconButton>
-          </span>
-        </Tooltip>
+        <Stack
+          direction="row"
+          spacing={1}
+          useFlexGap
+          alignItems="center"
+          sx={{ flexWrap: 'wrap', justifyContent: { xs: 'flex-start', md: 'flex-end' } }}
+        >
+          <Tooltip title="View game">
+            <span>
+              <IconButton color="primary" onClick={() => navigate(viewTarget)}>
+                <ViewIcon fontSize="small" />
+              </IconButton>
+            </span>
+          </Tooltip>
+          <Button
+            size="small"
+            variant="outlined"
+            color="warning"
+            startIcon={<ResetIcon fontSize="small" />}
+            onClick={() => handleReset(game)}
+            disabled={busy}
+          >
+            {busy && actionState[game.id] === 'reset' ? 'Resetting…' : 'Reset'}
+          </Button>
+        </Stack>
       );
     }
 
@@ -284,6 +327,16 @@ const GroupGameSupervisionPanel = ({
             disabled={busy}
           >
             {busy ? 'Starting…' : 'Start'}
+          </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="warning"
+            startIcon={<ResetIcon fontSize="small" />}
+            onClick={() => handleReset(game)}
+            disabled={busy}
+          >
+            {busy && actionState[game.id] === 'reset' ? 'Resetting…' : 'Reset'}
           </Button>
         </Stack>
       );
@@ -341,18 +394,50 @@ const GroupGameSupervisionPanel = ({
           >
             {busy && actionState[game.id] === 'stop' ? 'Stopping…' : 'Stop'}
           </Button>
+          <Button
+            size="small"
+            variant="outlined"
+            color="warning"
+            startIcon={<ResetIcon fontSize="small" />}
+            onClick={() => handleReset(game)}
+            disabled={busy}
+          >
+            {busy && actionState[game.id] === 'reset' ? 'Resetting…' : 'Reset'}
+          </Button>
         </Stack>
       );
     }
 
+    const allowReset = status && status !== 'created';
+
     return (
-          <Tooltip title="View game">
-            <span>
-              <IconButton color="primary" onClick={() => navigate(viewTarget)}>
-                <ViewIcon fontSize="small" />
-              </IconButton>
-            </span>
-          </Tooltip>
+      <Stack
+        direction="row"
+        spacing={1}
+        useFlexGap
+        alignItems="center"
+        sx={{ flexWrap: 'wrap', justifyContent: { xs: 'flex-start', md: 'flex-end' } }}
+      >
+        <Tooltip title="View game">
+          <span>
+            <IconButton color="primary" onClick={() => navigate(viewTarget)}>
+              <ViewIcon fontSize="small" />
+            </IconButton>
+          </span>
+        </Tooltip>
+        {allowReset && (
+          <Button
+            size="small"
+            variant="outlined"
+            color="warning"
+            startIcon={<ResetIcon fontSize="small" />}
+            onClick={() => handleReset(game)}
+            disabled={busy}
+          >
+            {busy && actionState[game.id] === 'reset' ? 'Resetting…' : 'Reset'}
+          </Button>
+        )}
+      </Stack>
     );
   };
 
