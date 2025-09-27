@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import os
 import re
 from dataclasses import dataclass
+from importlib import resources
+from pathlib import Path
 from threading import Lock
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from openai import OpenAI
 
@@ -17,8 +21,52 @@ from .daybreak_instructions import DAYBREAK_STRATEGIST_INSTRUCTIONS
 _CLIENT: Optional[OpenAI] = None
 _CLIENT_LOCK = Lock()
 
-_SESSION_CACHE: Dict[Tuple[str, str], str] = {}
+_SESSION_CACHE: Dict[Tuple[str, str, Tuple[str, ...]], str] = {}
 _SESSION_LOCK = Lock()
+
+_RESOURCE_UPLOAD_CACHE: Dict[Tuple[str, str], str] = {}
+
+
+def _iter_resource_files(
+    package: str = "backend.llm_agent.resources",
+) -> Iterable[Tuple[str, Path]]:
+    """Yield (relative_path, absolute_path) pairs for packaged assets."""
+
+    try:
+        package_root = resources.files(package)
+    except (ModuleNotFoundError, FileNotFoundError):
+        return []
+
+    file_entries: List[Tuple[str, Path]] = []
+    with resources.as_file(package_root) as resolved_root:
+        root_path = Path(resolved_root)
+        for file_path in root_path.rglob("*"):
+            if not file_path.is_file():
+                continue
+            if file_path.name == "__init__.py":
+                continue
+            relative = file_path.relative_to(root_path).as_posix()
+            file_entries.append((relative, file_path))
+    return file_entries
+
+
+def _ensure_resource_attachments(client: OpenAI) -> List[Dict[str, str]]:
+    """Upload bundled resources once and return attachment descriptors."""
+
+    attachments: List[Dict[str, str]] = []
+    for relative_path, absolute_path in _iter_resource_files():
+        data = absolute_path.read_bytes()
+        digest = hashlib.sha256(data).hexdigest()
+        cache_key = (relative_path, digest)
+        file_id = _RESOURCE_UPLOAD_CACHE.get(cache_key)
+        if not file_id:
+            buffer = io.BytesIO(data)
+            buffer.name = relative_path  # type: ignore[attr-defined]
+            uploaded = client.files.create(file=buffer, purpose="assistants")
+            file_id = uploaded.id
+            _RESOURCE_UPLOAD_CACHE[cache_key] = file_id
+        attachments.append({"file_id": file_id})
+    return attachments
 
 
 def _get_client() -> OpenAI:
@@ -37,7 +85,11 @@ def _get_client() -> OpenAI:
         return _CLIENT
 
 
-def _resolve_session_id(model: str, instructions: str) -> str:
+def _resolve_session_id(
+    model: str,
+    instructions: str,
+    attachments: Optional[List[Dict[str, str]]] = None,
+) -> str:
     """Create (or reuse) the session backing the Daybreak strategist."""
 
     explicit = (
@@ -50,7 +102,8 @@ def _resolve_session_id(model: str, instructions: str) -> str:
     if explicit:
         return explicit
 
-    cache_key = (model, instructions)
+    attachment_ids = tuple(sorted(att["file_id"] for att in attachments or []))
+    cache_key = (model, instructions, attachment_ids)
     if cache_key in _SESSION_CACHE:
         return _SESSION_CACHE[cache_key]
 
@@ -59,10 +112,14 @@ def _resolve_session_id(model: str, instructions: str) -> str:
             return _SESSION_CACHE[cache_key]
 
         client = _get_client()
-        session = client.responses.sessions.create(
-            model=model,
-            instructions=instructions,
-        )
+        create_kwargs: Dict[str, Any] = {
+            "model": model,
+            "instructions": instructions,
+        }
+        if attachments:
+            create_kwargs["attachments"] = attachments
+
+        session = client.responses.sessions.create(**create_kwargs)
         _SESSION_CACHE[cache_key] = session.id
         return session.id
 
@@ -88,6 +145,7 @@ class DaybreakStrategistSession:
     session_id: Optional[str] = None
     _client: Optional[OpenAI] = None
     _last_decision: Optional[Dict[str, Any]] = None
+    _resource_attachments: Optional[List[Dict[str, str]]] = None
 
     @property
     def client(self) -> OpenAI:
@@ -99,7 +157,15 @@ class DaybreakStrategistSession:
         """Initialise a Responses session for a new Beer Game run."""
 
         if not self.session_id:
-            session_id = _resolve_session_id(self.model, self.instructions)
+            if self._resource_attachments is None:
+                self._resource_attachments = _ensure_resource_attachments(self.client)
+
+            attachments = self._resource_attachments or []
+            session_id = _resolve_session_id(
+                self.model,
+                self.instructions,
+                attachments if attachments else None,
+            )
             self.session_id = session_id
         return self.session_id
 
@@ -107,7 +173,10 @@ class DaybreakStrategistSession:
         """Discard the current conversation (start a fresh game)."""
 
         if self.session_id:
-            cache_key = (self.model, self.instructions)
+            attachment_ids = tuple(
+                sorted(att["file_id"] for att in (self._resource_attachments or []))
+            )
+            cache_key = (self.model, self.instructions, attachment_ids)
             with _SESSION_LOCK:
                 if _SESSION_CACHE.get(cache_key) == self.session_id:
                     _SESSION_CACHE.pop(cache_key, None)
