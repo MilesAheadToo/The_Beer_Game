@@ -767,7 +767,7 @@ def delete_config(
 
 # --- Item Endpoints ---
 
-@router.get("/{config_id}/items/", response_model=List[schemas.Item])
+@router.get("/{config_id}/items", response_model=List[schemas.Item])
 def read_items(
     config_id: int,
     db: Session = Depends(deps.get_db),
@@ -780,7 +780,7 @@ def read_items(
     _ensure_user_can_manage_config(db, current_user, config)
     return crud.item.get_multi_by_config(db, config_id=config_id, skip=skip, limit=limit)
 
-@router.post("/{config_id}/items/", response_model=schemas.Item, status_code=status.HTTP_201_CREATED)
+@router.post("/{config_id}/items", response_model=schemas.Item, status_code=status.HTTP_201_CREATED)
 def create_item(
     *,
     db: Session = Depends(deps.get_db),
@@ -865,7 +865,7 @@ def delete_item(
 
 # --- Node Endpoints ---
 
-@router.get("/{config_id}/nodes/", response_model=List[schemas.Node])
+@router.get("/{config_id}/nodes", response_model=List[schemas.Node])
 def read_nodes(
     config_id: int,
     node_type: Optional[NodeType] = None,
@@ -880,7 +880,7 @@ def read_nodes(
         return crud.node.get_by_type(db, node_type=node_type, config_id=config_id)
     return crud.node.get_multi_by_config(db, config_id=config_id)
 
-@router.post("/{config_id}/nodes/", response_model=schemas.Node, status_code=status.HTTP_201_CREATED)
+@router.post("/{config_id}/nodes", response_model=schemas.Node, status_code=status.HTTP_201_CREATED)
 def create_node(
     *,
     db: Session = Depends(deps.get_db),
