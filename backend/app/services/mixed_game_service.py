@@ -1871,15 +1871,28 @@ class MixedGameService:
         
         # Get the game
         game_query = """
-            SELECT id, name, status, current_round, max_rounds, 
-                   created_at, updated_at, demand_pattern, config
-            FROM games 
-            WHERE id = :game_id
+            SELECT g.id,
+                   g.name,
+                   g.status,
+                   g.current_round,
+                   g.max_rounds,
+                   g.created_at,
+                   g.updated_at,
+                   g.demand_pattern,
+                   g.config,
+                   g.supply_chain_config_id,
+                   sc.name AS supply_chain_name
+            FROM games AS g
+            LEFT JOIN supply_chain_configs AS sc
+                ON g.supply_chain_config_id = sc.id
+            WHERE g.id = :game_id
         """
         game_result = self.db.execute(text(game_query), {"game_id": game_id}).first()
-        
+
         if not game_result:
             raise ValueError("Game not found")
+
+        game_record = dict(game_result._mapping)
         
         # Get all players for the game
         players_query = """
@@ -1910,7 +1923,11 @@ class MixedGameService:
         
         # Create a default demand pattern if none exists
         try:
-            raw_pattern = json.loads(game_result[7]) if game_result[7] else DEFAULT_DEMAND_PATTERN.copy()
+            raw_pattern = (
+                json.loads(game_record.get("demand_pattern"))
+                if game_record.get("demand_pattern")
+                else DEFAULT_DEMAND_PATTERN.copy()
+            )
         except (json.JSONDecodeError, TypeError):
             raw_pattern = DEFAULT_DEMAND_PATTERN.copy()
         demand_pattern = normalize_demand_pattern(raw_pattern)
@@ -1924,7 +1941,7 @@ class MixedGameService:
         supply_chain_config_id: Optional[int] = None
         supply_chain_name: Optional[str] = None
         try:
-            cfg = json.loads(game_result[8]) if len(game_result) > 8 and game_result[8] else {}
+            cfg = json.loads(game_record.get("config")) if game_record.get("config") else {}
             if isinstance(cfg, dict):
                 progression_mode = cfg.get("progression_mode", progression_mode) or "supervised"
                 node_policies = cfg.get('node_policies', {})
@@ -1941,21 +1958,26 @@ class MixedGameService:
         except Exception:
             pass
 
+        if supply_chain_config_id is None:
+            supply_chain_config_id = game_record.get("supply_chain_config_id")
+        if not supply_chain_name:
+            supply_chain_name = game_record.get("supply_chain_name")
+
         supply_chain_snapshot = self._supply_chain_snapshot(supply_chain_config_id)
 
         return GameState(
-            id=game_result[0],
-            name=game_result[1],
-            status=game_result[2],
-            current_round=game_result[3],
-            max_rounds=game_result[4],
+            id=game_record["id"],
+            name=game_record["name"],
+            status=game_record["status"],
+            current_round=game_record["current_round"],
+            max_rounds=game_record["max_rounds"],
             progression_mode=progression_mode,
             players=player_states,
             current_demand=None,  # Will be set by the round
             round_started_at=None,  # Will be set by the round
             round_ends_at=None,  # Will be set by the round
-            created_at=game_result[5],
-            updated_at=game_result[6],
+            created_at=game_record["created_at"],
+            updated_at=game_record["updated_at"],
             started_at=None,  # Not in schema
             completed_at=None,  # Not in schema
             created_by=None,  # Not in schema
