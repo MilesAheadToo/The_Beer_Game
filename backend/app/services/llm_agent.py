@@ -31,6 +31,7 @@ class LLMAgent:
         self.session = DaybreakStrategistSession(model=self.model)
         self.last_explanation: Optional[str] = None
         self._last_ship_plan: Optional[int] = None
+        self.last_decision: Optional[Dict[str, Any]] = None
 
     def make_decision(
         self,
@@ -46,6 +47,7 @@ class LLMAgent:
         """Make a decision on how many units to order."""
         self.last_explanation = None
         self._last_ship_plan = None
+        self.last_decision = None
         payload = None
         if isinstance(upstream_data, dict):
             payload = upstream_data.get("llm_payload")
@@ -53,6 +55,7 @@ class LLMAgent:
         if payload:
             try:
                 decision = self.session.decide(payload)
+                self.last_decision = decision
 
                 def _safe_int(value: Any) -> int:
                     try:
@@ -72,10 +75,15 @@ class LLMAgent:
                 self.last_explanation = f"{rationale}{ship_fragment}".strip()
                 return order_quantity
             except Exception as exc:
-                print(f"Error calling Daybreak strategist: {exc}")
+                logger.warning("Error calling Daybreak strategist: %s", exc)
+                self.last_explanation = (
+                    f"Fallback heuristic | strategist error: {exc}"
+                )
                 return self._fallback_strategy(current_inventory, backorders, current_demand)
 
+        self.last_explanation = "Fallback heuristic | no LLM payload provided"
         return self._fallback_strategy(current_inventory, backorders, current_demand)
+
 
     def _fallback_strategy(
         self, 
