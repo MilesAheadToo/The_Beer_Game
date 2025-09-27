@@ -1,5 +1,5 @@
 # /backend/app/main.py
-from collections import defaultdict
+from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from pathlib import Path
 import asyncio
@@ -1188,6 +1188,17 @@ def _append_debug_round_log(
         reply = entry.get("reply")
         lines.append("    Reply:")
         lines.append(_format_debug_block(reply))
+        step_trace = entry.get("step_trace")
+        if step_trace:
+            lines.append("    Step trace:")
+            for step in step_trace:
+                label = step.get("step", "Step")
+                lines.append(f"      - {label}:")
+                details = {k: v for k, v in step.items() if k != "step"}
+                if details:
+                    lines.append(_format_debug_block(details, indent="        "))
+                else:
+                    lines.append("        (no details)")
         ending_state = entry.get("ending_state")
         lines.append("    Ending state:")
         lines.append(_format_debug_block(ending_state))
@@ -1198,6 +1209,40 @@ def _append_debug_round_log(
             handle.write("\n".join(lines))
     except Exception as exc:  # noqa: BLE001
         logger.exception("Failed to append debug log for game %s: %s", game.id, exc)
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _snapshot_queue(values: Any) -> List[int]:
+    if values is None:
+        return []
+    if isinstance(values, list):
+        iterable = values
+    elif isinstance(values, tuple):
+        iterable = list(values)
+    elif isinstance(values, deque):
+        iterable = list(values)
+    elif isinstance(values, set):
+        iterable = list(values)
+    elif hasattr(values, "__iter__") and not isinstance(values, (str, bytes)):
+        try:
+            iterable = list(values)
+        except TypeError:
+            iterable = [values]
+    else:
+        iterable = [values]
+    snapshot: List[int] = []
+    for item in iterable:
+        try:
+            snapshot.append(int(item))
+        except (TypeError, ValueError):
+            continue
+    return snapshot
 
 
 def _save_game_config(db: Session, game: DbGame, config: Dict[str, Any]) -> None:
@@ -1416,6 +1461,12 @@ def _finalize_round_if_ready(
         for node in all_nodes
     }
     previous_orders_by_node = {node: engine[node].get("last_order", 0) for node in all_nodes}
+    pre_ship_queues = {
+        node: _snapshot_queue(engine[node].get("ship_queue")) for node in all_nodes
+    }
+    pre_info_queues = {
+        node: _snapshot_queue(engine[node].get("info_queue")) for node in all_nodes
+    }
 
     pending_demand = defaultdict(int)
     for node in market_demand_nodes:
@@ -1453,6 +1504,10 @@ def _finalize_round_if_ready(
             incoming = queue.pop(0) if queue else 0
         state_node["incoming_orders"] = incoming
         incoming_orders_map[node] = incoming
+
+    post_info_queues = {
+        node: _snapshot_queue(engine[node].get("info_queue")) for node in all_nodes
+    }
 
     hold_cost = float(global_policy.get("holding_cost", 0.5))
     back_cost = float(global_policy.get("backlog_cost", 1.0))
@@ -1512,6 +1567,10 @@ def _finalize_round_if_ready(
         state_node["incoming_shipments"] = arriving
         state_node["last_shipment_planned"] = int(shipments_planned.get(node, 0))
         arrivals_map[node] = arriving
+
+    post_ship_queues = {
+        node: _snapshot_queue(engine[node].get("ship_queue")) for node in all_nodes
+    }
 
     for node in all_nodes:
         node_type = node_types_map.get(node, "")
@@ -1742,6 +1801,34 @@ def _finalize_round_if_ready(
         if node not in round_debug_order:
             round_debug_order.append(node)
 
+    market_demand_value = _safe_int(external_demand)
+    market_entry = round_debug_entries.get("market")
+    market_step_trace = [
+        {"step": "Starting state", "demand": market_demand_value},
+        {"step": "Demand issued", "demand": market_demand_value},
+        {"step": "Ending state", "demand_sent": market_demand_value},
+    ]
+    if not market_entry:
+        market_entry = {
+            "node": "market",
+            "player": {"name": "Market Demand", "is_ai": False},
+            "info_sent": {
+                "current_round": round_number,
+                "external_demand": market_demand_value,
+            },
+            "reply": {"type": "market_demand", "demand": market_demand_value},
+            "ending_state": {"demand_transmitted": market_demand_value},
+        }
+        round_debug_entries["market"] = market_entry
+    else:
+        market_entry.setdefault(
+            "ending_state", {"demand_transmitted": market_demand_value}
+        )
+    market_entry["step_trace"] = market_step_trace
+    if "market" not in round_debug_order:
+        round_debug_order.insert(0, "market")
+
+    step_traces: Dict[str, List[Dict[str, Any]]] = {}
     role_stats = {}
     for role in ROLES_IN_ORDER:
         node_state = engine.get(role, {})
@@ -1769,8 +1856,47 @@ def _finalize_round_if_ready(
             "backlog_cost": round(backlog_cost_delta, 2),
             "total_cost": round(total_cost_delta, 2),
         }
+        step_traces[role] = [
+            {
+                "step": "Starting state",
+                "inventory": int(before_inv),
+                "backlog": int(before_backlog),
+                "order_queue": pre_info_queues.get(role, []),
+                "arrival_queue": pre_ship_queues.get(role, []),
+            },
+            {
+                "step": "Deliveries this step",
+                "arrivals": int(arrivals_map.get(role, 0)),
+                "arrival_queue": post_ship_queues.get(role, []),
+            },
+            {
+                "step": "Incoming orders this step",
+                "incoming_orders": int(demand_here),
+                "order_queue": post_info_queues.get(role, []),
+            },
+            {
+                "step": "Shipment this step",
+                "available_inventory": int(before_inv + arrivals_map.get(role, 0)),
+                "demand": int(demand_here + before_backlog),
+                "shipped": int(shipped_qty),
+            },
+            {
+                "step": "Orders this step",
+                "order_quantity": int(order_qty),
+                "order_queue": post_info_queues.get(role, []),
+            },
+            {
+                "step": "Ending state",
+                "inventory": int(inv_after),
+                "backlog": int(backlog_after),
+                "order_queue": post_info_queues.get(role, []),
+                "arrival_queue": post_ship_queues.get(role, []),
+            },
+        ]
 
     for node, debug_entry in round_debug_entries.items():
+        if node == "market":
+            continue
         stats = role_stats.get(node)
         node_state = engine.get(node, {})
         ending_state = {
@@ -1797,6 +1923,22 @@ def _finalize_round_if_ready(
                     "total_cost_delta": stats.get("total_cost"),
                 }
             )
+            ending_state.update(
+                {
+                    "order_queue": post_info_queues.get(node, []),
+                    "arrival_queue": post_ship_queues.get(node, []),
+                }
+            )
+        else:
+            ending_state.update(
+                {
+                    "order_queue": post_info_queues.get(node, []),
+                    "arrival_queue": post_ship_queues.get(node, []),
+                }
+            )
+        step_trace = step_traces.get(node)
+        if step_trace:
+            debug_entry["step_trace"] = step_trace
         debug_entry["ending_state"] = ending_state
 
     state_inventory = state.setdefault("inventory", {})
@@ -1814,10 +1956,15 @@ def _finalize_round_if_ready(
     if pending is not None:
         pending.clear()
 
+    preferred_order = ["market", *ROLES_IN_ORDER]
     ordered_debug_entries: List[Dict[str, Any]] = []
+    for node in preferred_order:
+        entry = round_debug_entries.get(node)
+        if entry and entry not in ordered_debug_entries:
+            ordered_debug_entries.append(entry)
     for node in round_debug_order:
         entry = round_debug_entries.get(node)
-        if entry:
+        if entry and entry not in ordered_debug_entries:
             ordered_debug_entries.append(entry)
     for node, entry in round_debug_entries.items():
         if entry not in ordered_debug_entries:
