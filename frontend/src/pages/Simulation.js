@@ -27,6 +27,7 @@ import {
   SkipPrevious as PreviousIcon,
 } from '@mui/icons-material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LLM_BASE_MODEL_OPTIONS, DEFAULT_LLM_BASE_MODEL } from '../constants/llmModels';
 
 // Sample data for the simulation
 const sampleDemandData = [
@@ -61,11 +62,7 @@ const demandPatternOptions = [
   { value: 'custom', label: 'Custom Scenario' },
 ];
 
-const llmModelOptions = [
-  { value: 'opt-66-mini', label: 'opt-66-mini' },
-  { value: 'gpt-4o-mini', label: 'gpt-4o-mini' },
-  { value: 'llama-3.1-8b', label: 'Llama 3.1 8B' },
-];
+const llmModelOptions = LLM_BASE_MODEL_OPTIONS;
 
 const ParameterSlider = ({
   label,
@@ -184,7 +181,7 @@ const Simulation = () => {
     initialDemand: 4,
     newDemand: 8,
     demandChangeWeek: 6,
-    llmModel: 'opt-66-mini',
+    llmModel: DEFAULT_LLM_BASE_MODEL,
     useRlModel: false,
   });
 

@@ -56,6 +56,7 @@ import PricingConfigForm from '../components/PricingConfigForm';
 import { api, mixedGameApi } from '../services/api';
 import { getModelStatus } from '../services/modelService';
 import { useSystemConfig } from '../contexts/SystemConfigContext.jsx';
+import { LLM_BASE_MODEL_OPTIONS, DEFAULT_LLM_BASE_MODEL } from '../constants/llmModels';
 import {
   PRIMARY_FONT,
   CARD_BG_LIGHT,
@@ -594,7 +595,7 @@ const CreateMixedGame = () => {
         canSeeDemand:
           record?.can_see_demand != null ? Boolean(record.can_see_demand) : roleValue === 'retailer',
         userId: record?.user_id ?? null,
-        llmModel: record?.llm_model || 'gpt-4o-mini',
+        llmModel: record?.llm_model || DEFAULT_LLM_BASE_MODEL,
         daybreakOverridePct:
           overrideValue != null ? clampOverridePercent(Number(overrideValue) * 100) : undefined,
         displayName: record?.name || record?.display_name || roleValue,
@@ -613,7 +614,7 @@ const CreateMixedGame = () => {
         strategy: 'NAIVE',
         canSeeDemand: roleValue === 'retailer',
         userId: null,
-        llmModel: 'gpt-4o-mini',
+        llmModel: DEFAULT_LLM_BASE_MODEL,
         daybreakOverridePct: undefined,
         displayName: label,
       };
@@ -1108,7 +1109,7 @@ const CreateMixedGame = () => {
           strategy: 'NAIVE',
           canSeeDemand: roleKey === 'retailer',
           userId: roleKey === 'retailer' && user ? user.id : null,
-          llmModel: 'gpt-4o-mini',
+          llmModel: DEFAULT_LLM_BASE_MODEL,
           daybreakOverridePct: 5,
           displayName: node?.name || roleKey,
           nodeId: node?.id,
@@ -1277,7 +1278,7 @@ const CreateMixedGame = () => {
           updatedPlayer.userId = null;
           updatedPlayer.strategy = updatedPlayer.strategy || agentStrategies[0].options[0].value;
           if (!updatedPlayer.llmModel) {
-            updatedPlayer.llmModel = 'gpt-4o-mini';
+            updatedPlayer.llmModel = DEFAULT_LLM_BASE_MODEL;
           }
         }
         return updatedPlayer;
@@ -1293,7 +1294,7 @@ const CreateMixedGame = () => {
         }
         const updated = { ...player, strategy };
         if (String(strategy).startsWith('LLM_') && !updated.llmModel) {
-          updated.llmModel = 'gpt-4o-mini';
+          updated.llmModel = DEFAULT_LLM_BASE_MODEL;
         }
         if (strategy === 'DAYBREAK_DTCE_CENTRAL') {
           const basePct = player.daybreakOverridePct ?? 5;
@@ -2515,10 +2516,11 @@ const CreateMixedGame = () => {
                                   )
                                 }
                               >
-                                <option value="gpt-4o">GPT-4o</option>
-                                <option value="gpt-4o-mini">GPT-4o Mini</option>
-                                <option value="claude-3-5-sonnet">Claude 3.5 Sonnet</option>
-                                <option value="claude-3-5-haiku">Claude 3.5 Haiku</option>
+                                {LLM_BASE_MODEL_OPTIONS.map((option) => (
+                                  <option key={option.value} value={option.value}>
+                                    {option.label}
+                                  </option>
+                                ))}
                               </Select>
                               <HelperText>Pick the Daybreak LLM backend for this agent.</HelperText>
                             </Box>
